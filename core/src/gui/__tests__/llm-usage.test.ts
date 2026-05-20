@@ -151,6 +151,7 @@ async function buildApp(options?: {
 				householdService: options?.householdServiceFull,
 				messageRateTracker: options?.messageRateTracker,
 				llmSafeguards: options?.llmSafeguards,
+				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
 			});
 		},
 		{ prefix: '/gui' },
@@ -598,6 +599,23 @@ describe('LLM Usage Routes', () => {
 			const res = await authenticatedGet(app, '/gui/llm');
 
 			expect(res.body).toContain('Not configured');
+		});
+
+		it('per-user breakdown leads with the display name, id only in <small> (W2 identity)', async () => {
+			const usageContent = [
+				`| 2026-03-11T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | ${TEST_USER_ID} |`,
+				'| 2026-03-11T11:00:00Z | anthropic | sonnet | 100 | 50 | 0.002 | echo | ghost-999 |',
+			].join('\n');
+			const built = await buildApp({ usageContent });
+			app = built.app;
+
+			const res = await authenticatedGet(app, '/gui/llm');
+
+			expect(res.statusCode).toBe(200);
+			// Known user (id 123 → "TestUser"): name leads, numeric id demoted to <small>.
+			expect(res.body).toMatch(/TestUser\s+<small><code>123<\/code><\/small>/);
+			// Unresolvable id (no longer a registered user): falls back to the bare id.
+			expect(res.body).toContain('ghost-999');
 		});
 	});
 

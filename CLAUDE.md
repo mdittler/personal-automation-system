@@ -130,6 +130,7 @@ Security patterns and posture are in the `pas-security-posture` skill. Invoke wh
 
 All major phases — infrastructure, food app, security, deployment, conversation memory (Hermes), LLM enhancement, and Persona Regression — are complete. **Per-phase history (including the full batch-by-batch breakdown of every Current/Previous Priority) lives in `docs/implementation-phases.md`.** Most recent phases (one line each, newest first):
 
+- **User Identity Clarity + Chatbot Command Awareness** (2026-05-18) — W1: `getEffectiveCommandCatalog` single source for `/help` + sandboxed system-prompt catalog + build-failing doc-coverage gate; `/notes`→`/listnotes` shadow fix. W2: operator GUI leads with `user.name` (id in `<small>`), login by display name or numeric id with resolve-then-rate-limit, globally-unique names via shared `DISPLAY_NAME_LOCK_KEY` + boot-time duplicate scan. W1 PR #35 / W2 PR #34 merged; post-merge Codex corrections applied 2026-05-20. 4 REQ-USER URS entries (W2); W1/W2 URS + W1 phase-doc backfill tracked in `docs/open-items.md`.
 - **App-Message Memory Bridge** (2026-05-18) — AppOutboundBridge routes proactive app-originated Telegram messages into the chatbot transcript; new `SessionTurn.source` provenance field fixes a latent photo-bridge spoof gap and powers metadata-driven fencing cap-lift; `PHOTO_SUMMARY_GUIDANCE` rewritten to drop the unbacked retrieval promise; late-bound proxy resolves compose-runtime construction-order seam; 14 REQ-CONV-APP-BRIDGE + 3 REQ-CONV-SESSION-SOURCE URS entries.
 - **Receipt Parser Robustness PR2 — Transcription Oracle** (2026-05-15) — operator-authored `.transcription.yaml` ground truth + SHA256 sidecars; drift resistance + confidence tiers. 11 REQ-FOOD-RECEIPT-TRANSCRIPTION URS entries.
 - **Receipt Parser Robustness PR1** (2026-05-15) — anti-reconciliation prompt, `finishReason` plumbing, integrity check, single-shot continuation, Telegram warning. 13 REQ-FOOD-RECEIPT-INTEGRITY URS entries.
@@ -137,7 +138,6 @@ All major phases — infrastructure, food app, security, deployment, conversatio
 - **llama.cpp provider** (2026-05-15) — `LlamaCppProvider extends OpenAICompatibleProvider`. 6 REQ-LLM-LLAMA-CPP URS entries.
 - **Open-Items Cleanup Batches 1–5** (2026-05-07) — `/flushmemory`, telemetry, GUI cleanup, food micro-fixes, P4 freeze coverage.
 - **Hermes P6 + P6.next** (2026-05-05) — typed memory + temporal recall + mid-session snapshot rebuild. 27 URS entries.
-- **Hermes P5 carry-forwards** (2026-05-05) — `/recall` command + `<session-search>` pseudo-tool. 21 URS entries.
 
 Spec pointers: deployment-readiness — `docs/superpowers/specs/2026-04-13-deployment-readiness-roadmap-design.md`; LLM enhancement #2 — `docs/superpowers/plans/2026-04-15-llm-enhancement-opportunities.md`; D5c — `docs/superpowers/plans/2026-04-20-d5c-per-household-governance.md`.
 

@@ -207,6 +207,7 @@ export async function registerGuiRoutes(
 				householdService: options.householdService,
 				messageRateTracker,
 				llmSafeguards,
+				userManager,
 			});
 			// Persona Regression Suite admin page (Chunk B.2). The case-discovery
 			// service shells out to the regression CLI on each page load (Codex

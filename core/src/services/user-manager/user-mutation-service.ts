@@ -54,12 +54,32 @@ export class UserMutationService {
 		// DISPLAY_NAME_LOCK_KEY only — syncUsersToConfig acquires configPath
 		// internally and AsyncLock is non-reentrant.
 		return withMultiFileLock([DISPLAY_NAME_LOCK_KEY], async () => {
+			// Duplicate-id guard. `UserManager.addUser` unconditionally pushes onto
+			// its internal array, so a second registerUser for an already-registered
+			// id would persist a duplicate user block to pas.yaml. A genuine retry
+			// after a *failed* registration does not reach here — failure rolls the
+			// user back out of UserManager — so an existing record means the user is
+			// already fully registered.
+			const alreadyRegistered = this.userManager.getUser(user.id);
+			if (alreadyRegistered) {
+				if (registeredUsersEqual(alreadyRegistered, user)) {
+					this.logger.info(
+						{ userId: user.id },
+						'registerUser: id already registered with identical data — no-op',
+					);
+					return;
+				}
+				throw new Error(
+					`User id '${user.id}' is already registered — change an existing user through the dedicated update methods, not registerUser.`,
+				);
+			}
+
 			const incomingNorm = normalizeDisplayName(user.name);
 			if (incomingNorm.length > 0) {
 				for (const existing of this.userManager.getAllUsers()) {
-					// Skip the same user id — re-registration of the same user (idempotent
-					// retry path) should not be blocked by its own name.
-					if (existing.id === user.id) continue;
+					// The duplicate-id guard above has already returned/thrown for any
+					// existing user sharing this id, so every `existing` here is a
+					// different account — no same-id skip is needed.
 					if (normalizeDisplayName(existing.name) === incomingNorm) {
 						throw new Error(
 							`Display name '${user.name}' is already taken. Choose a different name.`,
@@ -211,4 +231,28 @@ export class UserMutationService {
 			});
 		}
 	}
+}
+
+/**
+ * Structural equality for two RegisteredUser records — lets `registerUser`
+ * tell an idempotent re-registration (identical record) apart from an attempt
+ * to mutate an existing user through the wrong entry point.
+ */
+function registeredUsersEqual(a: RegisteredUser, b: RegisteredUser): boolean {
+	return (
+		a.id === b.id &&
+		a.name === b.name &&
+		a.isAdmin === b.isAdmin &&
+		(a.householdId ?? '') === (b.householdId ?? '') &&
+		sameStringSet(a.enabledApps, b.enabledApps) &&
+		sameStringSet(a.sharedScopes, b.sharedScopes)
+	);
+}
+
+/** Order-independent string-array equality. */
+function sameStringSet(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
+	if (a.length !== b.length) return false;
+	const sortedA = [...a].sort();
+	const sortedB = [...b].sort();
+	return sortedA.every((value, index) => value === sortedB[index]);
 }

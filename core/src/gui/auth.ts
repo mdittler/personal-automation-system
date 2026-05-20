@@ -274,7 +274,9 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		//    keeps the per-account counter useful as a second line of defense.)
 		const userLimitKey = resolvedUser
 			? `user:${resolvedUser.id}`
-			: `unknown:${clientIp}:${submitted.toLocaleLowerCase()}`;
+			: // `toLowerCase` (not `toLocaleLowerCase`) keeps the key locale-independent,
+				// matching `normalizeDisplayName`. `submitted` is already trimmed above.
+				`unknown:${clientIp}:${submitted.toLowerCase()}`;
 		if (loginRateLimiter && !loginRateLimiter.isAllowed(userLimitKey)) {
 			return reply.status(429).viewAsync('login', {
 				title: 'Login — PAS',

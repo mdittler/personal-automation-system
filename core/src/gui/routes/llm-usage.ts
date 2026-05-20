@@ -24,6 +24,7 @@ import {
 import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { ProviderRegistry } from '../../services/llm/providers/provider-registry.js';
 import type { MessageRateTracker } from '../../services/metrics/message-rate-tracker.js';
+import type { UserManager } from '../../services/user-manager/index.js';
 import type { LLMSafeguardsConfig } from '../../types/config.js';
 import type { ModelRef, ModelTier } from '../../types/llm.js';
 
@@ -41,6 +42,13 @@ export interface LlmUsageOptions {
 	messageRateTracker?: MessageRateTracker;
 	/** LLM safeguards config for displaying per-household caps. */
 	llmSafeguards?: LLMSafeguardsConfig;
+	/**
+	 * User manager — resolves numeric user ids in the per-user breakdown to
+	 * display names so the operator GUI leads with the name (W2 identity goal).
+	 * Optional: when absent, or when an id no longer resolves, the row falls
+	 * back to the bare id.
+	 */
+	userManager?: Pick<UserManager, 'getUser'>;
 }
 
 export interface UsageRow {
@@ -58,6 +66,26 @@ export interface UserBreakdown {
 	userId: string;
 	callCount: number;
 	totalCost: number;
+}
+
+/** A per-user breakdown row enriched with the resolved display name. */
+export interface PerUserRow extends UserBreakdown {
+	/** Display name, or null when the id no longer resolves to a user. */
+	userName: string | null;
+}
+
+/**
+ * Resolve each per-user row's numeric id to a display name so the GUI can lead
+ * with the name and keep the id only as a secondary `<small>` annotation.
+ */
+function enrichPerUser(
+	perUser: UserBreakdown[],
+	userManager: Pick<UserManager, 'getUser'> | undefined,
+): PerUserRow[] {
+	return perUser.map((u) => ({
+		...u,
+		userName: userManager?.getUser(u.userId)?.name ?? null,
+	}));
 }
 
 export interface ModelBreakdown {
@@ -273,6 +301,7 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 		householdService,
 		messageRateTracker,
 		llmSafeguards,
+		userManager,
 	} = options;
 
 	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
@@ -335,7 +364,7 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 			providers,
 			rows,
 			perModel,
-			perUser,
+			perUser: enrichPerUser(perUser, userManager),
 			perHouseholdRows,
 			todayCost: todayCost.toFixed(6),
 			monthCost: monthCost.toFixed(6),

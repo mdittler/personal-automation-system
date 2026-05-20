@@ -152,10 +152,30 @@ describe('registerUser defensive uniqueness', () => {
 		expect(has222 !== has333).toBe(true);
 	});
 
-	it('idempotent re-registration of the same id with the same name is not blocked by its own name', async () => {
-		// The same user retrying after a transient failure shouldn't be blocked by
-		// their own previously-stored name. The implementation skips the existing
-		// user when the id matches.
+	it('idempotent re-registration of the same id+record is a no-op, not a duplicate', async () => {
+		// Re-registering an identical record (e.g. a retry that re-runs the whole
+		// redeem→register flow) must neither throw nor append a second user block.
+		// UserManager.addUser pushes unconditionally, so the guard in registerUser
+		// is the only thing standing between a retry and a duplicate pas.yaml entry.
+		const record = {
+			id: '222',
+			name: 'Carol',
+			isAdmin: false,
+			enabledApps: [],
+			sharedScopes: [],
+		};
+		await service.registerUser({ ...record });
+		await expect(service.registerUser({ ...record })).resolves.toBeUndefined();
+
+		// Exactly one '222' must remain in the manager (and therefore in pas.yaml).
+		const matches = userManager.getAllUsers().filter((u) => u.id === '222');
+		expect(matches).toHaveLength(1);
+	});
+
+	it('rejects re-registration of an existing id with a divergent record', async () => {
+		// Same id, different attributes — this is an attempt to mutate an existing
+		// user through registerUser, which only registers NEW users. It must throw
+		// rather than silently no-op (which would drop the change) or duplicate.
 		await service.registerUser({
 			id: '222',
 			name: 'Carol',
@@ -164,20 +184,20 @@ describe('registerUser defensive uniqueness', () => {
 			sharedScopes: [],
 		});
 
-		// Subsequent registration with the same id+name should not throw "already taken".
-		// (The downstream addUser/sync path may complain about duplicate ids, but the
-		// name-uniqueness check must not be the rejecter.)
-		try {
-			await service.registerUser({
+		await expect(
+			service.registerUser({
 				id: '222',
 				name: 'Carol',
-				isAdmin: false,
+				isAdmin: true, // diverges from the registered record
 				enabledApps: [],
 				sharedScopes: [],
-			});
-		} catch (err) {
-			expect((err as Error).message).not.toMatch(/already taken/i);
-		}
+			}),
+		).rejects.toThrow(/already registered/i);
+
+		// The rejected divergent registration must not have mutated the stored record.
+		const matches = userManager.getAllUsers().filter((u) => u.id === '222');
+		expect(matches).toHaveLength(1);
+		expect(matches[0]?.isAdmin).toBe(false);
 	});
 
 	it('allows registration when user.name is empty (other layers handle that)', async () => {

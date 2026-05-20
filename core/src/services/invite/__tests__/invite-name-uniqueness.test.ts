@@ -38,17 +38,14 @@ afterEach(async () => {
 
 interface MakeServiceOptions {
 	users?: Array<{ id: string; name: string }>;
-	knownUserIds?: Iterable<string>;
 	now?: () => Date;
 }
 
 function makeService(opts: MakeServiceOptions = {}): InviteService {
 	const users = opts.users ?? [];
-	const ids = opts.knownUserIds ?? users.map((u) => u.id);
 	return new InviteService({
 		dataDir: tempDir,
 		logger,
-		knownUserIds: () => ids,
 		knownUsers: () => users,
 		...(opts.now ? { now: opts.now } : {}),
 	});
@@ -182,12 +179,24 @@ describe('createInvite name uniqueness — concurrent races', () => {
 	});
 });
 
-describe('createInvite — knownUsers option omitted', () => {
-	it('skips the user.name collision check but still applies active-invite collision check', async () => {
-		const svc = new InviteService({ dataDir: tempDir, logger });
-		// First creation should succeed.
+describe('createInvite — knownUsers contract', () => {
+	it('constructor throws when knownUsers is omitted (required contract)', () => {
+		// knownUsers is a required option — createInvite relies on it for both the
+		// id-collision and name-collision checks. An untyped JS caller that omits
+		// it must fail fast at construction, not silently skip the checks.
+		expect(
+			() =>
+				new InviteService({
+					dataDir: tempDir,
+					logger,
+				} as unknown as ConstructorParameters<typeof InviteService>[0]),
+		).toThrow(/knownUsers/i);
+	});
+
+	it('accepts an empty-returning knownUsers function (no users yet)', async () => {
+		const svc = new InviteService({ dataDir: tempDir, logger, knownUsers: () => [] });
+		// First creation succeeds; second is still rejected by the active-invite check.
 		await svc.createInvite('Sarah', 'admin1', { householdId: 'h1' });
-		// Second should be rejected by active-invite check.
 		await expect(svc.createInvite('Sarah', 'admin1', { householdId: 'h1' })).rejects.toThrow(
 			/already taken/i,
 		);

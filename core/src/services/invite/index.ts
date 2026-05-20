@@ -49,7 +49,8 @@ export interface InviteServiceOptions {
 	 * Returns the registered users. `createInvite` uses this to reject names
 	 * that collide with an existing `user.name` (case-insensitive) or match an
 	 * existing user's numeric id. Re-evaluated on every call so newly-registered
-	 * users are visible immediately. Pass `() => []` if no users exist yet.
+	 * users are visible immediately. Required — pass `() => []` when no users
+	 * exist yet rather than omitting it.
 	 */
 	knownUsers: () => Iterable<{ id: string; name: string }>;
 	/** Clock injection. Defaults to `() => new Date()`. */
@@ -64,6 +65,15 @@ export class InviteService {
 	private readonly now: () => Date;
 
 	constructor(options: InviteServiceOptions) {
+		// `knownUsers` is a required part of the contract — createInvite relies on
+		// it for both the id-collision and name-collision checks. Fail fast here
+		// (rather than at the first createInvite call) so an untyped JS caller that
+		// omits it gets a clear error at construction.
+		if (typeof options.knownUsers !== 'function') {
+			throw new Error(
+				'InviteService requires a knownUsers function (pass () => [] if no users exist).',
+			);
+		}
 		this.invitesPath = join(options.dataDir, 'system', 'invites.yaml');
 		this.logger = options.logger;
 		this.knownUsers = options.knownUsers;
@@ -95,13 +105,11 @@ export class InviteService {
 		}
 		// Reject id-collisions before the all-digit guard so the operator sees
 		// the more specific message when they typed an id into the name field.
-		if (this.knownUsers) {
-			for (const u of this.knownUsers()) {
-				if (u.id === trimmedName) {
-					throw new Error(
-						`Display name '${trimmedName}' matches an existing user id; choose a different name.`,
-					);
-				}
+		for (const u of this.knownUsers()) {
+			if (u.id === trimmedName) {
+				throw new Error(
+					`Display name '${trimmedName}' matches an existing user id; choose a different name.`,
+				);
 			}
 		}
 		// Reject all-digit names regardless of knownUsers — they would shadow
@@ -144,13 +152,11 @@ export class InviteService {
 			const nowDate = this.now();
 
 			// Reject collisions with existing user.name (case-insensitive).
-			if (this.knownUsers) {
-				for (const u of this.knownUsers()) {
-					if (normalizeDisplayName(u.name) === norm) {
-						throw new Error(
-							`Display name '${trimmedName}' is already taken. Choose a different name for the invite.`,
-						);
-					}
+			for (const u of this.knownUsers()) {
+				if (normalizeDisplayName(u.name) === norm) {
+					throw new Error(
+						`Display name '${trimmedName}' is already taken. Choose a different name for the invite.`,
+					);
 				}
 			}
 
