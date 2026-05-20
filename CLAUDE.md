@@ -68,6 +68,12 @@ App system patterns (manifests, distribution, install-time trust model, message 
 - **Time-sensitive tests** — never hardcode dates in tests that compare against "today". Use relative dates (e.g., `new Date(Date.now() - 86400000)`) so tests don't rot as time passes
 - **Comprehensive testing patterns and standards are in the `pas-testing-standards` skill. URS workflow and traceability matrix are in the `pas-urs-workflow` skill.**
 
+### Linting
+- **Biome** is the linter and formatter; `pnpm lint` must report **zero errors** at all times.
+- **Enforcement**: `git push` and `git merge` are blocked when any changed file has a Biome error (`.claude/hooks/biome-check.sh`, also installed as git `pre-push`/`pre-merge-commit` hooks). A PostToolUse hook (`.claude/hooks/biome-check-file.sh`) surfaces newly-introduced errors immediately on edit.
+- **Warnings are baselined and non-blocking**: `noNonNullAssertion`, `noExplicitAny`, `noConsole`, and `noUnusedVariables` are `warn`-level by design (~2,400 warnings as of 2026-05-20). Do not introduce new errors; do not edit `biome.json` rule severities to dodge an error.
+- Run `pnpm lint:fix` to auto-fix. Per-occurrence `// biome-ignore <rule>: <reason>` is acceptable only where the flagged construct is genuinely intentional.
+
 ### Deferred Work Tracking
 - **`docs/open-items.md` is the single source of truth for all deferred, out-of-scope, and follow-up work.** Every spec, plan, and findings doc that explicitly defers something must have a corresponding entry in `docs/open-items.md` before the session ends.
 - If a task is described as "deferred", "out of scope", "future phase", "follow-up", or "to be done in a later session", it must be added to `docs/open-items.md` under the appropriate section: Confirmed Phases, Deferred Infrastructure Work, Unfinished Corrections, Food App Enhancements, Proposals, or Accepted Risks.
