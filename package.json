@@ -28,7 +28,7 @@
 		"chat-index-prune": "tsx scripts/chat-index-prune.ts",
 		"test:regression": "tsx --tsconfig regression/tsconfig.test.json regression/src/runner/cli-main.ts",
 		"typecheck:fixtures": "pnpm --filter @pas/core typecheck:fixtures",
-		"prepare": "cp .claude/hooks/tsc-nocheck.sh .git/hooks/pre-push && cp .claude/hooks/tsc-nocheck.sh .git/hooks/pre-merge-commit && chmod +x .git/hooks/pre-push .git/hooks/pre-merge-commit"
+		"prepare": "bash .claude/hooks/install-git-hooks.sh"
 	},
 	"pnpm": {
 		"onlyBuiltDependencies": ["@biomejs/biome", "better-sqlite3", "esbuild"]

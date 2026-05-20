@@ -19,6 +19,13 @@
             "if": "Bash(git merge *)|Bash(git push *)",
             "timeout": 120,
             "statusMessage": "Checking TypeScript before merge..."
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/biome-check.sh",
+            "if": "Bash(git merge *)|Bash(git push *)",
+            "timeout": 60,
+            "statusMessage": "Checking Biome lint before merge..."
           }
         ]
       }
@@ -30,6 +37,10 @@
           {
             "type": "command",
             "command": "bash .claude/hooks/check-deferred-work.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/biome-check-file.sh"
           }
         ]
       }
