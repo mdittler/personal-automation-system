@@ -175,10 +175,8 @@ export interface CoreServices {
  *   - `(msg: string, ...args)` — printf-style message
  *   - `(obj: object, msg?: string, ...args)` — structured fields + optional message
  *
- * Codex 2026-05-15 #2: the second overload was originally omitted, which made
- * `apps/food/src/handlers/photo.ts:218` fail to typecheck (and blocked root
- * `pnpm build`) even though the runtime call was a perfectly valid pino
- * invocation. Widening matches what every caller actually does.
+ * The object-first overload mirrors pino's own signature so structured-field
+ * logging (`logger.info({ userId }, 'msg')`) typechecks for every caller.
  */
 export interface AppLogger {
 	trace(obj: object, msg?: string, ...args: unknown[]): void;
