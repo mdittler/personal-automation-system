@@ -6,12 +6,42 @@
  */
 
 import AjvModule from 'ajv';
-import type { ErrorObject } from 'ajv';
+import type { ErrorObject, ValidateFunction } from 'ajv';
 import type { Logger } from 'pino';
 import type { LLMClient } from '../../types/llm.js';
 import { buildExtractPrompt } from './prompt-templates.js';
 
 const ajv = new AjvModule.default();
+
+/**
+ * Memoization cache for compiled AJV validators, keyed by schema object
+ * identity. `ajv.compile()` is expensive; callers pass stable module-level
+ * schema constants, so identity keying gives a correct, collision-free hit.
+ */
+const validatorCache = new WeakMap<object, ValidateFunction>();
+
+/**
+ * Return a compiled AJV validator for `schema`, memoized by object identity.
+ *
+ * The cache is keyed on the schema **object reference** via a `WeakMap`, which
+ * is correct and collision-free for the expected pattern: callers hold a stable
+ * module-level schema constant and pass the same object on every call. Two
+ * structurally-identical but distinct objects are distinct keys and therefore
+ * compile to distinct validators — this is intentional, not a bug.
+ *
+ * A schema object is treated as **immutable after its first validation**:
+ * mutating a schema in place after it has been cached yields the stale cached
+ * validator rather than a recompiled one. Treat schema objects as frozen once
+ * passed to `getValidator`/`extractStructured`.
+ */
+export function getValidator(schema: object): ValidateFunction {
+	let validate = validatorCache.get(schema);
+	if (validate === undefined) {
+		validate = ajv.compile(schema);
+		validatorCache.set(schema, validate);
+	}
+	return validate;
+}
 
 /**
  * Extract structured data from text according to a JSON schema.
@@ -36,7 +66,7 @@ export async function extractStructured<T>(
 	const parsed = parseExtractResponse<T>(response, logger);
 
 	// Validate parsed JSON against the provided schema
-	const validate = ajv.compile(schema);
+	const validate = getValidator(schema);
 	if (!validate(parsed)) {
 		const errors = validate.errors
 			?.map((e: ErrorObject) => `${e.instancePath} ${e.message}`)

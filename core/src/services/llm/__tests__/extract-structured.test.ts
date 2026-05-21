@@ -1,6 +1,6 @@
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
-import { extractStructured, parseExtractResponse } from '../extract-structured.js';
+import { extractStructured, getValidator, parseExtractResponse } from '../extract-structured.js';
 import { buildExtractPrompt } from '../prompt-templates.js';
 
 const logger = pino({ level: 'silent' });
@@ -92,6 +92,54 @@ describe('extractStructured (schema validation)', () => {
 			logger,
 		);
 		expect(result).toEqual({ name: 'Alice' });
+	});
+});
+
+describe('getValidator (memoization)', () => {
+	it('returns the same compiled validator for a repeated schema object', () => {
+		const schema = {
+			type: 'object',
+			properties: { name: { type: 'string' } },
+			required: ['name'],
+		};
+
+		const first = getValidator(schema);
+		const second = getValidator(schema);
+
+		expect(second).toBe(first);
+	});
+
+	it('returns distinct validators for structurally-identical but distinct objects', () => {
+		// Identity-keyed caching: two separate objects, even with identical
+		// structure, are distinct cache keys and get distinct validators.
+		const schemaA = {
+			type: 'object',
+			properties: { name: { type: 'string' } },
+			required: ['name'],
+		};
+		const schemaB = {
+			type: 'object',
+			properties: { name: { type: 'string' } },
+			required: ['name'],
+		};
+
+		const validatorA = getValidator(schemaA);
+		const validatorB = getValidator(schemaB);
+
+		expect(validatorB).not.toBe(validatorA);
+	});
+
+	it('produces a functional validator', () => {
+		const schema = {
+			type: 'object',
+			properties: { count: { type: 'number' } },
+			required: ['count'],
+		};
+
+		const validate = getValidator(schema);
+
+		expect(validate({ count: 7 })).toBe(true);
+		expect(validate({ count: 'seven' })).toBe(false);
 	});
 });
 
