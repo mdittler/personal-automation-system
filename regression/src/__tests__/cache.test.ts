@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CacheStore } from '../runner/cache.js';
 import type { RunResult } from '../shared/types.js';
+import { VERDICT } from '../shared/types.js';
 
 let tempDir: string;
 
@@ -24,7 +25,7 @@ function makeRunResult(overrides: Partial<RunResult> = {}): RunResult {
 		caseId: 'case-1',
 		cacheKey: VALID_KEY_A,
 		source: 'fresh',
-		verdict: 'pass',
+		verdict: VERDICT.pass,
 		inputs: [],
 		actuals: [],
 		oracleVerdicts: [],

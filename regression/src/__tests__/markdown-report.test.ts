@@ -7,6 +7,7 @@ import {
 	formatSummaryMarkdown,
 } from '../runner/markdown-report.js';
 import type { RoutingTarget, RunResult } from '../shared/types.js';
+import { VERDICT } from '../shared/types.js';
 
 function mk(
 	caseId: string,
@@ -19,7 +20,11 @@ function mk(
 		source: 'fresh',
 		verdict:
 			caseVerdict ??
-			(verdicts.includes('error') ? 'error' : verdicts.includes('fail') ? 'fail' : 'pass'),
+			(verdicts.includes('error')
+				? VERDICT.error
+				: verdicts.includes('fail')
+					? VERDICT.fail
+					: VERDICT.pass),
 		inputs: verdicts.map(() => ({ payload: 'x', expected: {} })),
 		actuals: verdicts.map(() => ''),
 		oracleVerdicts: verdicts.map((v) => ({ verdict: v, details: '' })),
@@ -64,7 +69,7 @@ describe('computeRoutingAccuracy (REQ-REG-011)', () => {
 
 	it('counts budget-exceeded cases (whose synthesized verdicts are error) against the gate', () => {
 		const passes = Array.from({ length: 19 }, (_, i) => mk(`p${i}`, ['pass']));
-		const be = mk('b1', ['error'], 'budget-exceeded');
+		const be = mk('b1', ['error'], VERDICT.budgetExceeded);
 		const targets = new Map([...passes, be].map((r) => [r.caseId, 'food-shadow' as RoutingTarget]));
 		const acc = computeRoutingAccuracy([...passes, be], targets);
 		expect(acc).toBeCloseTo(19 / 20, 3);
@@ -89,7 +94,7 @@ describe('computeRoutingAccuracy (REQ-REG-011)', () => {
 		const verdicts: Array<'pass' | 'fail' | 'error'> = [];
 		for (let i = 0; i < 21; i++) verdicts.push('pass');
 		verdicts.push('fail');
-		const results = [mk('c1', verdicts, 'fail')];
+		const results = [mk('c1', verdicts, VERDICT.fail)];
 		const targets = new Map([['c1', 'food-shadow' as RoutingTarget]]);
 		expect(computeRoutingAccuracy(results, targets)).toBeCloseTo(21 / 22, 3);
 	});

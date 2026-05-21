@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { VERDICT } from '../../../../types/regression.js';
 import { readDisplayForCase } from '../cache-reader.js';
 import { createRunRegistry } from '../run-registry.js';
 import { type SpawnProcLike, spawnRegression } from '../subprocess.js';
@@ -159,7 +160,7 @@ describe('Codex P2.1 — cache-reader filename/content cacheKey parity', () => {
 			caseId: 'demo-case',
 			cacheKey: HEX64_B, // filename will be HEX64_A — mismatch!
 			source: 'fresh',
-			verdict: 'pass',
+			verdict: VERDICT.pass,
 			inputs: [],
 			actuals: [],
 			oracleVerdicts: [],

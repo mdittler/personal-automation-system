@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runRoutingCase } from '../runner/case-runners/routing-runner.js';
 import type { PersonaCase, TierModelSnapshot } from '../shared/types.js';
+import { VERDICT } from '../shared/types.js';
 
 const MODEL_IDS: TierModelSnapshot = {
 	fast: 'claude-fast-1',
@@ -69,8 +70,8 @@ describe('runRoutingCase — food-shadow happy path', () => {
 			['save this recipe'],
 		);
 		const result = await runRoutingCase(c, deps);
-		expect(result.verdict).toBe('pass');
-		expect(result.oracleVerdicts[0]!.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
+		expect(result.oracleVerdicts[0]!.verdict).toBe(VERDICT.pass);
 		expect(result.costUsd).toBeCloseTo(0.00005, 7);
 		expect(result.tokenCounts).toEqual({ input: 50, output: 30 });
 		expect(result.modelIds).toEqual(MODEL_IDS);
@@ -103,7 +104,7 @@ describe('runRoutingCase — session-control happy path', () => {
 			['/newchat'],
 		);
 		const result = await runRoutingCase(c, deps);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 		expect(result.costUsd).toBe(0); // prefilter — no LLM hit
 	});
 });
@@ -131,7 +132,7 @@ describe('runRoutingCase — pas happy path', () => {
 			['what apps do I have?'],
 		);
 		const result = await runRoutingCase(c, deps);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 	});
 });
 
@@ -151,7 +152,7 @@ describe('runRoutingCase — verdict=fail when expected label disagrees', () => 
 			strings: [{ path: 'action', expectedCaseInsensitive: 'user wants to save a recipe' }],
 		});
 		const result = await runRoutingCase(c, deps);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 	});
 });
 
@@ -164,7 +165,7 @@ describe('runRoutingCase — deps.caseBudgetUsd authority', () => {
 			inputs: [{ payload: 'a', expected: { schema: { type: 'object' } } }],
 		};
 		const result = await runRoutingCase(c, deps);
-		expect(result.verdict).toBe('budget-exceeded');
+		expect(result.verdict).toBe(VERDICT.budgetExceeded);
 		expect(deps.classifiers.foodShadow).not.toHaveBeenCalled();
 	});
 });
@@ -188,8 +189,8 @@ describe('runRoutingCase — parse-failed surfaces as fail/error', () => {
 		const result = await runRoutingCase(c, deps);
 		// Non-parseable JSON is treated as an oracle error by the structural oracle.
 		// REQ-REG-011 accuracy gate counts this against the gate.
-		expect(result.oracleVerdicts[0]!.verdict).toBe('error');
-		expect(result.verdict).toBe('error');
+		expect(result.oracleVerdicts[0]!.verdict).toBe(VERDICT.error);
+		expect(result.verdict).toBe(VERDICT.error);
 	});
 
 	it('schema-valid but wrong action → verdict=fail', async () => {
@@ -207,7 +208,7 @@ describe('runRoutingCase — parse-failed surfaces as fail/error', () => {
 			strings: [{ path: 'action', expectedCaseInsensitive: 'user wants to save a recipe' }],
 		});
 		const result = await runRoutingCase(c, deps);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 	});
 });
 
@@ -244,7 +245,7 @@ describe('runRoutingCase — classifier throw is infra error', () => {
 		deps.classifiers.foodShadow.mockRejectedValueOnce(new Error('LLM timeout'));
 		const c = baseCase('food-shadow', { schema: { type: 'object' } });
 		const result = await runRoutingCase(c, deps);
-		expect(result.verdict).toBe('error');
+		expect(result.verdict).toBe(VERDICT.error);
 		expect(result.costUsd).toBe(0);
 		expect(result.tokenCounts).toEqual({ input: 0, output: 0 });
 	});
@@ -270,7 +271,7 @@ describe('runRoutingCase — budget abort precision', () => {
 			['a', 'b', 'c', 'd'],
 		);
 		const result = await runRoutingCase(c, deps);
-		expect(result.verdict).toBe('budget-exceeded');
+		expect(result.verdict).toBe(VERDICT.budgetExceeded);
 		// After first call: costUsd=0.0001; next projected (0.0001) would push to 0.0002 > 0.00015 → abort.
 		expect(deps.classifiers.foodShadow).toHaveBeenCalledTimes(1);
 	});
@@ -302,7 +303,7 @@ describe('runRoutingCase — verdict precedence (matches receipt-runner)', () =>
 			['a', 'b', 'c'],
 		);
 		const result = await runRoutingCase(c, deps);
-		expect(result.verdict).toBe('error');
+		expect(result.verdict).toBe(VERDICT.error);
 	});
 });
 
@@ -331,7 +332,7 @@ describe('runRoutingCase — token + cost aggregation across inputs', () => {
 			['x', 'y'],
 		);
 		const result = await runRoutingCase(c, deps);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 		expect(result.tokenCounts).toEqual({ input: 30, output: 13 });
 		expect(result.costUsd).toBeCloseTo(0.0003, 7);
 	});

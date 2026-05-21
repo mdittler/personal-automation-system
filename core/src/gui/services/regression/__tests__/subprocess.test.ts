@@ -13,6 +13,7 @@
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
+import { VERDICT } from '../../../../types/regression.js';
 import { isTerminalEventType } from '../run-registry.js';
 import {
 	type RegressionEvent,
@@ -145,8 +146,8 @@ describe('spawnRegression — event ordering', () => {
 	it('emits case-result events in stream order, then summary, then complete', async () => {
 		const evts = await runWith({
 			stdoutLines: [
-				JSON.stringify({ type: 'case-result', result: { caseId: 'a', verdict: 'pass' } }),
-				JSON.stringify({ type: 'case-result', result: { caseId: 'b', verdict: 'fail' } }),
+				JSON.stringify({ type: 'case-result', result: { caseId: 'a', verdict: VERDICT.pass } }),
+				JSON.stringify({ type: 'case-result', result: { caseId: 'b', verdict: VERDICT.fail } }),
 				JSON.stringify({ type: 'summary', summary: { totalCases: 2 } }),
 			],
 			exitCode: 0,

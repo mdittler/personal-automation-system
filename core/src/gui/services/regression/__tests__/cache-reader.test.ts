@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunResult } from '../../../../types/regression.js';
+import { VERDICT } from '../../../../types/regression.js';
 import { readDisplayForCase, readHistoryForCase } from '../cache-reader.js';
 
 let cacheDir: string;
@@ -27,7 +28,7 @@ function makeResult(
 		caseId: overrides.caseId,
 		cacheKey: overrides.cacheKey,
 		source: 'fresh',
-		verdict: 'pass',
+		verdict: VERDICT.pass,
 		inputs: [],
 		actuals: [],
 		oracleVerdicts: [],

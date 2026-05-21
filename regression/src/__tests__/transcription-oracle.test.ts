@@ -1,6 +1,7 @@
 import type { ParsedReceipt } from '@food/services/receipt-parser.js';
 import { describe, expect, it } from 'vitest';
 import { runTranscriptionOracle } from '../oracles/transcription.js';
+import { VERDICT } from '../shared/types.js';
 import type { ReceiptTranscription, TranscriptionLineItem } from '../types/transcription.js';
 
 type ParsedReceiptShape = Pick<ParsedReceipt, 'lineItems' | 'subtotal' | 'tax' | 'total'>;
@@ -30,14 +31,14 @@ describe('runTranscriptionOracle — happy path', () => {
 			p({ total: 5, lineItems: [{ name: 'APPLE', quantity: 1, unitPrice: 5, totalPrice: 5 }] }),
 			t({ total: 5, lineItems: [hi({ name: 'APPLE', totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 	it('passes with case-insensitive name match', () => {
 		const r = runTranscriptionOracle(
 			p({ total: 5, lineItems: [{ name: 'apple', quantity: 1, unitPrice: 5, totalPrice: 5 }] }),
 			t({ total: 5, lineItems: [hi({ name: 'APPLE', totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 	it('passes with whitespace-collapsed name match', () => {
 		const r = runTranscriptionOracle(
@@ -47,7 +48,7 @@ describe('runTranscriptionOracle — happy path', () => {
 			}),
 			t({ total: 5, lineItems: [hi({ name: 'APPLE PIE', totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 });
 
@@ -60,7 +61,7 @@ describe('runTranscriptionOracle — missing high-confidence items (drift-resist
 				lineItems: [hi({ name: 'A', totalPrice: 5 }), hi({ name: 'B', totalPrice: 10 })],
 			}),
 		);
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 		expect(r.details).toMatch(/missing.*B/);
 	});
 
@@ -84,7 +85,7 @@ describe('runTranscriptionOracle — missing high-confidence items (drift-resist
 				],
 			}),
 		);
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 		expect(r.details).toMatch(/missing.*C/i);
 		expect(r.details).toMatch(/hallucinated.*B/i);
 	});
@@ -118,7 +119,7 @@ describe('runTranscriptionOracle — hallucinated items', () => {
 			}),
 			t({ total: 5, lineItems: [hi({ name: 'APPLE', totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 		expect(r.details).toMatch(/hallucinated.*GHOST/i);
 	});
 
@@ -139,7 +140,7 @@ describe('runTranscriptionOracle — hallucinated items', () => {
 				],
 			}),
 		);
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 	});
 });
 
@@ -155,7 +156,7 @@ describe('runTranscriptionOracle — confidence: low (optional items)', () => {
 				],
 			}),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 
 	it('passes when low-confidence item is present at the exact spec', () => {
@@ -175,7 +176,7 @@ describe('runTranscriptionOracle — confidence: low (optional items)', () => {
 				],
 			}),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 });
 
@@ -194,7 +195,7 @@ describe('runTranscriptionOracle — multiset duplicates with find-first-satisfy
 				lineItems: [hi({ name: 'BANANA', totalPrice: 2 }), hi({ name: 'BANANA', totalPrice: 2 })],
 			}),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 
 	it('fails when parser merges duplicates', () => {
@@ -205,7 +206,7 @@ describe('runTranscriptionOracle — multiset duplicates with find-first-satisfy
 				lineItems: [hi({ name: 'BANANA', totalPrice: 2 }), hi({ name: 'BANANA', totalPrice: 2 })],
 			}),
 		);
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 	});
 
 	it('distinguishes same name at different prices', () => {
@@ -222,7 +223,7 @@ describe('runTranscriptionOracle — multiset duplicates with find-first-satisfy
 				lineItems: [hi({ name: 'BANANA', totalPrice: 2 }), hi({ name: 'BANANA', totalPrice: 3 })],
 			}),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 
 	it('find-first-satisfying-row prevents order-sensitive false-pass when duplicates have different quantities', () => {
@@ -242,7 +243,7 @@ describe('runTranscriptionOracle — multiset duplicates with find-first-satisfy
 				],
 			}),
 		);
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 		expect(r.details).toMatch(/quantity/i);
 	});
 });
@@ -253,7 +254,7 @@ describe('runTranscriptionOracle — quantity and unitPrice', () => {
 			p({ total: 6, lineItems: [{ name: 'A', quantity: 1, unitPrice: 6, totalPrice: 6 }] }),
 			t({ total: 6, lineItems: [hi({ name: 'A', quantity: 3, unitPrice: 2, totalPrice: 6 })] }),
 		);
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 		expect(r.details).toMatch(/quantity/);
 	});
 
@@ -262,7 +263,7 @@ describe('runTranscriptionOracle — quantity and unitPrice', () => {
 			p({ total: 5, lineItems: [{ name: 'A', quantity: 99, unitPrice: 5, totalPrice: 5 }] }),
 			t({ total: 5, lineItems: [hi({ name: 'A', totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 
 	it('skips unitPrice check when parser reports null', () => {
@@ -270,7 +271,7 @@ describe('runTranscriptionOracle — quantity and unitPrice', () => {
 			p({ total: 5, lineItems: [{ name: 'A', quantity: 1, unitPrice: null, totalPrice: 5 }] }),
 			t({ total: 5, lineItems: [hi({ name: 'A', quantity: 1, unitPrice: 5, totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 
 	it('fails when unitPrice differs by more than $0.01', () => {
@@ -278,7 +279,7 @@ describe('runTranscriptionOracle — quantity and unitPrice', () => {
 			p({ total: 5, lineItems: [{ name: 'A', quantity: 1, unitPrice: 5.1, totalPrice: 5 }] }),
 			t({ total: 5, lineItems: [hi({ name: 'A', quantity: 1, unitPrice: 5.0, totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 	});
 
 	it('passes when unitPrice differs by exactly $0.01 (boundary)', () => {
@@ -286,7 +287,7 @@ describe('runTranscriptionOracle — quantity and unitPrice', () => {
 			p({ total: 5, lineItems: [{ name: 'A', quantity: 1, unitPrice: 5.01, totalPrice: 5 }] }),
 			t({ total: 5, lineItems: [hi({ name: 'A', quantity: 1, unitPrice: 5.0, totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 });
 
@@ -300,7 +301,7 @@ describe('runTranscriptionOracle — aggregate totals (direct money tolerance)',
 			}),
 			t({ total: 10, subtotal: 10, lineItems: [hi({ name: 'A', totalPrice: 10 })] }),
 		);
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 		expect(r.details).toMatch(/total/);
 	});
 
@@ -309,7 +310,7 @@ describe('runTranscriptionOracle — aggregate totals (direct money tolerance)',
 			p({ total: 10.01, lineItems: [{ name: 'A', quantity: 1, unitPrice: 10, totalPrice: 10 }] }),
 			t({ total: 10, lineItems: [hi({ name: 'A', totalPrice: 10 })] }),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 
 	it('catches $0.70 vs $1.50 tax discrepancy (the Codex-flagged old tolerance hole)', () => {
@@ -322,7 +323,7 @@ describe('runTranscriptionOracle — aggregate totals (direct money tolerance)',
 			}),
 			t({ total: 11.5, tax: 1.5, subtotal: 10, lineItems: [hi({ name: 'A', totalPrice: 10 })] }),
 		);
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 		expect(r.details).toMatch(/tax/);
 	});
 
@@ -336,7 +337,7 @@ describe('runTranscriptionOracle — aggregate totals (direct money tolerance)',
 			}),
 			t({ total: 11, tax: 1, subtotal: 10, lineItems: [hi({ name: 'A', totalPrice: 10 })] }),
 		);
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 		expect(r.details).toMatch(/subtotal/);
 	});
 
@@ -350,7 +351,7 @@ describe('runTranscriptionOracle — aggregate totals (direct money tolerance)',
 			}),
 			t({ total: 5, lineItems: [hi({ name: 'A', totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 
 	it('skips subtotal/tax checks when parser reports null', () => {
@@ -363,7 +364,7 @@ describe('runTranscriptionOracle — aggregate totals (direct money tolerance)',
 			}),
 			t({ total: 5, subtotal: 4.5, tax: 0.5, lineItems: [hi({ name: 'A', totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 });
 
@@ -376,7 +377,7 @@ describe('runTranscriptionOracle — error verdicts', () => {
 			}),
 			t({ total: 5, lineItems: [hi({ name: 'A', totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('error');
+		expect(r.verdict).toBe(VERDICT.error);
 	});
 	it('returns verdict "error" on Infinity in parsed totals', () => {
 		const r = runTranscriptionOracle(
@@ -386,7 +387,7 @@ describe('runTranscriptionOracle — error verdicts', () => {
 			}),
 			t({ total: 5, lineItems: [hi({ name: 'A', totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('error');
+		expect(r.verdict).toBe(VERDICT.error);
 	});
 	it('returns verdict "error" on NaN quantity in parsed', () => {
 		const r = runTranscriptionOracle(
@@ -396,7 +397,7 @@ describe('runTranscriptionOracle — error verdicts', () => {
 			}),
 			t({ total: 5, lineItems: [hi({ name: 'A', totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('error');
+		expect(r.verdict).toBe(VERDICT.error);
 	});
 });
 
@@ -409,7 +410,7 @@ describe('runTranscriptionOracle — security and determinism', () => {
 			}),
 			t({ total: 5, lineItems: [hi({ name: '$(rm -rf /)', totalPrice: 5 })] }),
 		);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 
 	it('produces deterministic verdict regardless of parser line-item ordering', () => {
@@ -437,8 +438,8 @@ describe('runTranscriptionOracle — security and determinism', () => {
 			}),
 			trx,
 		);
-		expect(ordered.verdict).toBe('pass');
-		expect(reversed.verdict).toBe('pass');
+		expect(ordered.verdict).toBe(VERDICT.pass);
+		expect(reversed.verdict).toBe(VERDICT.pass);
 	});
 
 	it('verdict shape: pass result has details string', () => {

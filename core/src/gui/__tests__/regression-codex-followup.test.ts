@@ -23,6 +23,7 @@ import type { HouseholdService } from '../../services/household/index.js';
 import type { ModelCatalog } from '../../services/llm/model-catalog.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { RunManifest, RunResult } from '../../types/regression.js';
+import { VERDICT } from '../../types/regression.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerRegressionRoutes } from '../routes/regression.js';
@@ -64,7 +65,7 @@ function manifestWith(overrides: Partial<RunManifest> = {}): RunManifest {
 				bucket: 'routing',
 				cacheKey: VALID_KEY,
 				evaluatedTier: 'fast',
-				verdict: 'pass',
+				verdict: VERDICT.pass,
 				source: 'fresh',
 				costUsd: 0.001,
 				timestamp: '2026-05-13T11:30:00.000Z',
@@ -90,7 +91,7 @@ function makeRunResult(overrides: Partial<RunResult> = {}): RunResult {
 		caseId: 'case-1',
 		cacheKey: VALID_KEY,
 		source: 'fresh',
-		verdict: 'pass',
+		verdict: VERDICT.pass,
 		inputs: [],
 		actuals: [],
 		oracleVerdicts: [],
@@ -210,7 +211,7 @@ describe('P1 — auto-summarize fires on terminal events', () => {
 					bucket: 'routing',
 					cacheKey: VALID_KEY,
 					evaluatedTier: 'fast',
-					verdict: 'fail',
+					verdict: VERDICT.fail,
 					source: 'fresh',
 					costUsd: 0.001,
 					timestamp: '2026-05-13T11:30:00.000Z',
@@ -374,7 +375,7 @@ describe('P1 — auto-summarize fires on terminal events', () => {
 						bucket: 'routing',
 						cacheKey: VALID_KEY,
 						evaluatedTier: 'fast',
-						verdict: 'fail',
+						verdict: VERDICT.fail,
 						source: 'fresh',
 						costUsd: 0.001,
 						timestamp: '2026-05-13T11:30:00.000Z',
@@ -464,7 +465,7 @@ describe('P1 — auto-summarize fires on terminal events', () => {
 						bucket: 'routing',
 						cacheKey: VALID_KEY,
 						evaluatedTier: 'fast',
-						verdict: 'fail',
+						verdict: VERDICT.fail,
 						source: 'fresh',
 						costUsd: 0.001,
 						timestamp: '2026-05-13T11:30:00.000Z',
@@ -749,7 +750,7 @@ describe('P2 — overview gate badge only set for rows with routing cases', () =
 					bucket: 'chatbot',
 					cacheKey: VALID_KEY,
 					evaluatedTier: 'standard',
-					verdict: 'fail',
+					verdict: VERDICT.fail,
 					source: 'fresh',
 					costUsd: 0.001,
 					timestamp: '2026-05-13T11:30:00.000Z',

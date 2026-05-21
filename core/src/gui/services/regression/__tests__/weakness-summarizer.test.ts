@@ -16,6 +16,7 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LLMService } from '../../../../types/llm.js';
 import type { RunManifest, RunResult } from '../../../../types/regression.js';
+import { VERDICT } from '../../../../types/regression.js';
 import { createWeaknessSummarizer } from '../weakness-summarizer.js';
 
 const silentLogger = pino({ level: 'silent' });
@@ -49,7 +50,7 @@ function makeManifest(overrides: Partial<RunManifest> = {}): RunManifest {
 				bucket: 'routing',
 				cacheKey: VALID_KEY,
 				evaluatedTier: 'fast',
-				verdict: 'fail',
+				verdict: VERDICT.fail,
 				source: 'fresh',
 				costUsd: 0.001,
 				timestamp: '2026-05-13T11:30:00.000Z',
@@ -75,10 +76,10 @@ function makeRunResult(overrides: Partial<RunResult> = {}): RunResult {
 		caseId: 'failing-case',
 		cacheKey: VALID_KEY,
 		source: 'fresh',
-		verdict: 'fail',
+		verdict: VERDICT.fail,
 		inputs: [{ payload: 'show me my macros', expected: { intent: 'macro-targets' } }],
 		actuals: [{ intent: 'data-query' }],
-		oracleVerdicts: [{ verdict: 'fail', details: 'expected macro-targets, got data-query' }],
+		oracleVerdicts: [{ verdict: VERDICT.fail, details: 'expected macro-targets, got data-query' }],
 		tokenCounts: { input: 0, output: 0 },
 		costUsd: 0.001,
 		modelIds: {
@@ -189,7 +190,7 @@ describe('createWeaknessSummarizer — LLM call discipline (Codex #12)', () => {
 					bucket: 'routing',
 					cacheKey: VALID_KEY,
 					evaluatedTier: 'fast',
-					verdict: 'pass',
+					verdict: VERDICT.pass,
 					source: 'fresh',
 					costUsd: 0.001,
 					timestamp: '2026-05-13T11:30:00.000Z',
@@ -354,7 +355,7 @@ describe('createWeaknessSummarizer — robustness', () => {
 				bucket: 'routing' as const,
 				cacheKey: VALID_KEY,
 				evaluatedTier: 'fast' as const,
-				verdict: 'fail' as const,
+				verdict: VERDICT.fail as const,
 				source: 'fresh' as const,
 				costUsd: 0.001,
 				timestamp: '2026-05-13T11:30:00.000Z',

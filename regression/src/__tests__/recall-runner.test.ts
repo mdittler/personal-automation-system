@@ -2,6 +2,7 @@ import type { PersonaCase, PersonaInput, TierModelSnapshot } from '@core/types/r
 import { describe, expect, it } from 'vitest';
 import { runRecallCase } from '../runner/case-runners/recall-runner.js';
 import type { RecallAdapter } from '../runner/dispatch.js';
+import { VERDICT } from '../shared/types.js';
 
 const modelIds: TierModelSnapshot = { fast: 'fast-m', standard: 'std-m', reasoning: null };
 const noopLogger = {
@@ -67,7 +68,7 @@ describe('runRecallCase', () => {
 			estimateUsd: () => 0.0001,
 			logger: noopLogger,
 		});
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 		expect(r.oracleVerdicts).toHaveLength(1);
 	});
 
@@ -83,7 +84,7 @@ describe('runRecallCase', () => {
 			estimateUsd: () => 0.0001,
 			logger: noopLogger,
 		});
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 	});
 
 	it('errors when the classifier returns unparseable JSON', async () => {
@@ -96,7 +97,7 @@ describe('runRecallCase', () => {
 			estimateUsd: () => 0.0001,
 			logger: noopLogger,
 		});
-		expect(r.verdict).toBe('error');
+		expect(r.verdict).toBe(VERDICT.error);
 	});
 
 	it('budget equality is ALLOWED (estimate === remaining budget proceeds with dispatch)', async () => {
@@ -130,7 +131,7 @@ describe('runRecallCase', () => {
 			logger: noopLogger,
 		});
 		expect(calls).toBe(1);
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 
 	it('aborts with budget-exceeded when projected > remaining budget (no calls dispatched)', async () => {
@@ -169,7 +170,7 @@ describe('runRecallCase', () => {
 			estimateUsd: () => 0.0401, // 1 cent over the budget — first call blocked
 			logger: noopLogger,
 		});
-		expect(r.verdict).toBe('budget-exceeded');
+		expect(r.verdict).toBe(VERDICT.budgetExceeded);
 		expect(calls).toBe(0); // pre-charge gate fires before first call
 	});
 
@@ -265,9 +266,9 @@ describe('runRecallCase', () => {
 			logger: noopLogger,
 		});
 		// Verdict stays 'pass' even though the structural oracle would have failed.
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 		// The actual structural verdict is preserved in oracleVerdicts for review.
 		expect(r.oracleVerdicts).toHaveLength(1);
-		expect(r.oracleVerdicts[0]?.verdict).toBe('fail');
+		expect(r.oracleVerdicts[0]?.verdict).toBe(VERDICT.fail);
 	});
 });
