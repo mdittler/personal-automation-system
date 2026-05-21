@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# PostToolUse(Write|Edit): lints the just-edited file, surfaces Biome ERRORS
-# immediately as a non-blocking reminder. Warnings ignored.
+# PostToolUse(Write|Edit): lints the just-edited file. Surfaces Biome ERRORS
+# (and Biome tooling failures) as a non-blocking reminder. Warnings ignored.
 INPUT=$(cat)
 extract_path() {
   local s='import sys,json; d=json.load(sys.stdin); print(d.get("tool_input",{}).get("file_path",""))'
@@ -23,11 +23,19 @@ REL="${FILE_PATH#"$REPO_ROOT"/}"
 BIOME="$REPO_ROOT/node_modules/.bin/biome"
 [ -x "$BIOME" ] || BIOME="npx biome"
 OUTPUT=$($BIOME check --reporter=github "$REL" 2>&1)
+RC=$?
 ERRORS=$(grep '^::error' <<< "$OUTPUT" || true)
-[ -z "$ERRORS" ] && exit 0
-MSG="BIOME ERRORS in $REL — fix now (errors block git push/merge):
+if [ -n "$ERRORS" ]; then
+  MSG="BIOME ERRORS in $REL — fix now (errors block git push/merge):
 $ERRORS
 Run: pnpm exec biome check --write '$REL'"
+elif [ "$RC" -ne 0 ] && ! grep -q 'No files were processed' <<< "$OUTPUT"; then
+  # Fail visible: Biome itself failed (bad config, crash) — surface it.
+  MSG="Biome could not check $REL (exit $RC) — possible tooling/config issue:
+$OUTPUT"
+else
+  exit 0
+fi
 emit_json() {
   python3 -c "import json,sys; print(json.dumps({'hookSpecificOutput':{'hookEventName':'PostToolUse','additionalContext':sys.argv[1]}}))" "$MSG" 2>/dev/null && return
   python  -c "import json,sys; print(json.dumps({'hookSpecificOutput':{'hookEventName':'PostToolUse','additionalContext':sys.argv[1]}}))" "$MSG" 2>/dev/null && return
