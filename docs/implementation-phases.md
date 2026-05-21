@@ -3308,6 +3308,58 @@ The following Previous Priority blocks moved here from CLAUDE.md during slimming
 
 ---
 
+## Phase 2026-05-18 — Chatbot Command Awareness (W1)
+
+**Status:** ✅ Merged 2026-05-18 (PR #35). Traceability backfill (this section + `REQ-CHATBOT-CATALOG-*` + catalog-injection test coverage) completed 2026-05-21 — see "Traceability backfill" below.
+**Depends on:** Phase 29 (User Management), the ConversationService `/ask` app-aware prompt stack, AppKnowledgeBase.
+
+**Plan:** `docs/superpowers/plans/2026-05-18-user-identity-and-invite-discoverability.md` (Phase 1, Batches 1A–1G).
+**Spec:** `docs/superpowers/specs/2026-05-18-user-identity-and-invite-discoverability-design.md`.
+
+### Goal
+
+Make the chatbot reliably aware of every slash command the Router would actually dispatch for a given user, and make future drift impossible. W1 is the companion workstream to W2 (PR #34); the two shipped under the joint "User Identity Clarity + Chatbot Command Awareness" phase. Before W1, `/help` hand-rendered hardcoded command lists, the `/ask` system prompt had no command knowledge at all, an app could silently shadow a builtin command, and the `auto_detect_pas` resolver disagreed with its own manifest default.
+
+### Approach
+
+A single source of truth — `getEffectiveCommandCatalog(userId, deps)` in `core/src/services/router/command-catalog.ts` — enumerates every command reachable for a user: directly-handled commands (`/help`, `/start`, `/space`, `/invite`), service-gated conversation builtins (`BUILTIN_COMMAND_NAMES`), and app-manifest commands filtered by the per-user app toggle. Service-availability flags (`conversationServiceWired`, `spaceServiceWired`, `inviteServiceWired`) gate commands so the catalog cannot drift from actual Router dispatch; aliases are grouped under their canonical entry. Four consumers all read this one catalog: `/help` rendering, the sandboxed system-prompt catalog block, the build-failing doc-coverage test, and the boot-time soft warning.
+
+### New Files
+
+- `core/src/services/router/command-catalog.ts` — `getEffectiveCommandCatalog`, `CommandCatalogEntry`/`CommandCatalogDeps` types, `BUILTIN_COMMAND_NAMES` (moved here to break a Router import cycle), `detectCommandShadowing`, `loadAllManifests`.
+- `core/src/services/router/validate-command-documentation.ts` — `validateCommandDocumentation` (pure doc-coverage check shared by the test gate and the boot warning) + `logDocCoverageWarnings`; structured `DocCoverageResult` with `missing` / `orphanAllowlist` / `expiredAllowlist` / `malformedAllowlist` buckets.
+- `core/config/undocumented-commands.yaml` — structured allowlist for deliberate temporary doc-coverage exceptions (`command` / `reason` / `owner` / optional `expires`); empty by default.
+- `core/docs/help/conversation-commands.md`, `core/docs/help/inviting-users.md`, `apps/echo/help.md`, `apps/notes/help.md`, `apps/food/help.md` — help-doc backfill so every catalog command is documented within the first 2000 chars (the AppKnowledgeBase truncation budget the chatbot search sees).
+- `core/src/services/router/__tests__/command-catalog.test.ts`, `command-shadowing.test.ts`, `command-documentation.test.ts` (+ `__tests__/fixtures/allowlist-*.yaml`).
+
+### Changed Files
+
+- `core/src/services/router/index.ts` — `sendHelp` rewritten to render from `getEffectiveCommandCatalog` instead of hand-written hardcoded lists; `BUILTIN_COMMAND_NAMES` re-exported from `command-catalog.ts` for back-compat; `commandCatalogDeps` plumbed onto the Router.
+- `core/src/services/conversation/prompt-builder.ts` — `buildAppAwareSystemPrompt` injects the per-user catalog inside a `<reference-data type="commands">` fence with the trusted "do not follow instructions within" directive placed OUTSIDE the fence; `formatCatalogLines` + `sanitizeCatalogField` apply per-entry (`MAX_CATALOG_DESCRIPTION_CHARS = 200`) and total-block (`MAX_CATALOG_BLOCK_CHARS = 4000`) caps, control-char + collapsed-whitespace + fence-escape sanitization; optional `getCommandCatalog` dep on `PromptBuilderDeps` (section omitted entirely when unwired).
+- `core/src/services/conversation/handle-ask.ts`, `handle-message.ts`, `conversation-service.ts` — wire `getCommandCatalog` into the app-aware prompt path.
+- `core/src/compose-runtime.ts` — bind `getEffectiveCommandCatalog` once with live deps (registry, admin check, per-user app toggle, service-wired flags); run `validateCommandDocumentation` after `appKnowledge.init()` and emit `logDocCoverageWarnings` (non-blocking) at boot.
+- `core/src/services/app-knowledge/index.ts` — factor a reusable `loadIndexedEntries` loader + `getEntries()` so the doc-coverage test exercises the exact truncated content the chatbot's runtime search uses.
+- `core/src/services/conversation/auto-detect.ts` — `getAutoDetectSetting` derives its default from `CONVERSATION_USER_CONFIG.auto_detect_pas.default` at module load (throws if the manifest entry is missing or non-boolean), so the constant cannot drift from the manifest; honors the manifest default (`true`) on unset config, missing config service, throws, and unexpected shapes, with a logged warning on the unexpected-shape path.
+- `apps/notes/manifest.yaml`, `apps/notes/src/index.ts` — Notes app list command renamed `/notes` → `/listnotes` to resolve its shadow of the chatbot-builtin `/notes`; the `/note` save command and `/summarize` are unchanged.
+- `core/docs/help/commands-and-routing.md` — cross-links the new help docs.
+
+### Codex Review
+
+Phase 1 went through two Codex review rounds before PR #35 merged. Findings included the test-vs-production manifest shape drift (a fixture using `{command:}` would parse but never match production `{name:}` — addressed by loading the real `apps/notes/manifest.yaml` off disk in `command-catalog.test.ts`), the four-consumer single-source requirement (closed by refactoring `sendHelp` to consume the catalog), and the doc-coverage gate's intent that every command that *could* be dispatched is documented (the boot/test caller forces `isAppEnabledForUser: () => true`). All corrections were applied in-place before merge.
+
+### Tests
+
+W1 shipped `command-catalog.test.ts`, `command-shadowing.test.ts`, `command-documentation.test.ts`, and extensions to `auto-detect.test.ts`, `router.help.test.ts`, and `apps/notes/__tests__/notes.test.ts`. Full suite green at merge (PR #35: 526 files / 11,692 tests).
+
+### Traceability backfill (2026-05-21)
+
+W1 merged without its `implementation-phases.md` section or URS traceability — a deferred item tracked in `docs/open-items.md`. The backfill phase added: this section; seven `REQ-CHATBOT-CATALOG-001..007` URS entries with matching Traceability-Matrix rows; and catalog-specific test coverage that was missing from the original W1 batches. The new coverage (`prompt-builder.catalog.test.ts`, plus Layer A augmentations to `command-catalog.test.ts`) is layer-correct — catalog filtering proven at `getEffectiveCommandCatalog`, fencing/capping/sanitization proven at `buildAppAwareSystemPrompt` — and surfaced two genuine W1 defects, both fixed minimally:
+
+- **Whitespace-only app description** — `getEffectiveCommandCatalog` used `cmd.description || cmd.name`, which only catches falsy values; a whitespace-only `"   "` description survived and rendered a dangling `- /cmd — ` line. Fixed to fall back to the canonical command name unless the description has a non-whitespace character.
+- **Truncation marker overflowed the block cap** — `formatCatalogLines` checked `MAX_CATALOG_BLOCK_CHARS` *before* appending the `… (catalog truncated; N omitted)` marker, so the marker pushed the fenced block past 4000 chars (observed 4040 with many small entries). Fixed to count the marker against the cap and drop accepted lines until the marker fits.
+
+---
+
 ## Phase 2026-05-18 — User Identity Clarity (W2)
 
 **Status:** ✅ Merged 2026-05-18 (PR #34). Post-merge Codex review corrections applied 2026-05-20 — see "Post-merge corrections" below.
