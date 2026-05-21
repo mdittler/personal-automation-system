@@ -43,6 +43,7 @@ import type { AlertDefinition } from '../../../types/alert.js';
 import type { ReportDefinition } from '../../../types/report.js';
 import { AppConfigServiceImpl } from '../../config/app-config-service.js';
 import { requestContext } from '../../context/request-context.js';
+import type { SessionTurn } from '../../conversation-session/chat-session-store.js';
 import { buildSessionKey } from '../../conversation-session/session-key.js';
 import { CostTracker } from '../../llm/cost-tracker.js';
 
@@ -144,11 +145,16 @@ describe.sequential(
 			const userId = USER_A;
 			const sessionKey = dmSessionKey(userId);
 
-			// Snapshot transcript length so we can isolate this test's appends.
-			let beforeCount = 0;
+			// Snapshot the FULL transcript so the exact-diff below is meaningful even
+			// once a session holds ≥20 turns: loadRecentTurns' default 20-turn cap
+			// would otherwise mask the appends. maxTurns:100 reads the whole transcript
+			// for these short integration sessions.
+			let beforeTurns: SessionTurn[] = [];
 			await requestContext.run({ userId, householdId: householdAId }, async () => {
-				const turns = await runtime.services.chatSessions.loadRecentTurns({ userId, sessionKey });
-				beforeCount = turns.length;
+				beforeTurns = await runtime.services.chatSessions.loadRecentTurns(
+					{ userId, sessionKey },
+					{ maxTurns: 100 },
+				);
 			});
 
 			// Invoke the food app's handleScheduledJob the same way the cron path does —
@@ -157,23 +163,50 @@ describe.sequential(
 			const foodApp = runtime.services.registry.getApp('food');
 			expect(foodApp?.module.handleScheduledJob).toBeDefined();
 
+			// Snapshot Telegram sends: the production contract is "send the outbound
+			// app message, THEN bridge it" — asserting both distinguishes "the job
+			// did not run" from "the bridge did not write".
+			const sentBefore = telegram.sent.length;
+
 			await requestContext.run({ userId, householdId: householdAId }, async () => {
 				await foodApp!.module.handleScheduledJob!('weekly-nutrition-summary', userId);
 			});
 
+			// Telegram: exactly one new send, to the I1 user — proves the scheduled
+			// job actually ran the weekly-nutrition handler.
+			const newSends = telegram.sent.slice(sentBefore);
+			expect(newSends.filter((m) => m.userId === userId)).toHaveLength(1);
+			const summaryText = newSends.find((m) => m.userId === userId)!.text;
+
 			await requestContext.run({ userId, householdId: householdAId }, async () => {
-				const turns = await runtime.services.chatSessions.loadRecentTurns({ userId, sessionKey });
-				// Two new turns: user + assistant from the bridge.
-				expect(turns.length).toBeGreaterThanOrEqual(beforeCount + 2);
-				expect(turns.some((t) => t.content === '[App: food] weekly-nutrition')).toBe(true);
-				// Body the user actually saw (empty macro data → fixed copy from
-				// generatePersonalSummary). Substring check proves the bridge body matched.
-				expect(
-					turns.some((t) => t.role === 'assistant' && t.content.includes('No macro data recorded')),
-				).toBe(true);
-				// Provenance: app-bridged turns must be tagged source:'app'.
-				const bridgeUserTurn = turns.find((t) => t.content === '[App: food] weekly-nutrition');
-				expect(bridgeUserTurn?.source).toBe('app');
+				const turns = await runtime.services.chatSessions.loadRecentTurns(
+					{ userId, sessionKey },
+					{ maxTurns: 100 },
+				);
+
+				// EXACTLY two new turns appended by the bridge — no more, no fewer.
+				expect(turns).toHaveLength(beforeTurns.length + 2);
+
+				// The two new turns must be the LAST two and must be adjacent + ordered:
+				// a user turn immediately followed by the assistant turn.
+				const newUserTurn = turns[turns.length - 2]!;
+				const newAssistantTurn = turns[turns.length - 1]!;
+
+				// User turn: the synthetic app header, tagged source:'app'.
+				expect(newUserTurn.role).toBe('user');
+				expect(newUserTurn.content).toBe('[App: food] weekly-nutrition');
+				expect(newUserTurn.source).toBe('app');
+
+				// Assistant turn: the exact body the user saw on Telegram, tagged
+				// source:'app'. Empty macro data → the fixed "No macro data recorded"
+				// copy from generatePersonalSummary; assert against the captured send.
+				expect(newAssistantTurn.role).toBe('assistant');
+				expect(newAssistantTurn.content).toBe(summaryText);
+				expect(newAssistantTurn.content).toContain('No macro data recorded');
+				expect(newAssistantTurn.source).toBe('app');
+
+				// Everything before the new pair is untouched.
+				expect(turns.slice(0, beforeTurns.length)).toEqual(beforeTurns);
 			});
 		});
 
