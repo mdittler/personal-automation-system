@@ -11285,7 +11285,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-USER-011 | scan-duplicate-names.test.ts, auth-login-by-name-disabled.test.ts | 6 | 3 | Implemented |
 | REQ-USER-012 | template-name-rendering.test.ts | 5 | 1 | Implemented |
 | REQ-CHATBOT-CATALOG-001 | command-catalog.test.ts | 11 | 8 | Implemented |
-| REQ-CHATBOT-CATALOG-002 | prompt-builder.catalog.test.ts | 13 | 8 | Implemented |
+| REQ-CHATBOT-CATALOG-002 | prompt-builder.catalog.test.ts | 11 | 10 | Implemented |
 | REQ-CHATBOT-CATALOG-003 | command-shadowing.test.ts, notes.test.ts | 3 | 3 | Implemented |
 | REQ-CHATBOT-CATALOG-004 | auto-detect.test.ts | 8 | 5 | Implemented |
 | REQ-CHATBOT-CATALOG-005 | command-documentation.test.ts | 1 | 0 | Implemented |
@@ -11783,4 +11783,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-LLAMA-CPP-008 | llama-cpp-provider.test.ts | 1 | 0 | Implemented |
 | REQ-LLM-LLAMA-CPP-009 | llama-cpp-provider.test.ts | 1 | 0 | Implemented |
 
-| **Totals** | **375 test files** | **2607** | **2651** | **5258 tests** |
+| **Totals** | **375 test files** | **2605** | **2653** | **5258 tests** |
