@@ -3410,7 +3410,7 @@ A post-merge Codex review of the merged W2 work surfaced four corrections, appli
 - **Locale-dependent lowercasing** (P2) — the unknown-user login rate-limit key in `auth.ts` used `toLocaleLowerCase()`; switched to locale-independent `toLowerCase()`, consistent with `normalizeDisplayName`.
 - **LLM-usage per-user breakdown** (P1) — the `/gui/llm` per-user table rendered a bare numeric id (this template was outside Batch 2B's enumerated GUI surfaces). `userManager` is now injected into the LLM-usage route; the table leads with the display name and keeps the id in `<small>`, matching the rest of the W2 GUI work.
 
-Deferred and tracked in `docs/open-items.md`: the W1 `implementation-phases.md` section is still missing, and URS traceability needs a backfill (`REQ-CHATBOT-CATALOG-*` for W1; reconcile W2's `REQ-USER-009..012` against the plan's intended `REQ-USER-IDENTITY-*` namespace).
+The W1 `implementation-phases.md` section and the `REQ-CHATBOT-CATALOG-*` URS traceability were backfilled on 2026-05-21 — see the "Traceability backfill (2026-05-21)" subsection in the W1 section above. W2's identity requirements ship as `REQ-USER-009..012`; that is the canonical namespace (no `REQ-USER-IDENTITY-*` IDs are created) — see the durable note adjacent to those entries in `docs/urs.md`.
 
 ---
 
