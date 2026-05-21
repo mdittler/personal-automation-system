@@ -24,6 +24,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { type StructuralExpectation, runStructuralOracle } from '../oracles/structural.js';
+import { VERDICT } from '../shared/types.js';
 
 describe('Characterization: structural multisetRows oracle catches drop-and-inflate today', () => {
 	// This test PROVES the current structural oracle catches the primary bug shape.
@@ -87,7 +88,7 @@ describe('Characterization: structural multisetRows oracle catches drop-and-infl
 		const result = runStructuralOracle(parsedJson, expectation);
 
 		// Primary assertion: structural oracle catches the bug.
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 
 		// The `multisetRows` operative runs before scalars (per the receipt
 		// runner's commentary: "Runs before scalars so a line-item mismatch

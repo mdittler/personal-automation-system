@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ManifestCaseResult, RunManifest } from '../../../../types/regression.js';
+import { VERDICT } from '../../../../types/regression.js';
 import { aggregateLeaderboard } from '../leaderboard-aggregator.js';
 
 function cr(overrides: Partial<ManifestCaseResult> & { caseId: string }): ManifestCaseResult {
@@ -15,7 +16,7 @@ function cr(overrides: Partial<ManifestCaseResult> & { caseId: string }): Manife
 		bucket: 'routing',
 		cacheKey: 'a'.repeat(64),
 		evaluatedTier: 'fast',
-		verdict: 'pass',
+		verdict: VERDICT.pass,
 		source: 'fresh',
 		costUsd: 0.001,
 		timestamp: '2026-05-13T11:00:00.000Z',
@@ -72,7 +73,7 @@ describe('aggregateLeaderboard — single tier', () => {
 			runId: 'r2',
 			completedAt: '2026-05-13T11:00:00.000Z',
 			fast: 'B',
-			caseResults: [cr({ caseId: 'c2', verdict: 'fail' })],
+			caseResults: [cr({ caseId: 'c2', verdict: VERDICT.fail })],
 		});
 		const rows = aggregateLeaderboard({ manifests: [m1, m2], tier: 'fast' });
 		expect(rows.map((r) => r.modelId).sort()).toEqual(['A', 'B']);
@@ -97,8 +98,8 @@ describe('aggregateLeaderboard — single tier', () => {
 			fast: 'A',
 			caseResults: [
 				cr({ caseId: 'c1', evaluatedTier: 'fast' }),
-				cr({ caseId: 'c2', evaluatedTier: 'mixed', verdict: 'fail' }),
-				cr({ caseId: 'c3', evaluatedTier: 'unknown', verdict: 'error' }),
+				cr({ caseId: 'c2', evaluatedTier: 'mixed', verdict: VERDICT.fail }),
+				cr({ caseId: 'c3', evaluatedTier: 'unknown', verdict: VERDICT.error }),
 			],
 		});
 		const rows = aggregateLeaderboard({ manifests: [m], tier: 'fast' });
@@ -112,13 +113,13 @@ describe('aggregateLeaderboard — single tier', () => {
 			runId: 'r1',
 			completedAt: '2026-05-13T08:00:00.000Z',
 			fast: 'A',
-			caseResults: [cr({ caseId: 'c1', verdict: 'fail' })],
+			caseResults: [cr({ caseId: 'c1', verdict: VERDICT.fail })],
 		});
 		const newer = manifest({
 			runId: 'r2',
 			completedAt: '2026-05-13T12:00:00.000Z',
 			fast: 'A',
-			caseResults: [cr({ caseId: 'c1', verdict: 'pass' })],
+			caseResults: [cr({ caseId: 'c1', verdict: VERDICT.pass })],
 		});
 		const rows = aggregateLeaderboard({ manifests: [older, newer], tier: 'fast' });
 		expect(rows).toHaveLength(1);
@@ -132,13 +133,13 @@ describe('aggregateLeaderboard — single tier', () => {
 			runId: 'r1',
 			completedAt: '2026-05-13T08:00:00.000Z',
 			fast: 'A',
-			caseResults: [cr({ caseId: 'c1', verdict: 'fail' })],
+			caseResults: [cr({ caseId: 'c1', verdict: VERDICT.fail })],
 		});
 		const newer = manifest({
 			runId: 'r2',
 			completedAt: '2026-05-13T12:00:00.000Z',
 			fast: 'A',
-			caseResults: [cr({ caseId: 'c1', verdict: 'pass' })],
+			caseResults: [cr({ caseId: 'c1', verdict: VERDICT.pass })],
 		});
 		const rows = aggregateLeaderboard({
 			manifests: [older, newer],
@@ -189,13 +190,13 @@ describe('aggregateLeaderboard — counts and grouping', () => {
 		completedAt: '2026-05-13T11:00:00.000Z',
 		fast: 'A',
 		caseResults: [
-			cr({ caseId: 'c1', bucket: 'routing', verdict: 'pass' }),
-			cr({ caseId: 'c2', bucket: 'routing', verdict: 'fail' }),
-			cr({ caseId: 'c3', bucket: 'recall', verdict: 'pass', source: 'cached' }),
+			cr({ caseId: 'c1', bucket: 'routing', verdict: VERDICT.pass }),
+			cr({ caseId: 'c2', bucket: 'routing', verdict: VERDICT.fail }),
+			cr({ caseId: 'c3', bucket: 'recall', verdict: VERDICT.pass, source: 'cached' }),
 			cr({
 				caseId: 'c4',
 				bucket: 'routing',
-				verdict: 'error',
+				verdict: VERDICT.error,
 				costUsd: 0.005,
 			}),
 		],
@@ -299,19 +300,19 @@ describe('aggregateLeaderboard — row sort', () => {
 			runId: 'r1',
 			completedAt: '2026-05-13T11:00:00.000Z',
 			fast: 'expensive-perfect',
-			caseResults: [cr({ caseId: 'c1', verdict: 'pass', costUsd: 1 })],
+			caseResults: [cr({ caseId: 'c1', verdict: VERDICT.pass, costUsd: 1 })],
 		});
 		const b = manifest({
 			runId: 'r2',
 			completedAt: '2026-05-13T11:00:00.000Z',
 			fast: 'cheap-perfect',
-			caseResults: [cr({ caseId: 'c1', verdict: 'pass', costUsd: 0.001 })],
+			caseResults: [cr({ caseId: 'c1', verdict: VERDICT.pass, costUsd: 0.001 })],
 		});
 		const c = manifest({
 			runId: 'r3',
 			completedAt: '2026-05-13T11:00:00.000Z',
 			fast: 'lower-accuracy',
-			caseResults: [cr({ caseId: 'c1', verdict: 'fail', costUsd: 0 })],
+			caseResults: [cr({ caseId: 'c1', verdict: VERDICT.fail, costUsd: 0 })],
 		});
 		const rows = aggregateLeaderboard({ manifests: [a, b, c], tier: 'fast' });
 		expect(rows.map((r) => r.modelId)).toEqual([

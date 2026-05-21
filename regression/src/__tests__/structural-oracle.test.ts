@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { runStructuralOracle } from '../oracles/structural.js';
+import { VERDICT } from '../shared/types.js';
 
 describe('structural — JSON parsability emits error per spec', () => {
 	it('emits error on non-JSON', () => {
 		const v = runStructuralOracle('not json{', { schema: { type: 'object' } });
-		expect(v.verdict).toBe('error');
+		expect(v.verdict).toBe(VERDICT.error);
 		expect(v.details).toMatch(/parse/i);
 	});
 	it('emits error on empty string', () => {
 		const v = runStructuralOracle('', { schema: { type: 'object' } });
-		expect(v.verdict).toBe('error');
+		expect(v.verdict).toBe(VERDICT.error);
 	});
 });
 
@@ -22,13 +23,13 @@ describe('structural — schema violation emits fail', () => {
 				properties: { store: { type: 'string' } },
 			},
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 	});
 	it('fail on wrong type', () => {
 		const v = runStructuralOracle('{"total":"forty"}', {
 			schema: { type: 'object', properties: { total: { type: 'number' } } },
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 	});
 });
 
@@ -38,14 +39,14 @@ describe('structural — set equality on multi-value fields', () => {
 			schema: { type: 'object' },
 			setEquality: [{ path: 'lineItems', keyField: 'name', expected: ['Eggs', 'Milk'] }],
 		});
-		expect(v.verdict).toBe('pass');
+		expect(v.verdict).toBe(VERDICT.pass);
 	});
 	it('fail with missing item names listed', () => {
 		const v = runStructuralOracle('{"lineItems":[{"name":"Eggs"}]}', {
 			schema: { type: 'object' },
 			setEquality: [{ path: 'lineItems', keyField: 'name', expected: ['Eggs', 'Bread'] }],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 		expect(v.details).toMatch(/Bread/);
 	});
 	it('fail on hallucinated item', () => {
@@ -53,7 +54,7 @@ describe('structural — set equality on multi-value fields', () => {
 			schema: { type: 'object' },
 			setEquality: [{ path: 'lineItems', keyField: 'name', expected: ['Eggs'] }],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 		expect(v.details).toMatch(/caviar/i);
 	});
 });
@@ -75,7 +76,7 @@ describe('structural — keyed scalar tolerances on line items', () => {
 				],
 			},
 		);
-		expect(v.verdict).toBe('pass');
+		expect(v.verdict).toBe(VERDICT.pass);
 	});
 	it('fail when one keyed price drifts', () => {
 		const v = runStructuralOracle('{"lineItems":[{"name":"Eggs","totalPrice":4.50}]}', {
@@ -90,7 +91,7 @@ describe('structural — keyed scalar tolerances on line items', () => {
 				},
 			],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 		expect(v.details).toMatch(/eggs/i);
 	});
 });
@@ -101,7 +102,7 @@ describe('structural — scalar with NaN/null guards (LLM-output untrust)', () =
 			schema: { type: 'object' },
 			scalars: [{ path: 'total', expected: 1, tolerance: 0.01 }],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 	});
 });
 
@@ -124,7 +125,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				],
 			},
 		);
-		expect(v.verdict).toBe('pass');
+		expect(v.verdict).toBe(VERDICT.pass);
 	});
 
 	it('pass on row-correlated quantity + unitPrice (matched per row)', () => {
@@ -146,7 +147,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				],
 			},
 		);
-		expect(v.verdict).toBe('pass');
+		expect(v.verdict).toBe(VERDICT.pass);
 	});
 
 	// The critical case: same-name duplicates with DIFFERENT multipliers
@@ -178,7 +179,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				],
 			},
 		);
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 		expect(v.details).toMatch(/BANANA EACH/);
 	});
 
@@ -210,7 +211,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				],
 			},
 		);
-		expect(v.verdict).toBe('pass');
+		expect(v.verdict).toBe(VERDICT.pass);
 	});
 
 	it('fails when actual numeric field is NaN-equivalent (null)', () => {
@@ -225,7 +226,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				},
 			],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 		expect(v.details).toMatch(/not finite|totalPrice/i);
 	});
 
@@ -241,7 +242,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				},
 			],
 		});
-		expect(v.verdict).toBe('error');
+		expect(v.verdict).toBe(VERDICT.error);
 		expect(v.details).toMatch(/missing string key/i);
 	});
 
@@ -260,7 +261,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				],
 			},
 		);
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 		expect(v.details).toMatch(/hallucinated|caviar/i);
 	});
 
@@ -276,7 +277,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				},
 			],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 		expect(v.details).toMatch(/not an array/);
 	});
 
@@ -298,7 +299,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				],
 			},
 		);
-		expect(v.verdict).toBe('pass');
+		expect(v.verdict).toBe(VERDICT.pass);
 	});
 
 	it('fail on missing duplicate (expected 2 PE GRANOLA, actual 1)', () => {
@@ -316,7 +317,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				},
 			],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 		expect(v.details).toMatch(/PE GRANOLA/);
 	});
 
@@ -332,7 +333,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				},
 			],
 		});
-		expect(v.verdict).toBe('pass');
+		expect(v.verdict).toBe(VERDICT.pass);
 	});
 
 	it('fail just outside tolerance (diff 0.006 with tolerance 0.005)', () => {
@@ -347,7 +348,7 @@ describe('structural — multisetRows operative (row-level correlation + duplica
 				},
 			],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 	});
 });
 
@@ -357,7 +358,7 @@ describe('structural — calendar-strict date validation', () => {
 			schema: { type: 'object' },
 			dates: [{ path: 'date', minIso: '2024-01-01', maxIso: '2030-12-31' }],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 		expect(v.details).toMatch(/calendar|invalid/i);
 	});
 	it('fail on month 13', () => {
@@ -365,21 +366,21 @@ describe('structural — calendar-strict date validation', () => {
 			schema: { type: 'object' },
 			dates: [{ path: 'date', minIso: '2024-01-01', maxIso: '2030-12-31' }],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 	});
 	it('pass on valid date in range', () => {
 		const v = runStructuralOracle('{"date":"2026-04-15"}', {
 			schema: { type: 'object' },
 			dates: [{ path: 'date', minIso: '2026-01-01', maxIso: '2026-12-31' }],
 		});
-		expect(v.verdict).toBe('pass');
+		expect(v.verdict).toBe(VERDICT.pass);
 	});
 	it('fail when date is outside range', () => {
 		const v = runStructuralOracle('{"date":"2025-12-15"}', {
 			schema: { type: 'object' },
 			dates: [{ path: 'date', minIso: '2026-01-01', maxIso: '2026-12-31' }],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 	});
 });
 
@@ -389,14 +390,14 @@ describe('structural — string equality (store name)', () => {
 			schema: { type: 'object' },
 			strings: [{ path: 'store', expectedCaseInsensitive: 'walmart' }],
 		});
-		expect(v.verdict).toBe('pass');
+		expect(v.verdict).toBe(VERDICT.pass);
 	});
 	it('fail on completely wrong store', () => {
 		const v = runStructuralOracle('{"store":"Target"}', {
 			schema: { type: 'object' },
 			strings: [{ path: 'store', expectedCaseInsensitive: 'walmart' }],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 	});
 });
 
@@ -406,7 +407,7 @@ describe('structural — additional LLM-untrust + integration coverage', () => {
 			schema: { type: 'object' },
 			scalars: [{ path: 'total', expected: 42, tolerance: 0.01 }],
 		});
-		expect(v.verdict).toBe('fail');
+		expect(v.verdict).toBe(VERDICT.fail);
 		expect(v.details).toMatch(/finite|scalar/i);
 	});
 
@@ -446,7 +447,7 @@ describe('structural — additional LLM-untrust + integration coverage', () => {
 				},
 			],
 		});
-		expect(v.verdict).toBe('pass');
+		expect(v.verdict).toBe(VERDICT.pass);
 	});
 });
 
@@ -456,7 +457,7 @@ describe('structural — date range misconfig defensive (Task 7 followup)', () =
 			schema: { type: 'object' },
 			dates: [{ path: 'date', minIso: '2024-13-01', maxIso: '2026-12-31' }],
 		});
-		expect(v.verdict).toBe('error');
+		expect(v.verdict).toBe(VERDICT.error);
 		expect(v.details).toMatch(/operator|misconfig/i);
 	});
 
@@ -465,7 +466,7 @@ describe('structural — date range misconfig defensive (Task 7 followup)', () =
 			schema: { type: 'object' },
 			dates: [{ path: 'date', minIso: '2024-01-01', maxIso: 'not-a-date' }],
 		});
-		expect(v.verdict).toBe('error');
+		expect(v.verdict).toBe(VERDICT.error);
 		expect(v.details).toMatch(/operator|misconfig/i);
 	});
 });

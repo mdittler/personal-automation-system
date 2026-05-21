@@ -23,6 +23,7 @@ import type { CatalogModel, ModelCatalog } from '../../services/llm/model-catalo
 import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { RunManifest } from '../../types/regression.js';
+import { VERDICT } from '../../types/regression.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerRegressionRoutes } from '../routes/regression.js';
@@ -240,7 +241,7 @@ function manifestWith(overrides: Partial<RunManifest> = {}): RunManifest {
 				bucket: 'routing',
 				cacheKey: 'a'.repeat(64),
 				evaluatedTier: 'fast',
-				verdict: 'pass',
+				verdict: VERDICT.pass,
 				source: 'fresh',
 				costUsd: 0.001,
 				timestamp: '2026-05-13T11:30:00.000Z',

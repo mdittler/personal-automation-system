@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runRubricOracle } from '../oracles/rubric.js';
+import { VERDICT } from '../shared/types.js';
 import { StubLLMService } from './_stub-provider.js';
 
 const baseDeps = (stub: StubLLMService) => ({
@@ -22,7 +23,7 @@ describe('runRubricOracle', () => {
 			actualResponse: 'X is mentioned',
 			deps: baseDeps(stub),
 		});
-		expect(result.verdict.verdict).toBe('pass');
+		expect(result.verdict.verdict).toBe(VERDICT.pass);
 		expect(result.verdict.details).toContain('5');
 		expect(result.meter.costUsd).toBeGreaterThanOrEqual(0);
 	});
@@ -34,7 +35,7 @@ describe('runRubricOracle', () => {
 			actualResponse: 'X',
 			deps: baseDeps(stub),
 		});
-		expect(result.verdict.verdict).toBe('pass');
+		expect(result.verdict.verdict).toBe(VERDICT.pass);
 	});
 
 	it('fails when score is 3 or below', async () => {
@@ -44,7 +45,7 @@ describe('runRubricOracle', () => {
 			actualResponse: 'a',
 			deps: baseDeps(stub),
 		});
-		expect(result.verdict.verdict).toBe('fail');
+		expect(result.verdict.verdict).toBe(VERDICT.fail);
 		expect(result.verdict.details).toContain('3');
 	});
 
@@ -55,7 +56,7 @@ describe('runRubricOracle', () => {
 			actualResponse: 'a',
 			deps: baseDeps(stub),
 		});
-		expect(result.verdict.verdict).toBe('error');
+		expect(result.verdict.verdict).toBe(VERDICT.error);
 		expect(result.verdict.details).toMatch(/parse/i);
 	});
 
@@ -66,7 +67,7 @@ describe('runRubricOracle', () => {
 			actualResponse: 'a',
 			deps: baseDeps(stub),
 		});
-		expect(result.verdict.verdict).toBe('error');
+		expect(result.verdict.verdict).toBe(VERDICT.error);
 		expect(result.verdict.details).toMatch(/finite|number|score/i);
 	});
 
@@ -77,7 +78,7 @@ describe('runRubricOracle', () => {
 			actualResponse: 'a',
 			deps: baseDeps(stub),
 		});
-		expect(result.verdict.verdict).toBe('error');
+		expect(result.verdict.verdict).toBe(VERDICT.error);
 		expect(result.verdict.details).toMatch(/range|0.*5/i);
 	});
 
@@ -88,7 +89,7 @@ describe('runRubricOracle', () => {
 			actualResponse: 'a',
 			deps: baseDeps(stub),
 		});
-		expect(result.verdict.verdict).toBe('error');
+		expect(result.verdict.verdict).toBe(VERDICT.error);
 		expect(result.verdict.details).toMatch(/llm|throw|empty/i);
 	});
 
@@ -99,7 +100,7 @@ describe('runRubricOracle', () => {
 			actualResponse: 'a',
 			deps: baseDeps(stub),
 		});
-		expect(result.verdict.verdict).toBe('pass');
+		expect(result.verdict.verdict).toBe(VERDICT.pass);
 	});
 
 	it('fences hostile actualResponse inside the judge prompt (no prompt-injection escape)', async () => {
@@ -223,7 +224,7 @@ describe('runRubricOracle', () => {
 			actualResponse: 'a',
 			deps: baseDeps(stub),
 		});
-		expect(result.verdict.verdict).toBe('error');
+		expect(result.verdict.verdict).toBe(VERDICT.error);
 		expect(result.verdict.details).toMatch(/empty or invalid/i);
 	});
 });

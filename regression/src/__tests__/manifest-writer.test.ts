@@ -7,11 +7,12 @@
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type {
-	PersonaCase,
-	RunResult,
-	RunSummary,
-	TierModelSnapshot,
+import {
+	type PersonaCase,
+	type RunResult,
+	type RunSummary,
+	type TierModelSnapshot,
+	VERDICT,
 } from '@core/types/regression.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildManifest, writeManifest } from '../runner/manifest-writer.js';
@@ -51,7 +52,7 @@ function makeResult(id: string, overrides: Partial<RunResult> = {}): RunResult {
 		caseId: id,
 		cacheKey: VALID_KEY,
 		source: 'fresh',
-		verdict: 'pass',
+		verdict: VERDICT.pass,
 		inputs: [],
 		actuals: [],
 		oracleVerdicts: [],
@@ -80,7 +81,7 @@ const SUMMARY: RunSummary = {
 describe('buildManifest', () => {
 	it('maps each result to a ManifestCaseResult with bucket attribution', () => {
 		const r1 = makeResult('case-a');
-		const r2 = makeResult('case-b', { verdict: 'fail', source: 'cached', costUsd: 0 });
+		const r2 = makeResult('case-b', { verdict: VERDICT.fail, source: 'cached', costUsd: 0 });
 		const cases = new Map<string, PersonaCase>([
 			['case-a', makeCase('case-a')],
 			['case-b', makeCase('case-b', 'chatbot')],
@@ -102,14 +103,14 @@ describe('buildManifest', () => {
 			bucket: 'routing',
 			cacheKey: VALID_KEY,
 			evaluatedTier: 'fast',
-			verdict: 'pass',
+			verdict: VERDICT.pass,
 			source: 'fresh',
 			costUsd: 0.001,
 		});
 		expect(manifest.caseResults[1]).toMatchObject({
 			caseId: 'case-b',
 			bucket: 'chatbot',
-			verdict: 'fail',
+			verdict: VERDICT.fail,
 			source: 'cached',
 			costUsd: 0,
 		});

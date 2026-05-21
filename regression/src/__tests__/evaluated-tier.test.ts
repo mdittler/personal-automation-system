@@ -9,6 +9,7 @@
 import {
 	EVALUATED_TIER_VALUES,
 	type RunResult,
+	VERDICT,
 	getEvaluatedTier,
 	looksLikeRunResult,
 } from '@core/types/regression.js';
@@ -22,7 +23,7 @@ function baseResult(overrides: Partial<RunResult> = {}): RunResult {
 		caseId: 'case-1',
 		cacheKey: VALID_KEY,
 		source: 'fresh',
-		verdict: 'pass',
+		verdict: VERDICT.pass,
 		inputs: [],
 		actuals: [],
 		oracleVerdicts: [],

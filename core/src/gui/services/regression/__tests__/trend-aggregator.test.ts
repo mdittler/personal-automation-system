@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ManifestCaseResult, RunManifest } from '../../../../types/regression.js';
+import { VERDICT } from '../../../../types/regression.js';
 import { buildTrendData } from '../trend-aggregator.js';
 
 function cr(o: Partial<ManifestCaseResult> & { caseId: string }): ManifestCaseResult {
@@ -11,7 +12,7 @@ function cr(o: Partial<ManifestCaseResult> & { caseId: string }): ManifestCaseRe
 		bucket: 'routing',
 		cacheKey: 'a'.repeat(64),
 		evaluatedTier: 'fast',
-		verdict: 'pass',
+		verdict: VERDICT.pass,
 		source: 'fresh',
 		costUsd: 0.001,
 		timestamp: '2026-05-13T11:00:00.000Z',
@@ -69,7 +70,7 @@ describe('buildTrendData', () => {
 			runId: 'r2',
 			completedAt: '2026-05-13T00:00:00.000Z',
 			fast: 'A',
-			caseResults: [cr({ caseId: 'c1', verdict: 'fail' })],
+			caseResults: [cr({ caseId: 'c1', verdict: VERDICT.fail })],
 		});
 		const b1 = manifest({
 			runId: 'r3',
@@ -126,7 +127,7 @@ describe('buildTrendData', () => {
 			completedAt: '2026-05-12T00:00:00.000Z',
 			caseResults: [
 				cr({ caseId: 'c1', bucket: 'routing' }),
-				cr({ caseId: 'c2', bucket: 'recall', verdict: 'fail' }),
+				cr({ caseId: 'c2', bucket: 'recall', verdict: VERDICT.fail }),
 			],
 		});
 		const routing = buildTrendData({

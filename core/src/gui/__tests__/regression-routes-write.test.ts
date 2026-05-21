@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 import { CredentialService } from '../../services/credentials/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
+import { VERDICT } from '../../types/regression.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerRegressionRoutes } from '../routes/regression.js';
@@ -483,7 +484,10 @@ describe('GET /gui/regression/runs/:runId/events — SSE', () => {
 
 			// Emit events on the fake run BEFORE the SSE client attaches so the
 			// buffer-replay path is exercised.
-			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'demo', verdict: 'pass' } });
+			pendingRuns[0]?.emit({
+				type: 'case-result',
+				result: { caseId: 'demo', verdict: VERDICT.pass },
+			});
 			pendingRuns[0]?.emit({ type: 'summary', summary: { totalCases: 1, pass: 1 } });
 			pendingRuns[0]?.emit({ type: 'complete', summary: { totalCases: 1 } });
 			pendingRuns[0]?.finish();
@@ -1440,7 +1444,7 @@ describe('operator persona — runs two models back-to-back, both visible in his
 						caseId,
 						cacheKey: cacheKey1,
 						source: 'fresh',
-						verdict: 'pass',
+						verdict: VERDICT.pass,
 						inputs: [],
 						actuals: [],
 						oracleVerdicts: [],
@@ -1479,7 +1483,7 @@ describe('operator persona — runs two models back-to-back, both visible in his
 						caseId,
 						cacheKey: cacheKey2,
 						source: 'fresh',
-						verdict: 'pass',
+						verdict: VERDICT.pass,
 						inputs: [],
 						actuals: [],
 						oracleVerdicts: [],

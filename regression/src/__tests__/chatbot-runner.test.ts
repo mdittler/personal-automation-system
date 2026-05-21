@@ -1,6 +1,7 @@
 import type { PersonaCase, TierModelSnapshot } from '@core/types/regression.js';
 import { describe, expect, it, vi } from 'vitest';
 import { runChatbotCase } from '../runner/case-runners/chatbot-runner.js';
+import { VERDICT } from '../shared/types.js';
 import { StubLLMService } from './_stub-provider.js';
 
 const modelIds: TierModelSnapshot = { fast: 'fast-m', standard: 'std-m', reasoning: null };
@@ -81,7 +82,7 @@ describe('runChatbotCase', () => {
 			logger: noopLogger,
 		});
 
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 		expect(r.costUsd).toBeCloseTo(0.07, 4);
 		expect(env.routeMessage).toHaveBeenCalledTimes(1);
 	});
@@ -103,7 +104,7 @@ describe('runChatbotCase', () => {
 			estimateUsd: () => 0.001,
 			logger: noopLogger,
 		});
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 	});
 
 	it('errors when the rubric judge returns a non-finite score', async () => {
@@ -121,7 +122,7 @@ describe('runChatbotCase', () => {
 			estimateUsd: () => 0.001,
 			logger: noopLogger,
 		});
-		expect(r.verdict).toBe('error');
+		expect(r.verdict).toBe(VERDICT.error);
 	});
 
 	it('captures only THIS case turn even if telegram.sent was non-empty before', async () => {
@@ -145,7 +146,7 @@ describe('runChatbotCase', () => {
 		// the stale text.
 		expect(judge.lastPrompt).not.toContain('STALE REPLY FROM PRIOR CASE');
 		expect(judge.lastPrompt).toContain('clean reply');
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 	});
 
 	it('aborts with budget-exceeded before invoking routeMessage when over budget', async () => {
@@ -164,7 +165,7 @@ describe('runChatbotCase', () => {
 			estimateUsd: () => 0.1,
 			logger: noopLogger,
 		});
-		expect(r.verdict).toBe('budget-exceeded');
+		expect(r.verdict).toBe(VERDICT.budgetExceeded);
 		expect(env.routeMessage).not.toHaveBeenCalled();
 	});
 
@@ -191,7 +192,7 @@ describe('runChatbotCase', () => {
 			estimateUsd: () => 0.001,
 			logger: noopLogger,
 		});
-		expect(r.verdict).toBe('fail');
+		expect(r.verdict).toBe(VERDICT.fail);
 		expect(r.oracleVerdicts.some((v) => v.details.includes('routing mismatch'))).toBe(true);
 	});
 

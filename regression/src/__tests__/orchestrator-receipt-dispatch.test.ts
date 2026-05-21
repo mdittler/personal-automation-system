@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runSuite } from '../runner/index.js';
+import { VERDICT } from '../shared/types.js';
 
 let repoRoot: string;
 let casesDir: string;
@@ -137,7 +138,7 @@ describe('runSuite — receipt bucket dispatch', () => {
 		const { results } = await runSuite(opts);
 		expect(results).toHaveLength(1);
 		expect(results[0]!.caseId).toBe('r-happy');
-		expect(results[0]!.verdict).toBe('pass');
+		expect(results[0]!.verdict).toBe(VERDICT.pass);
 		expect(receiptLlm.completeWithMeta).toHaveBeenCalledTimes(1);
 	});
 

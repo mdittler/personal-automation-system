@@ -27,6 +27,7 @@ import { CredentialService } from '../../services/credentials/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { ManifestCaseResult, RunManifest, RunResult } from '../../types/regression.js';
+import { VERDICT } from '../../types/regression.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerRegressionRoutes } from '../routes/regression.js';
@@ -87,10 +88,10 @@ function makeRunResult(
 		caseId: overrides.caseId,
 		cacheKey: overrides.cacheKey,
 		source: 'fresh',
-		verdict: 'pass',
+		verdict: VERDICT.pass,
 		inputs: [{ payload: 'hi', expected: { intent: 'x' } }],
 		actuals: [{ intent: 'x' }],
-		oracleVerdicts: [{ verdict: 'pass', details: 'matches' }],
+		oracleVerdicts: [{ verdict: VERDICT.pass, details: 'matches' }],
 		tokenCounts: { input: 0, output: 0 },
 		costUsd: 0.0042,
 		modelIds: { fast: 'fast-m', standard: 'std-m', reasoning: null },
@@ -587,7 +588,7 @@ describe('GET /gui/regression/cases/:caseId — drilldown (Codex C5)', () => {
 					result: makeRunResult({
 						caseId: 'has-drill',
 						cacheKey: HEX64('a'),
-						oracleVerdicts: [{ verdict: 'pass', details: 'shape ok' }],
+						oracleVerdicts: [{ verdict: VERDICT.pass, details: 'shape ok' }],
 					}),
 				},
 			],
@@ -674,7 +675,7 @@ describe('GET /gui/regression/cases/:caseId/row — server-rendered row (Codex I
 		const liveResult = makeRunResult({
 			caseId: 'live-case',
 			cacheKey: HEX64('z'),
-			verdict: 'fail',
+			verdict: VERDICT.fail,
 		});
 		let runId: string;
 		let activeOnEvent!: (e: RegressionEvent) => void;
@@ -989,7 +990,7 @@ function manifestCase(over: Partial<ManifestCaseResult> & { caseId: string }): M
 		bucket: 'routing',
 		cacheKey: HEX64('a'),
 		evaluatedTier: 'fast',
-		verdict: 'pass',
+		verdict: VERDICT.pass,
 		source: 'fresh',
 		costUsd: 0.001,
 		timestamp: '2026-05-13T11:00:00.000Z',
@@ -1005,9 +1006,9 @@ function overviewManifest(opts: {
 	routingAccuracy: number | null;
 	routingInputsEvaluated: number;
 }): RunManifest {
-	const pass = opts.caseResults.filter((c) => c.verdict === 'pass').length;
-	const fail = opts.caseResults.filter((c) => c.verdict === 'fail').length;
-	const error = opts.caseResults.filter((c) => c.verdict === 'error').length;
+	const pass = opts.caseResults.filter((c) => c.verdict === VERDICT.pass).length;
+	const fail = opts.caseResults.filter((c) => c.verdict === VERDICT.fail).length;
+	const error = opts.caseResults.filter((c) => c.verdict === VERDICT.error).length;
 	return {
 		runId: opts.runId,
 		startedAt: '2026-05-13T10:00:00.000Z',
@@ -1070,9 +1071,9 @@ describe('Overview leaderboard — per-input routing accuracy', () => {
 			runId: 'run-contradiction',
 			fast: 'gemma4:26b',
 			caseResults: [
-				manifestCase({ caseId: 'c1', verdict: 'pass' }),
-				manifestCase({ caseId: 'c2', verdict: 'pass' }),
-				manifestCase({ caseId: 'c3', verdict: 'pass' }),
+				manifestCase({ caseId: 'c1', verdict: VERDICT.pass }),
+				manifestCase({ caseId: 'c2', verdict: VERDICT.pass }),
+				manifestCase({ caseId: 'c3', verdict: VERDICT.pass }),
 			],
 			routingAccuracy: 0.906,
 			routingInputsEvaluated: 53,

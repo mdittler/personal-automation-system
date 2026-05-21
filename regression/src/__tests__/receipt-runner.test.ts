@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { combineVerdicts, runReceiptCase } from '../runner/case-runners/receipt-runner.js';
 import type { Verdict } from '../shared/types.js';
+import { VERDICT } from '../shared/types.js';
 import {
 	llmShim,
 	llmShimFromMock,
@@ -70,7 +71,7 @@ describe('runReceiptCase — production parser integration', () => {
 		);
 		const deps = makeReceiptDeps(llmShimFromMock(llmComplete));
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath), deps);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 		expect(result.actuals).toHaveLength(1);
 		expect(result.costUsd).toBeCloseTo(0.02, 4);
 		expect(llmComplete).toHaveBeenCalledTimes(1);
@@ -87,7 +88,7 @@ describe('runReceiptCase — production parser integration', () => {
 		const opts = callArgs[1] as { tier?: string; images?: Array<{ mimeType: string }> };
 		expect(opts.tier).toBe('standard');
 		expect(opts.images?.[0]?.mimeType).toBe('image/png');
-		expect(result.oracleVerdicts[0]?.verdict).toBe('pass');
+		expect(result.oracleVerdicts[0]?.verdict).toBe(VERDICT.pass);
 	});
 
 	it('fails when LLM hallucinates a line item (set-equality)', async () => {
@@ -114,7 +115,7 @@ describe('runReceiptCase — production parser integration', () => {
 			),
 		);
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'hallu'), deps);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/caviar/i);
 	});
 
@@ -128,7 +129,7 @@ describe('runReceiptCase — production parser integration', () => {
 		});
 		const deps = makeReceiptDeps(llmShim('not json{'));
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'bad-json'), deps);
-		expect(result.verdict).toBe('error');
+		expect(result.verdict).toBe(VERDICT.error);
 		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/parser threw/i);
 		expect(result.actuals[0]).toBeNull();
 	});
@@ -158,7 +159,7 @@ describe('runReceiptCase — production parser integration', () => {
 			),
 		);
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'reject'), deps);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 		const parsed = result.actuals[0] as { rawExtractedDate?: string; date: string };
 		expect(parsed.rawExtractedDate).toBe(futureDate);
 		expect(parsed.date).not.toBe(futureDate); // overwritten to today (parser fallback)
@@ -192,7 +193,7 @@ describe('runReceiptCase — production parser integration', () => {
 			expected: { kind: 'sidecar' },
 		});
 		const result = await runReceiptCase(c, deps);
-		expect(result.verdict).toBe('budget-exceeded');
+		expect(result.verdict).toBe(VERDICT.budgetExceeded);
 		// Pre-charge gate fires before the first call is dispatched: 0 + 0.05 > 0.01.
 		expect(llmComplete).not.toHaveBeenCalled();
 		expect(result.costUsd).toBe(0);
@@ -236,12 +237,12 @@ describe('runReceiptCase — production parser integration', () => {
 			expected: { kind: 'sidecar' },
 		});
 		const result = await runReceiptCase(c, deps);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 		// First input was processed (LLM called once, hallucination → fail).
 		// Second input was gated out, but must NOT clobber the prior fail.
 		expect(llmComplete).toHaveBeenCalledTimes(1);
 		expect(result.oracleVerdicts).toHaveLength(1);
-		expect(result.oracleVerdicts[0]?.verdict).toBe('fail');
+		expect(result.oracleVerdicts[0]?.verdict).toBe(VERDICT.fail);
 	});
 
 	it('passes input to production parseReceiptFromPhoto with correct mime type and tier', async () => {
@@ -302,7 +303,7 @@ describe('runReceiptCase — production parser integration', () => {
 			makeCase(photoPath, sidecarPath, 'rejected-date-pass'),
 			deps,
 		);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 		const parsed = result.actuals[0] as { rawExtractedDate?: string };
 		expect(parsed.rawExtractedDate).toBe('2025-08-01');
 	});
@@ -330,7 +331,7 @@ describe('runReceiptCase — production parser integration', () => {
 			makeCase(photoPath, sidecarPath, 'rejected-date-fail'),
 			deps,
 		);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/rawExtractedDate/i);
 	});
 
@@ -363,7 +364,7 @@ describe('runReceiptCase — production parser integration', () => {
 			),
 		);
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'dupes'), deps);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 	});
 
 	it('fails when parser collapses two duplicate items into one', async () => {
@@ -391,7 +392,7 @@ describe('runReceiptCase — production parser integration', () => {
 			),
 		);
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'collapse'), deps);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/missing.*PE GRANOLA/i);
 	});
 
@@ -432,7 +433,7 @@ describe('runReceiptCase — production parser integration', () => {
 			),
 		);
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'grocery-dupes'), deps);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 	});
 
 	// quantity/unitPrice on sidecar lines become additional multiset
@@ -460,7 +461,7 @@ describe('runReceiptCase — production parser integration', () => {
 			),
 		);
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'qty-pass'), deps);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 	});
 
 	// Subtotal/tax assertions when sidecar provides them.
@@ -494,7 +495,7 @@ describe('runReceiptCase — production parser integration', () => {
 			),
 		);
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'sub-fail'), deps);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/subtotal/i);
 	});
 
@@ -528,7 +529,7 @@ describe('runReceiptCase — production parser integration', () => {
 			),
 		);
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'tax-fail'), deps);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/tax/i);
 	});
 
@@ -561,7 +562,7 @@ describe('runReceiptCase — production parser integration', () => {
 			),
 		);
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'all-pass'), deps);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 	});
 
 	it('fails when parser collapses multiplier into quantity=1 unitPrice=totalPrice', async () => {
@@ -586,7 +587,7 @@ describe('runReceiptCase — production parser integration', () => {
 			),
 		);
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'qty-fail'), deps);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 		// Either the quantity multiset or the unitPrice multiset will surface the failure.
 		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/quantity|unitPrice/i);
 	});
@@ -660,13 +661,13 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'happy'),
 			deps,
 		);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 		const structuralEntry = result.oracleVerdicts.find((v) => v.label === 'structural');
 		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
 		expect(structuralEntry).toBeDefined();
-		expect(structuralEntry?.verdict).toBe('pass');
+		expect(structuralEntry?.verdict).toBe(VERDICT.pass);
 		expect(transcriptionEntry).toBeDefined();
-		expect(transcriptionEntry?.verdict).toBe('pass');
+		expect(transcriptionEntry?.verdict).toBe(VERDICT.pass);
 	});
 
 	it('2. FAIL when structural passes but transcription fails (drift resistance)', async () => {
@@ -708,11 +709,11 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'drift'),
 			deps,
 		);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 		const structuralEntry = result.oracleVerdicts.find((v) => v.label === 'structural');
 		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
-		expect(structuralEntry?.verdict).toBe('pass');
-		expect(transcriptionEntry?.verdict).toBe('fail');
+		expect(structuralEntry?.verdict).toBe(VERDICT.pass);
+		expect(transcriptionEntry?.verdict).toBe(VERDICT.fail);
 		expect(transcriptionEntry?.details ?? '').toMatch(/truffle|hallucinated/i);
 	});
 
@@ -753,11 +754,11 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'struct-fail'),
 			deps,
 		);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 		const structuralEntry = result.oracleVerdicts.find((v) => v.label === 'structural');
 		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
-		expect(structuralEntry?.verdict).toBe('fail');
-		expect(transcriptionEntry?.verdict).toBe('pass');
+		expect(structuralEntry?.verdict).toBe(VERDICT.fail);
+		expect(transcriptionEntry?.verdict).toBe(VERDICT.pass);
 		expect(structuralEntry?.details ?? '').toMatch(/milk/i);
 	});
 
@@ -798,11 +799,11 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'both-fail'),
 			deps,
 		);
-		expect(result.verdict).toBe('fail');
+		expect(result.verdict).toBe(VERDICT.fail);
 		const structuralEntry = result.oracleVerdicts.find((v) => v.label === 'structural');
 		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
-		expect(structuralEntry?.verdict).toBe('fail');
-		expect(transcriptionEntry?.verdict).toBe('fail');
+		expect(structuralEntry?.verdict).toBe(VERDICT.fail);
+		expect(transcriptionEntry?.verdict).toBe(VERDICT.fail);
 	});
 
 	it('5. skips transcription oracle when sidecar declares expectRejection:true', async () => {
@@ -868,10 +869,10 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 			makeCaseWithTranscription(photoPath, sidecarPath, missingPath, 'missing'),
 			deps,
 		);
-		expect(result.verdict).toBe('error');
+		expect(result.verdict).toBe(VERDICT.error);
 		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
 		expect(transcriptionEntry).toBeDefined();
-		expect(transcriptionEntry?.verdict).toBe('error');
+		expect(transcriptionEntry?.verdict).toBe(VERDICT.error);
 		expect(transcriptionEntry?.details ?? '').toMatch(/load failed|cannot stat|does-not-exist/i);
 	});
 
@@ -910,9 +911,9 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'sha-mismatch'),
 			deps,
 		);
-		expect(result.verdict).toBe('error');
+		expect(result.verdict).toBe(VERDICT.error);
 		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
-		expect(transcriptionEntry?.verdict).toBe('error');
+		expect(transcriptionEntry?.verdict).toBe(VERDICT.error);
 		expect(transcriptionEntry?.details ?? '').toMatch(/sha256/i);
 	});
 
@@ -947,7 +948,7 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'budget-once'),
 			deps,
 		);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 		// One parser call → one charge of the estimated $0.02 (see makeReceiptDeps).
 		expect(llmComplete).toHaveBeenCalledTimes(1);
 		expect(result.costUsd).toBeCloseTo(0.02, 4);
@@ -986,11 +987,11 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 			makeCaseWithTranscription(photoPath, sidecarPath, missingPath, 'err-prec'),
 			deps,
 		);
-		expect(result.verdict).toBe('error');
+		expect(result.verdict).toBe(VERDICT.error);
 		const structuralEntry = result.oracleVerdicts.find((v) => v.label === 'structural');
 		const transcriptionEntry = result.oracleVerdicts.find((v) => v.label === 'transcription');
-		expect(structuralEntry?.verdict).toBe('fail');
-		expect(transcriptionEntry?.verdict).toBe('error');
+		expect(structuralEntry?.verdict).toBe(VERDICT.fail);
+		expect(transcriptionEntry?.verdict).toBe(VERDICT.error);
 	});
 
 	it('10. omits transcription label entirely when payload.transcriptionFixture is undefined', async () => {
@@ -1019,7 +1020,7 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 			makeCaseWithTranscription(photoPath, sidecarPath, undefined, 'no-trx'),
 			deps,
 		);
-		expect(result.verdict).toBe('pass');
+		expect(result.verdict).toBe(VERDICT.pass);
 		const labels = result.oracleVerdicts.map((v) => v.label);
 		expect(labels).toContain('structural');
 		expect(labels).not.toContain('transcription');

@@ -6,6 +6,7 @@ import type { LLMService } from '@core/types/llm.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RecallAdapter } from '../runner/dispatch.js';
 import { runSuite } from '../runner/index.js';
+import { VERDICT } from '../shared/types.js';
 import { StubLLMService } from './_stub-provider.js';
 
 const noopLogger = {
@@ -116,7 +117,7 @@ describe('runSuite — cache lifecycle', () => {
 		const second = await runSuite(opts);
 		expect(opts.classifiers.foodShadow).toHaveBeenCalledTimes(1);
 		expect(second.results[0]!.source).toBe('cached');
-		expect(second.results[0]!.verdict).toBe('pass');
+		expect(second.results[0]!.verdict).toBe(VERDICT.pass);
 	});
 
 	it('rerun forces fresh dispatch even when cache is valid', async () => {
@@ -159,7 +160,7 @@ describe('runSuite — RunBudget hard-abort (REQ-REG-009)', () => {
 		const { results } = await runSuite(opts);
 		expect(adapter.foodShadow).toHaveBeenCalledTimes(1);
 		const verdictCounts = results.map((r) => r.verdict).sort();
-		expect(verdictCounts).toEqual(['budget-exceeded', 'budget-exceeded', 'pass']);
+		expect(verdictCounts).toEqual([VERDICT.budgetExceeded, VERDICT.budgetExceeded, VERDICT.pass]);
 	});
 
 	it('synthesizes one error oracleVerdict per input on budget-exceeded cases', async () => {
@@ -191,9 +192,9 @@ describe('runSuite — RunBudget hard-abort (REQ-REG-009)', () => {
 		});
 		const { results, targets } = await runSuite(opts);
 		const multi = results.find((r) => r.caseId === 'multi-id')!;
-		expect(multi.verdict).toBe('budget-exceeded');
+		expect(multi.verdict).toBe(VERDICT.budgetExceeded);
 		expect(multi.oracleVerdicts).toHaveLength(3);
-		expect(multi.oracleVerdicts.every((ov) => ov.verdict === 'error')).toBe(true);
+		expect(multi.oracleVerdicts.every((ov) => ov.verdict === VERDICT.error)).toBe(true);
 		expect(targets.get('multi-id')).toBe('food-shadow');
 	});
 });
@@ -491,7 +492,7 @@ describe('runSuite — recall bucket', () => {
 		});
 		expect(outcome.results).toHaveLength(1);
 		const r = outcome.results[0]!;
-		expect(r.verdict).toBe('pass');
+		expect(r.verdict).toBe(VERDICT.pass);
 		expect(r.source).toBe('fresh');
 		expect(recallCalls).toHaveLength(1);
 		expect(recallCalls[0]!.today).toBe('2026-05-11');
@@ -674,7 +675,7 @@ describe('runSuite — chatbot bucket', () => {
 			}),
 		);
 		expect(factory).toHaveBeenCalledTimes(1);
-		expect(outcome.results.map((r) => r.verdict)).toEqual(['pass', 'pass']);
+		expect(outcome.results.map((r) => r.verdict)).toEqual([VERDICT.pass, VERDICT.pass]);
 	});
 
 	it('disposes the env after the last chatbot case (try/finally)', async () => {
@@ -730,7 +731,7 @@ describe('runSuite — chatbot bucket', () => {
 		expect(factory).toHaveBeenCalledTimes(1); // not retried per case
 		expect(outcome.results).toHaveLength(2);
 		for (const r of outcome.results) {
-			expect(r.verdict).toBe('error');
+			expect(r.verdict).toBe(VERDICT.error);
 			expect(r.oracleVerdicts[0]!.details).toMatch(/compose runtime failed|env-factory/);
 		}
 	});

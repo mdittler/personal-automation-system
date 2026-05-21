@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type CostMeterSource, buildClassifierAdapters } from '../runner/dispatch.js';
 import { runSuite } from '../runner/index.js';
+import { VERDICT } from '../shared/types.js';
 import { StubLLMService } from './_stub-provider.js';
 
 const TYPES_PATH = join(process.cwd(), 'regression/src/shared/types.ts');
@@ -109,7 +110,7 @@ describe('orchestrator → adapters → FoodShadowClassifier integration', () =>
 		});
 
 		expect(outcome.results).toHaveLength(1);
-		expect(outcome.results[0]!.verdict).toBe('pass');
+		expect(outcome.results[0]!.verdict).toBe(VERDICT.pass);
 		expect(outcome.results[0]!.source).toBe('fresh');
 		expect(outcome.results[0]!.costUsd).toBeCloseTo(0.0001, 7);
 		expect(stubLLM.calls).toBe(1);
@@ -146,7 +147,7 @@ describe('orchestrator → adapters → FoodShadowClassifier integration', () =>
 		// the REQ-REG-011 gate counts it against accuracy.
 		// Batch 2 + simplify: empty-only retry policy — non-empty unparseable
 		// output (this case) does not retry, so exactly 1 LLM call.
-		expect(outcome.results[0]!.verdict).toBe('error');
+		expect(outcome.results[0]!.verdict).toBe(VERDICT.error);
 		expect(stubLLM.calls).toBe(1);
 	});
 
