@@ -173,6 +173,9 @@ function sanitizeCatalogField(s: string): string {
  */
 function formatCatalogLines(catalog: ReadonlyArray<CommandCatalogEntry>): string[] {
 	const lines: string[] = [];
+	// `total` tracks the joined-block length: each accepted line contributes
+	// `line.length + 1` (the `+ 1` is its joining newline). When the catalog
+	// fits without truncation `lines.join('\n').length === total - 1`.
 	let total = 0;
 	for (const entry of catalog) {
 		const description = sanitizeCatalogField(entry.description).slice(
@@ -188,7 +191,22 @@ function formatCatalogLines(catalog: ReadonlyArray<CommandCatalogEntry>): string
 		const adminPart = entry.adminOnly ? ' [admin]' : '';
 		const line = `- ${canonical}${argPart}${aliasPart}${adminPart} — ${description}`;
 		if (total + line.length + 1 > MAX_CATALOG_BLOCK_CHARS) {
-			lines.push(`- … (catalog truncated; ${catalog.length - lines.length} entries omitted)`);
+			// The truncation marker is itself part of the fenced block, so it
+			// must be counted against the cap — not appended past it. The marker
+			// text references the remaining catalog length (not the current
+			// `lines` length, which would shift as we pop overflowing lines).
+			let omitted = catalog.length - lines.length;
+			let marker = `- … (catalog truncated; ${omitted} entries omitted)`;
+			// `lines.join('\n').length === total - 1`; appending the marker adds
+			// one newline + the marker text, giving a block length of
+			// `total + marker.length`. Drop accepted lines until that fits.
+			while (lines.length > 0 && total + marker.length > MAX_CATALOG_BLOCK_CHARS) {
+				const dropped = lines.pop()!;
+				total -= dropped.length + 1;
+				omitted += 1;
+				marker = `- … (catalog truncated; ${omitted} entries omitted)`;
+			}
+			lines.push(marker);
 			break;
 		}
 		lines.push(line);
