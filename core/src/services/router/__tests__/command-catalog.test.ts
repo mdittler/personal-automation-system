@@ -218,4 +218,167 @@ describe('getEffectiveCommandCatalog', () => {
 		expect(recipes!.appId).toBe('food');
 		expect(recipes!.argSignature).toBe('<filter>');
 	});
+
+	// --- Layer A augmentations (W1 traceability backfill, Phase 2) ---
+	//
+	// The cases below pin the *completeness* contract — the catalog must
+	// include ALL AND ONLY the effective entries for a user — and the
+	// whitespace-description boundary that the original W1 batch left open.
+
+	describe('completeness — every reachable command is enumerated', () => {
+		it('enumerates every directly-handled + builtin + enabled-app command with no extras', async () => {
+			const fakeApp = {
+				manifest: {
+					app: { id: 'food' },
+					capabilities: {
+						messages: {
+							commands: [{ name: '/recipes', description: 'List recipes' }],
+						},
+					},
+				},
+			} as unknown as RegisteredApp;
+			const catalog = await getEffectiveCommandCatalog(
+				'admin1',
+				buildDeps({
+					isUserAdmin: () => true,
+					registry: { getAll: () => [fakeApp] },
+				}),
+			);
+			const names = catalog.map((c) => c.canonical).sort();
+			// All-and-only: directly-handled (4, admin included) + builtins (9 canonicals) + app (1)
+			expect(names).toEqual(
+				[
+					// directly-handled
+					'/help',
+					'/start',
+					'/space',
+					'/invite',
+					// service-gated builtins (canonicals only — aliases grouped, not separate entries)
+					'/ask',
+					'/edit',
+					'/notes',
+					'/newchat',
+					'/title',
+					'/recall',
+					'/refreshmemory',
+					'/flushmemory',
+					'/settings',
+					// enabled app
+					'/recipes',
+				].sort(),
+			);
+			// No alias token leaks in as its own entry.
+			expect(names).not.toContain('/reset');
+			expect(names).not.toContain('/refresh-memory');
+			expect(names).not.toContain('/flush-memory');
+		});
+
+		it('omits every conversation builtin AND keeps directly-handled when conversation service is unwired', async () => {
+			const catalog = await getEffectiveCommandCatalog(
+				'user1',
+				buildDeps({ conversationServiceWired: false }),
+			);
+			const names = catalog.map((c) => c.canonical);
+			for (const builtin of [
+				'/ask',
+				'/edit',
+				'/notes',
+				'/newchat',
+				'/title',
+				'/recall',
+				'/refreshmemory',
+				'/flushmemory',
+				'/settings',
+			]) {
+				expect(names).not.toContain(builtin);
+			}
+			// directly-handled commands survive
+			expect(names).toEqual(expect.arrayContaining(['/help', '/start', '/space']));
+		});
+
+		it('omits all three service-gated command families when no service is wired', async () => {
+			const catalog = await getEffectiveCommandCatalog(
+				'admin1',
+				buildDeps({
+					isUserAdmin: () => true,
+					conversationServiceWired: false,
+					spaceServiceWired: false,
+					inviteServiceWired: false,
+				}),
+			);
+			const names = catalog.map((c) => c.canonical);
+			// /space (space-gated) and /invite (invite-gated) omitted; conversation builtins omitted
+			expect(names).not.toContain('/space');
+			expect(names).not.toContain('/invite');
+			expect(names).not.toContain('/ask');
+			// /help and /start are always-available
+			expect(names).toEqual(expect.arrayContaining(['/help', '/start']));
+		});
+	});
+
+	describe('whitespace-only description fallback', () => {
+		// command-catalog.ts:215 uses `cmd.description || cmd.name`, which only
+		// catches falsy values. A whitespace-only description ("   ") is truthy,
+		// so it survives and later renders a dangling "- /cmd — " line in the
+		// system prompt. The catalog must fall back to the canonical command
+		// name when the description is empty or whitespace-only.
+		it('falls back to the command name when an app description is whitespace-only', async () => {
+			const fakeApp = {
+				manifest: {
+					app: { id: 'food' },
+					capabilities: {
+						messages: {
+							commands: [{ name: '/blank', description: '   ' }],
+						},
+					},
+				},
+			} as unknown as RegisteredApp;
+			const catalog = await getEffectiveCommandCatalog(
+				'user1',
+				buildDeps({ registry: { getAll: () => [fakeApp] } }),
+			);
+			const blank = catalog.find((c) => c.canonical === '/blank');
+			expect(blank).toBeDefined();
+			// Must NOT be a whitespace-only string — it should fall back to the name.
+			expect(blank!.description.trim()).not.toBe('');
+			expect(blank!.description).toBe('/blank');
+		});
+
+		it('falls back to the command name when an app description is an empty string', async () => {
+			const fakeApp = {
+				manifest: {
+					app: { id: 'food' },
+					capabilities: {
+						messages: {
+							commands: [{ name: '/empty', description: '' }],
+						},
+					},
+				},
+			} as unknown as RegisteredApp;
+			const catalog = await getEffectiveCommandCatalog(
+				'user1',
+				buildDeps({ registry: { getAll: () => [fakeApp] } }),
+			);
+			const empty = catalog.find((c) => c.canonical === '/empty');
+			expect(empty!.description).toBe('/empty');
+		});
+
+		it('preserves a genuine app description untouched', async () => {
+			const fakeApp = {
+				manifest: {
+					app: { id: 'food' },
+					capabilities: {
+						messages: {
+							commands: [{ name: '/recipes', description: 'List recipes' }],
+						},
+					},
+				},
+			} as unknown as RegisteredApp;
+			const catalog = await getEffectiveCommandCatalog(
+				'user1',
+				buildDeps({ registry: { getAll: () => [fakeApp] } }),
+			);
+			expect(catalog.find((c) => c.canonical === '/recipes')!.description).toBe('List recipes');
+		});
+	});
 });

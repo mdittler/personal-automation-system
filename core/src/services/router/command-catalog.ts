@@ -209,10 +209,16 @@ export async function getEffectiveCommandCatalog(
 		if (!enabled) continue;
 		const cmds = app.manifest.capabilities?.messages?.commands ?? [];
 		for (const cmd of cmds) {
+			// `cmd.description` may be a whitespace-only string (truthy, so a plain
+			// `||` would let it through and later render a dangling `- /cmd — `
+			// line in the system prompt). Fall back to the canonical command name
+			// unless the description has at least one non-whitespace character.
+			const hasDescription =
+				typeof cmd.description === 'string' && cmd.description.trim().length > 0;
 			out.push({
 				canonical: cmd.name,
 				aliases: [],
-				description: cmd.description || cmd.name,
+				description: hasDescription ? cmd.description : cmd.name,
 				adminOnly: false,
 				source: 'app',
 				appId,
