@@ -288,19 +288,19 @@ describe('buildAppAwareSystemPrompt — sandboxed command catalog (Layer B)', ()
 	});
 });
 
-describe('buildAppAwareSystemPrompt — real filtered catalog (Layer C integration)', () => {
-	function catalogDeps(overrides: Partial<CommandCatalogDeps> = {}): CommandCatalogDeps {
-		return {
-			registry: { getAll: () => [] },
-			isUserAdmin: () => false,
-			isAppEnabledForUser: () => true,
-			conversationServiceWired: true,
-			spaceServiceWired: true,
-			inviteServiceWired: true,
-			...overrides,
-		};
-	}
+function catalogDeps(overrides: Partial<CommandCatalogDeps> = {}): CommandCatalogDeps {
+	return {
+		registry: { getAll: () => [] },
+		isUserAdmin: () => false,
+		isAppEnabledForUser: () => true,
+		conversationServiceWired: true,
+		spaceServiceWired: true,
+		inviteServiceWired: true,
+		...overrides,
+	};
+}
 
+describe('buildAppAwareSystemPrompt — real filtered catalog (Layer C integration)', () => {
 	it('a service-gated command absent from the real catalog is absent from the rendered prompt', async () => {
 		// Conversation service unwired — getEffectiveCommandCatalog must drop
 		// every conversation builtin (/ask, /recall, ...). Feeding that REAL
@@ -372,14 +372,7 @@ describe('command catalog availability checklist — non-technical phrasings (co
 			logger: services.logger,
 			systemInfo: services.systemInfo,
 			getCommandCatalog: (userId: string) =>
-				getEffectiveCommandCatalog(userId, {
-					registry: { getAll: () => [] },
-					isUserAdmin: () => true,
-					isAppEnabledForUser: () => true,
-					conversationServiceWired: true,
-					spaceServiceWired: true,
-					inviteServiceWired: true,
-				}),
+				getEffectiveCommandCatalog(userId, catalogDeps({ isUserAdmin: () => true })),
 		};
 		return fencedBlock(await runPrompt(deps, { userId: 'admin1' }));
 	}
