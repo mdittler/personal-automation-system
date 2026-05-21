@@ -355,41 +355,52 @@ describe('buildAppAwareSystemPrompt — real filtered catalog (Layer C integrati
 });
 
 describe('command catalog availability checklist — non-technical phrasings (completeness, not NL routing)', () => {
-	// Each row pairs a real non-technical user phrasing with the slash command
+	// Each case pairs a real non-technical user phrasing with the slash command
 	// that phrasing implies. The assertion is purely about CATALOG AVAILABILITY:
 	// the command must be present in the assembled <reference-data> block so the
 	// model has it to work with. It is NOT a claim that the prompt performs
 	// natural-language intent matching — buildAppAwareSystemPrompt renders the
-	// whole catalog unconditionally, and NL routing is a separate layer.
-	const checklist: Array<{ phrasing: string; needs: string }> = [
-		{ phrasing: 'how do I start over', needs: '/newchat' },
-		{ phrasing: 'can I see my old chats', needs: '/recall' },
-		{ phrasing: 'what can you do', needs: '/help' },
-		{ phrasing: 'how do I change a setting', needs: '/settings' },
-		{ phrasing: 'I want to add someone to my household', needs: '/invite' },
-	];
+	// whole catalog unconditionally, and NL routing is a separate layer. Cases
+	// are explicit `it` calls (not `it.each`) so the test names stay clean and
+	// stable for URS traceability.
 
-	it.each(checklist)(
-		'phrasing "$phrasing" -> $needs is present in the assembled catalog block',
-		async ({ needs }) => {
-			const services = createMockCoreServices();
-			vi.mocked(services.systemInfo!.isUserAdmin).mockReturnValue(true);
-			const deps: PromptBuilderDeps = {
-				llm: services.llm,
-				logger: services.logger,
-				systemInfo: services.systemInfo,
-				getCommandCatalog: (userId: string) =>
-					getEffectiveCommandCatalog(userId, {
-						registry: { getAll: () => [] },
-						isUserAdmin: () => true,
-						isAppEnabledForUser: () => true,
-						conversationServiceWired: true,
-						spaceServiceWired: true,
-						inviteServiceWired: true,
-					}),
-			};
-			const block = fencedBlock(await runPrompt(deps, { userId: 'admin1' }));
-			expect(block).toContain(needs);
-		},
-	);
+	async function assembledCatalogBlock(): Promise<string> {
+		const services = createMockCoreServices();
+		vi.mocked(services.systemInfo!.isUserAdmin).mockReturnValue(true);
+		const deps: PromptBuilderDeps = {
+			llm: services.llm,
+			logger: services.logger,
+			systemInfo: services.systemInfo,
+			getCommandCatalog: (userId: string) =>
+				getEffectiveCommandCatalog(userId, {
+					registry: { getAll: () => [] },
+					isUserAdmin: () => true,
+					isAppEnabledForUser: () => true,
+					conversationServiceWired: true,
+					spaceServiceWired: true,
+					inviteServiceWired: true,
+				}),
+		};
+		return fencedBlock(await runPrompt(deps, { userId: 'admin1' }));
+	}
+
+	it('phrasing "how do I start over" — /newchat is present in the assembled catalog block', async () => {
+		expect(await assembledCatalogBlock()).toContain('/newchat');
+	});
+
+	it('phrasing "can I see my old chats" — /recall is present in the assembled catalog block', async () => {
+		expect(await assembledCatalogBlock()).toContain('/recall');
+	});
+
+	it('phrasing "what can you do" — /help is present in the assembled catalog block', async () => {
+		expect(await assembledCatalogBlock()).toContain('/help');
+	});
+
+	it('phrasing "how do I change a setting" — /settings is present in the assembled catalog block', async () => {
+		expect(await assembledCatalogBlock()).toContain('/settings');
+	});
+
+	it('phrasing "I want to add someone to my household" — /invite is present in the assembled catalog block', async () => {
+		expect(await assembledCatalogBlock()).toContain('/invite');
+	});
 });
