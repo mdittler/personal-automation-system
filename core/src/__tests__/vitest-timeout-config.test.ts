@@ -1,23 +1,11 @@
 /**
  * Regression guard for the `composeRuntime` integration-test timeout flake.
  *
- * Root cause (confirmed 2026-05-21): integration tests that build a full
- * runtime via `composeRuntime()` rely on Vitest's *default* 5000ms test
- * timeout. `composeRuntime()` alone takes ~250ms–1.6s, and under full-suite
- * CPU contention (534 test files in parallel) a `composeRuntime`-backed test
- * — e.g. `message-rate-tracker-wiring.integration.test.ts` — intermittently
- * exceeds 5000ms and fails with `Test timed out in 5000ms`. It passes in
- * isolation and on rerun because the contention is gone. This is the
- * "rare intermittent full-suite flake" the open-items entry tracks.
- *
- * The fix raises the global `testTimeout`/`hookTimeout` in
- * `core/vitest.config.ts` so the default 5000ms can never silently apply.
- * A generous timeout does not slow passing tests down — it only changes when
- * a genuinely hung test is killed — so this is safe for the fast unit tests
- * too.
- *
- * This guard fails deterministically if either knob is missing or set below
- * the safe threshold, so the flake's root cause cannot silently regress.
+ * `composeRuntime()` takes ~250ms–1.6s; under full-suite CPU contention a
+ * `composeRuntime`-backed test can exceed Vitest's default 5000ms timeout and
+ * fail intermittently. `core/vitest.config.ts` raises `testTimeout`/
+ * `hookTimeout` to prevent that; this guard fails if either knob is missing or
+ * below the safe threshold, so that root cause cannot silently regress.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -25,10 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 /**
- * Minimum safe timeout. `composeRuntime` integration tests observed up to
- * ~1.6s for the build alone in stress runs; the 5000ms default leaves no
- * headroom under contention. 15000ms gives a comfortable margin while still
- * catching a genuinely hung test.
+ * Timeout floor: comfortably above the observed ~1.6s `composeRuntime` build
+ * cost under contention, while still low enough to catch a genuine hang.
  */
 const MIN_SAFE_TIMEOUT_MS = 15_000;
 
@@ -54,7 +40,7 @@ describe('core/vitest.config.ts timeout configuration', () => {
 		expect(testTimeout as number).toBeGreaterThanOrEqual(MIN_SAFE_TIMEOUT_MS);
 	});
 
-	it('declares a hookTimeout at or above the safe threshold so composeRuntime in beforeAll/beforeEach cannot time out', async () => {
+	it('declares a hookTimeout at or above the safe threshold for composeRuntime in beforeAll/beforeEach', async () => {
 		const source = await readFile(CONFIG_PATH, 'utf-8');
 		const hookTimeout = extractNumericOption(source, 'hookTimeout');
 
