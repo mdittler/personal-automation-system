@@ -49,12 +49,21 @@ interface MonthlyCostData {
 /** Minimum interval between YAML persistence writes (ms). */
 const PERSIST_DEBOUNCE_MS = 10_000;
 
+/** Coerce an untrusted provider-supplied token count to a finite, non-negative integer. */
+function safeTokenCount(n: unknown): number {
+	return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+}
+
 export class CostTracker {
 	private readonly usageFilePath: string;
 	private readonly monthlyCostPath: string;
 	private readonly logger: Logger;
 	/** Write queue to serialize file operations and prevent race conditions. */
 	private writeQueue: Promise<void> = Promise.resolve();
+
+	// Process-local token usage counter (not persisted, not restored on restart)
+	private tokenUsageInput = 0;
+	private tokenUsageOutput = 0;
 
 	// Monthly cost cache
 	private monthlyCosts = new Map<string, number>();
@@ -359,15 +368,28 @@ export class CostTracker {
 	}
 
 	/**
+	 * Process-local running token totals seen by this CostTracker instance.
+	 *
+	 * NOT a monthly figure: unlike `getMonthlyTotalCost()` this is never
+	 * persisted to `monthly-costs.yaml`, never restored on restart, and never
+	 * reset on month rollover. It exists so the regression harness can meter
+	 * per-call token usage as a before/after delta. Only deltas are meaningful;
+	 * the absolute value is process-lifetime arbitrary. Returns a fresh object.
+	 */
+	getTokenUsageTotals(): { input: number; output: number } {
+		return { input: this.tokenUsageInput, output: this.tokenUsageOutput };
+	}
+
+	/**
 	 * Record an LLM API usage entry.
 	 */
 	async record(entry: Omit<UsageEntry, 'timestamp' | 'estimatedCost'>): Promise<void> {
-		const estimatedCost = this.estimateCost(
-			entry.model,
-			entry.inputTokens,
-			entry.outputTokens,
-			entry.providerType,
-		);
+		// Sanitize provider-supplied token counts at the boundary so malformed values
+		// cannot poison the cost estimate, the log row, or the token usage counter.
+		const inTok = safeTokenCount(entry.inputTokens);
+		const outTok = safeTokenCount(entry.outputTokens);
+
+		const estimatedCost = this.estimateCost(entry.model, inTok, outTok, entry.providerType);
 
 		if (entry.model && !hasPricing(entry.model, entry.providerType)) {
 			this.logger.warn(
@@ -385,11 +407,17 @@ export class CostTracker {
 			timestamp: toISO(),
 			estimatedCost,
 			...entry,
+			inputTokens: inTok,
+			outputTokens: outTok,
 			householdId: effectiveHouseholdId, // override to strip __platform__
 		};
 
-		// Update in-memory monthly cost cache
+		// Update in-memory monthly cost cache and process-local token counter.
+		// Both happen synchronously, before the first await, so a before/after
+		// delta on getTokenUsageTotals() is consistent with getMonthlyTotalCost().
 		this.updateMonthlyCache(entry.appId, estimatedCost, entry.userId, effectiveHouseholdId);
+		this.tokenUsageInput += inTok;
+		this.tokenUsageOutput += outTok;
 
 		try {
 			await this.appendEntry(usageEntry);
@@ -397,8 +425,8 @@ export class CostTracker {
 				{
 					provider: entry.provider,
 					model: entry.model,
-					inputTokens: entry.inputTokens,
-					outputTokens: entry.outputTokens,
+					inputTokens: inTok,
+					outputTokens: outTok,
 					estimatedCost,
 				},
 				'LLM API usage recorded',
