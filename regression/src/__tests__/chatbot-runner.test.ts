@@ -522,6 +522,9 @@ describe('token propagation', () => {
 		expect(r.verdict).toBe(VERDICT.error);
 		// Token spend from routeMessage is still captured.
 		expect(r.tokenCounts).toEqual({ input: 60, output: 12 });
+		// The throw is attributed to the oracle stage, not mislabelled as routeMessage.
+		const errVerdict = r.oracleVerdicts.find((v) => v.verdict === VERDICT.error);
+		expect(errVerdict?.details).toContain('runRubricOracle threw');
 
 		vi.restoreAllMocks();
 	});

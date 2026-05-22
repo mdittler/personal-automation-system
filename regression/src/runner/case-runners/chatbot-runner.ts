@@ -109,6 +109,8 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 		// where a throw occurs. Set true after the success-path push so the
 		// error-path fallback push is skipped when it already ran.
 		let routed = false;
+		// Which step a throw came from, so the error verdict names it accurately.
+		let stage: 'route' | 'oracle' = 'route';
 		let oracle: Awaited<ReturnType<typeof runRubricOracle>> | undefined;
 		try {
 			await deps.env.routeMessage({
@@ -145,6 +147,7 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 				verdict = VERDICT.error;
 			}
 
+			stage = 'oracle';
 			oracle = await runRubricOracle({
 				rubric: c.rubric,
 				actualResponse: newMessages,
@@ -170,7 +173,7 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 		if (routeErr !== undefined) {
 			oracleVerdicts.push({
 				verdict: VERDICT.error,
-				details: `routeMessage threw: ${(routeErr as Error).message}`,
+				details: `${stage === 'oracle' ? 'runRubricOracle' : 'routeMessage'} threw: ${(routeErr as Error).message}`,
 			});
 			verdict = VERDICT.error;
 			// Only push the fallback empty string when the success-path push
