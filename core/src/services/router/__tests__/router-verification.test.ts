@@ -798,6 +798,275 @@ describe('Router — verifier selects chatbot with conversationService wired (Ch
 	});
 });
 
+// ---------------------------------------------------------------------------
+// Task 3.3 — alwaysVerifyIntents: force verifier above the upper bound for
+// specifically-configured ambiguous intents. The grey-zone gate normally
+// short-circuits when confidence >= verificationUpperBound; this list bypasses
+// that short-circuit so the verifier still gets a say. Asymmetry guard
+// (Codex flag): the photo gate must consult the matched photoType field, NOT
+// the text-only `intent` field — different match shapes.
+// ---------------------------------------------------------------------------
+
+describe('alwaysVerifyIntents — force verify above the upper bound', () => {
+	let echoModule: AppModule;
+
+	beforeEach(() => {
+		echoModule = createMockModule();
+	});
+
+	// (a) Text path: high-confidence + intent IS in the always-verify list →
+	// verifier MUST be called even though confidence is above upper bound.
+	it('text path: high-confidence intent in alwaysVerifyIntents → verifier IS called', async () => {
+		const highConfLlm = createMockLLM({ category: 'echo', confidence: 0.85 });
+		const verifier = createMockVerifier({
+			action: 'route',
+			appId: 'echo',
+			intent: 'echo',
+			confidence: 0.85,
+			verifierStatus: 'agreed',
+		});
+
+		const config = createMockConfig([testUser]);
+		const cache = new ManifestCache();
+		cache.add(echoManifest, '/apps/echo');
+		const apps = [{ manifest: echoManifest, module: echoModule }];
+		const registry = {
+			getApp: (id: string) => {
+				const app = apps.find((a) => a.manifest.app.id === id);
+				if (!app) return undefined;
+				return {
+					manifest: app.manifest,
+					module: app.module,
+					appDir: `/apps/${id}`,
+				} as RegisteredApp;
+			},
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
+		} as unknown as AppRegistry;
+
+		const router = new Router({
+			registry,
+			llm: highConfLlm,
+			telegram: createMockTelegram(),
+			fallback: createMockFallback(),
+			config,
+			logger: createMockLogger(),
+			confidenceThreshold: 0.4,
+			routeVerifier: verifier,
+			alwaysVerifyIntents: ['echo'],
+		});
+		router.buildRoutingTables();
+
+		await router.routeMessage(createTextCtx('echo this clearly'));
+
+		expect(verifier.verify).toHaveBeenCalledOnce();
+		expect(echoModule.handleMessage).toHaveBeenCalledOnce();
+	});
+
+	// (b) Text path: high-confidence + intent NOT in list → verifier NOT called.
+	// Regression guard so the always-verify path doesn't accidentally widen to
+	// every high-confidence intent.
+	it('text path: high-confidence intent NOT in alwaysVerifyIntents → verifier NOT called', async () => {
+		const highConfLlm = createMockLLM({ category: 'echo', confidence: 0.85 });
+		const verifier = createMockVerifier({ action: 'held' }); // should never be called
+
+		const config = createMockConfig([testUser]);
+		const cache = new ManifestCache();
+		cache.add(echoManifest, '/apps/echo');
+		const apps = [{ manifest: echoManifest, module: echoModule }];
+		const registry = {
+			getApp: (id: string) => {
+				const app = apps.find((a) => a.manifest.app.id === id);
+				if (!app) return undefined;
+				return {
+					manifest: app.manifest,
+					module: app.module,
+					appDir: `/apps/${id}`,
+				} as RegisteredApp;
+			},
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
+		} as unknown as AppRegistry;
+
+		const router = new Router({
+			registry,
+			llm: highConfLlm,
+			telegram: createMockTelegram(),
+			fallback: createMockFallback(),
+			config,
+			logger: createMockLogger(),
+			confidenceThreshold: 0.4,
+			routeVerifier: verifier,
+			alwaysVerifyIntents: ['some.other.intent'],
+		});
+		router.buildRoutingTables();
+
+		await router.routeMessage(createTextCtx('echo this clearly'));
+
+		expect(verifier.verify).not.toHaveBeenCalled();
+		expect(echoModule.handleMessage).toHaveBeenCalledOnce();
+	});
+
+	// (c) Text path: verifier disagrees → secondary target is honored.
+	// Proves post-routing handoff still works (pas-testing-standards rule #2).
+	it('text path: always-verify + verifier picks chatbot → ConversationService dispatches, NOT original app', async () => {
+		const highConfLlm = createMockLLM({ category: 'echo', confidence: 0.85 });
+		// Verifier overrides to chatbot
+		const verifier = createMockVerifier({
+			action: 'route',
+			appId: 'chatbot',
+			intent: 'chatbot',
+			confidence: 0.85,
+			verifierStatus: 'degraded',
+		});
+
+		const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
+		const config = createMockConfig([testUser]);
+		const cache = new ManifestCache();
+		cache.add(echoManifest, '/apps/echo');
+		const apps = [{ manifest: echoManifest, module: echoModule }];
+		const registry = {
+			getApp: (id: string) => {
+				const app = apps.find((a) => a.manifest.app.id === id);
+				if (!app) return undefined;
+				return {
+					manifest: app.manifest,
+					module: app.module,
+					appDir: `/apps/${id}`,
+				} as RegisteredApp;
+			},
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
+		} as unknown as AppRegistry;
+
+		const router = new Router({
+			registry,
+			llm: highConfLlm,
+			telegram: createMockTelegram(),
+			fallback: createMockFallback(),
+			config,
+			logger: createMockLogger(),
+			confidenceThreshold: 0.4,
+			routeVerifier: verifier,
+			alwaysVerifyIntents: ['echo'],
+			conversationService: conversationService as any,
+		});
+		router.buildRoutingTables();
+
+		await router.routeMessage(createTextCtx('echo this clearly'));
+
+		expect(verifier.verify).toHaveBeenCalledOnce();
+		expect(conversationService.handleMessage).toHaveBeenCalledOnce();
+		expect(echoModule.handleMessage).not.toHaveBeenCalled();
+	});
+
+	// (d) Photo path: high-confidence + photoType IS in list → verifier called.
+	// Proves the photo gate reads `match.photoType`, NOT `match.intent` (the
+	// photo classification result has no `intent` field at all).
+	it('photo path: high-confidence photoType in alwaysVerifyIntents → verifier IS called', async () => {
+		const groceryModule = createMockModule();
+		const photoModule2 = createMockModule();
+		const highConfLlm = createMockLLM({ category: 'receipt', confidence: 0.9 });
+		const verifier = createMockVerifier({
+			action: 'route',
+			appId: 'grocery',
+			intent: 'receipt',
+			confidence: 0.9,
+			verifierStatus: 'agreed',
+		});
+
+		const config = createMockConfig([testUser]);
+		const cache = new ManifestCache();
+		cache.add(groceryManifest, '/apps/grocery');
+		cache.add(photoManifest2, '/apps/photos');
+		const apps = [
+			{ manifest: groceryManifest, module: groceryModule },
+			{ manifest: photoManifest2, module: photoModule2 },
+		];
+		const registry = {
+			getApp: (id: string) => {
+				const app = apps.find((a) => a.manifest.app.id === id);
+				if (!app) return undefined;
+				return {
+					manifest: app.manifest,
+					module: app.module,
+					appDir: `/apps/${id}`,
+				} as RegisteredApp;
+			},
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
+		} as unknown as AppRegistry;
+
+		const router = new Router({
+			registry,
+			llm: highConfLlm,
+			telegram: createMockTelegram(),
+			fallback: createMockFallback(),
+			config,
+			logger: createMockLogger(),
+			confidenceThreshold: 0.4,
+			routeVerifier: verifier,
+			alwaysVerifyIntents: ['receipt'],
+		});
+		router.buildRoutingTables();
+
+		await router.routePhoto(createPhotoCtx('grocery receipt here'));
+
+		expect(verifier.verify).toHaveBeenCalledOnce();
+		expect(groceryModule.handlePhoto).toHaveBeenCalledOnce();
+	});
+
+	// (e) Photo path: high-confidence + photoType NOT in list → verifier NOT
+	// called. Mirror of (b). Also makes sure the photo gate isn't accidentally
+	// consulting the (non-existent) `intent` field of the photo match.
+	it('photo path: high-confidence photoType NOT in alwaysVerifyIntents → verifier NOT called', async () => {
+		const groceryModule = createMockModule();
+		const photoModule2 = createMockModule();
+		const highConfLlm = createMockLLM({ category: 'receipt', confidence: 0.9 });
+		const verifier = createMockVerifier({ action: 'held' }); // should never be called
+
+		const config = createMockConfig([testUser]);
+		const cache = new ManifestCache();
+		cache.add(groceryManifest, '/apps/grocery');
+		cache.add(photoManifest2, '/apps/photos');
+		const apps = [
+			{ manifest: groceryManifest, module: groceryModule },
+			{ manifest: photoManifest2, module: photoModule2 },
+		];
+		const registry = {
+			getApp: (id: string) => {
+				const app = apps.find((a) => a.manifest.app.id === id);
+				if (!app) return undefined;
+				return {
+					manifest: app.manifest,
+					module: app.module,
+					appDir: `/apps/${id}`,
+				} as RegisteredApp;
+			},
+			getManifestCache: () => cache,
+			getLoadedAppIds: () => apps.map((a) => a.manifest.app.id),
+		} as unknown as AppRegistry;
+
+		const router = new Router({
+			registry,
+			llm: highConfLlm,
+			telegram: createMockTelegram(),
+			fallback: createMockFallback(),
+			config,
+			logger: createMockLogger(),
+			confidenceThreshold: 0.4,
+			routeVerifier: verifier,
+			alwaysVerifyIntents: ['landscape'],
+		});
+		router.buildRoutingTables();
+
+		await router.routePhoto(createPhotoCtx('grocery receipt here'));
+
+		expect(verifier.verify).not.toHaveBeenCalled();
+		expect(groceryModule.handlePhoto).toHaveBeenCalledOnce();
+	});
+});
+
 describe('Router.dispatchConversation — public error isolation (rv:chatbot regression)', () => {
 	it('error in ConversationService.handleMessage is caught and produces a friendly reply', async () => {
 		const telegramMock = createMockTelegram();

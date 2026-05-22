@@ -344,6 +344,7 @@ export class Router {
 	private readonly userManager?: UserManager;
 	private readonly routeVerifier?: RouteVerifier;
 	private readonly verificationUpperBound: number;
+	private readonly alwaysVerifyIntents: readonly string[];
 	private readonly inviteService?: InviteService;
 	private readonly userMutationService?: UserMutationService;
 	private readonly interactionContext?: InteractionContextService;
@@ -375,6 +376,7 @@ export class Router {
 		this.userManager = options.userManager;
 		this.routeVerifier = options.routeVerifier;
 		this.verificationUpperBound = options.verificationUpperBound ?? 0.7;
+		this.alwaysVerifyIntents = options.alwaysVerifyIntents ?? [];
 		this.inviteService = options.inviteService;
 		this.userMutationService = options.userMutationService;
 		this.interactionContext = options.interactionContext;
@@ -419,6 +421,26 @@ export class Router {
 			},
 			'Routing tables built',
 		);
+	}
+
+	/**
+	 * Grey-zone verification gate predicate.
+	 *
+	 * Returns true when the classifier match should be sent through the
+	 * RouteVerifier. The normal grey-zone band is
+	 * `[confidenceThreshold, verificationUpperBound)`; the second clause
+	 * extends that band upward for specifically-configured ambiguous intents
+	 * (e.g. the Food hosting intent — Task 3.3) so a high-confidence misroute
+	 * still gets a second opinion.
+	 *
+	 * Shared by the text gate (which passes `match.intent`) and the photo
+	 * gate (which passes `match.photoType` — distinct field, same role) so
+	 * both gates read identically.
+	 */
+	private shouldVerifyIntent(name: string, confidence: number): boolean {
+		if (confidence < this.confidenceThreshold) return false;
+		if (confidence < this.verificationUpperBound) return true;
+		return this.alwaysVerifyIntents.includes(name);
 	}
 
 	/**
@@ -530,12 +552,10 @@ export class Router {
 				return;
 			}
 
-			// Grey-zone verification: if confidence is moderate and verifier is configured
-			if (
-				this.routeVerifier &&
-				match.confidence >= this.confidenceThreshold &&
-				match.confidence < this.verificationUpperBound
-			) {
+			// Grey-zone verification: if confidence is moderate and verifier is configured.
+			// shouldVerifyIntent also force-verifies when match.intent is listed in
+			// alwaysVerifyIntents, even above the upper bound (Task 3.3).
+			if (this.routeVerifier && this.shouldVerifyIntent(match.intent, match.confidence)) {
 				// Resolve effective app list (raw enabledApps + appToggle overrides)
 				const resolvedApps = await this.resolveEnabledApps(enrichedCtx.userId, user.enabledApps);
 				const result = await this.routeVerifier.verify(enrichedCtx, match, undefined, resolvedApps);
@@ -642,12 +662,11 @@ export class Router {
 				return;
 			}
 
-			// Grey-zone verification for photo messages
-			if (
-				this.routeVerifier &&
-				match.confidence >= this.confidenceThreshold &&
-				match.confidence < this.verificationUpperBound
-			) {
+			// Grey-zone verification for photo messages. Note the asymmetry: the
+			// photo match exposes `photoType` (not `intent`), so the alwaysVerify
+			// list is consulted against that field. Same predicate, different
+			// shape — see shouldVerifyIntent.
+			if (this.routeVerifier && this.shouldVerifyIntent(match.photoType, match.confidence)) {
 				// Resolve effective app list (raw enabledApps + appToggle overrides)
 				const resolvedApps = await this.resolveEnabledApps(enrichedCtx.userId, user.enabledApps);
 				const result = await this.routeVerifier.verify(
