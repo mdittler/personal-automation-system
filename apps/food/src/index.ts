@@ -247,6 +247,7 @@ import { addDays, todayDate } from './utils/date.js';
 import { escapeMarkdown } from './utils/escape-markdown.js';
 import { loadHousehold, requireHousehold } from './utils/household-guard.js';
 import { parseStrictInt } from './utils/parse-int-strict.js';
+import { sendProactiveMessage } from './utils/proactive-message.js';
 import { sanitizeInput } from './utils/sanitize.js';
 
 let services: CoreServices;
@@ -2170,24 +2171,14 @@ async function sendBatchPrepToMember(
 	batchButtons: Array<Array<{ text: string; callbackData: string }>>,
 	freezerFriendlyRecipes: string[],
 ): Promise<void> {
-	if (batchButtons.length > 0) {
-		const sent = await services.telegram.sendWithButtons(memberId, batchMsg, batchButtons);
+	const sent = await sendProactiveMessage(services, {
+		userId: memberId,
+		kind: 'batch-prep',
+		body: batchMsg,
+		buttons: batchButtons.length > 0 ? batchButtons : undefined,
+	});
+	if (sent) {
 		setBatchFreezeRecipes(sent.chatId, sent.messageId, freezerFriendlyRecipes);
-		await services.appOutboundBridge?.recordOutboundMessage({
-			userId: memberId,
-			appId: 'food',
-			kind: 'batch-prep',
-			body: batchMsg,
-			buttons: batchButtons,
-		});
-	} else {
-		await services.telegram.send(memberId, batchMsg);
-		await services.appOutboundBridge?.recordOutboundMessage({
-			userId: memberId,
-			appId: 'food',
-			kind: 'batch-prep',
-			body: batchMsg,
-		});
 	}
 }
 
@@ -3506,10 +3497,8 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 			lines.push('');
 		}
 		const body = lines.join('\n').trimEnd();
-		await services.telegram.send(userId, body);
-		await services.appOutboundBridge?.recordOutboundMessage({
+		await sendProactiveMessage(services, {
 			userId,
-			appId: 'food',
 			kind: 'weekly-health',
 			body,
 		});
@@ -3554,10 +3543,8 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 			const message = formatPlanMessage(plan, recipes, location);
 			const planButtons = buildPlanButtons(plan);
 			for (const memberId of household.members) {
-				await services.telegram.sendWithButtons(memberId, message, planButtons);
-				await services.appOutboundBridge?.recordOutboundMessage({
+				await sendProactiveMessage(services, {
 					userId: memberId,
-					appId: 'food',
 					kind: 'weekly-menu',
 					body: message,
 					buttons: planButtons,

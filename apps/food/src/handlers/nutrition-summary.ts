@@ -9,6 +9,7 @@ import { generateWeeklyDigest } from '../services/nutrition-reporter.js';
 import type { MacroTargets } from '../types.js';
 import { todayDate } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { sendProactiveMessage } from '../utils/proactive-message.js';
 
 const TARGETS_FILE = 'nutrition/targets.yaml';
 
@@ -85,10 +86,8 @@ export async function handleWeeklyNutritionSummaryJob(
 
 		const today = todayDate(services.timezone);
 		const summary = await generateWeeklyDigest(services, userStore, userId, targets, today);
-		await services.telegram.send(userId, summary);
-		await services.appOutboundBridge?.recordOutboundMessage({
+		await sendProactiveMessage(services, {
 			userId,
-			appId: 'food',
 			kind: 'weekly-nutrition',
 			body: summary,
 		});
