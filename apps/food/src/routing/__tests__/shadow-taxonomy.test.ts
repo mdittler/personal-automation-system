@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
+import { HOSTING_MEAL_PLANNING_INTENT } from '../food-intents.js';
 import {
 	FOOD_SHADOW_LABELS,
 	INTENTIONALLY_UNMAPPED_LABELS,
@@ -104,7 +105,7 @@ describe('REGEX_TO_MANIFEST_MAP', () => {
 			'user wants to understand how their diet is affecting their health or energy',
 		],
 		['cultural_calendar', 'user wants holiday or cultural recipe suggestions'],
-		['hosting', 'user wants to plan for hosting guests'],
+		['hosting', HOSTING_MEAL_PLANNING_INTENT],
 		['budget_view', 'user wants to see food spending'],
 		['store_spending', 'user wants to see food spending'],
 		['receipt_query', 'user wants to see receipt details or look up items from a receipt'],

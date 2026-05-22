@@ -14,7 +14,7 @@
  *   5.  "user wants to see how well they are hitting their macro targets over time"
  *   6.  "user wants to understand how their diet is affecting their health or energy"
  *   7.  "user wants holiday or cultural recipe suggestions"
- *   8.  "user wants to plan for hosting guests"
+ *   8.  HOSTING_MEAL_PLANNING_INTENT (see ../routing/food-intents.ts)
  *   9.  "user wants to see food spending"
  *
  * Removed from allowlist (overlap violations):
@@ -34,6 +34,7 @@ import type { RouteInfo, ScopedDataStore } from '@pas/core/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
 import { handleMessage, init } from '../index.js';
+import { HOSTING_MEAL_PLANNING_INTENT } from '../routing/food-intents.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import type { Household } from '../types.js';
 
@@ -366,10 +367,10 @@ describe('natural-language-route-dispatch persona tests', () => {
 		});
 
 		// -----------------------------------------------------------------
-		// Intent 8 (was 10): "user wants to plan for hosting guests"
+		// Intent 8 (was 10): HOSTING_MEAL_PLANNING_INTENT
 		// -----------------------------------------------------------------
 		describe('hosting guests (intent 8)', () => {
-			const INTENT = 'user wants to plan for hosting guests';
+			const INTENT = HOSTING_MEAL_PLANNING_INTENT;
 			const messages = [
 				"i'm having company", // original from route-dispatch.test.ts
 				'friends are coming over saturday',
@@ -593,7 +594,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 			const ctx1 = createTestMessageContext({
 				userId: 'matt',
 				text: "we're having family over for the holidays",
-				route: makeRoute('user wants to plan for hosting guests'),
+				route: makeRoute(HOSTING_MEAL_PLANNING_INTENT),
 			});
 			await handleMessage(ctx1);
 			assertHandlerFired(vi.mocked(services.telegram.send));
@@ -772,7 +773,7 @@ describe('natural-language-route-dispatch persona tests', () => {
 			const ctx = createTestMessageContext({
 				userId: 'nina',
 				text: 'friends are coming over saturday for dinner',
-				route: makeRoute('user wants to plan for hosting guests', { confidence: 0.91 }),
+				route: makeRoute(HOSTING_MEAL_PLANNING_INTENT, { confidence: 0.91 }),
 			});
 			await handleMessage(ctx);
 

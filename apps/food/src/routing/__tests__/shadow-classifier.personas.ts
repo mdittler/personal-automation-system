@@ -25,6 +25,7 @@
  *                             invented rather than drawn from existing test suites
  */
 
+import { HOSTING_MEAL_PLANNING_INTENT } from '../food-intents.js';
 import type { FoodShadowLabel } from '../shadow-taxonomy.js';
 
 export interface RejectEntry {
@@ -315,7 +316,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
 	},
 
 	{
-		label: 'user wants to plan for hosting guests',
+		label: HOSTING_MEAL_PLANNING_INTENT,
 		accept: [
 			'hosting a dinner party next Saturday',
 			"we're having 8 people over for dinner",
@@ -756,7 +757,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
 		advisoryNearMisses: [
 			{
 				text: "we're having 10 people over for Thanksgiving dinner",
-				correctLabel: 'user wants to plan for hosting guests',
+				correctLabel: HOSTING_MEAL_PLANNING_INTENT,
 				reason:
 					'isHostingIntent (line 636) may capture "people over" phrasing if isCulturalCalendarIntent (line 630) does not match the Thanksgiving keyword in this phrasing; outcome depends on LLM routing for this ambiguous combination',
 				source: 'apps/food/src/index.ts:636',

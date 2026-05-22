@@ -32,7 +32,7 @@ capabilities:
       - "user wants to start cooking a recipe"
       - "user wants to check or update the pantry"
       - "user wants to log leftovers"
-      - "user wants to plan for hosting guests"
+      - "user wants to plan a meal or menu for a dinner party or guests they are hosting"
       - "user wants to see food spending"
       - "user wants to see receipt details or look up items from a receipt"
       - "user asks about prices at a specific store"

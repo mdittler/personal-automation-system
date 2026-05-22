@@ -115,6 +115,7 @@ import {
 	sendVotingMessages,
 } from './handlers/voting.js';
 import { dispatchByRoute } from './routing/dispatch.js';
+import { HOSTING_MEAL_PLANNING_INTENT } from './routing/food-intents.js';
 import { FoodShadowClassifier } from './routing/shadow-classifier.js';
 import { dispatchShadow } from './routing/shadow-dispatch.js';
 import { finalizeShadow, initShadowDeps, startShadow } from './routing/shadow-integration.js';
@@ -375,7 +376,7 @@ const ROUTE_HANDLERS: Record<string, (ctx: MessageContext) => Promise<void>> = {
 		handleHealthCorrelation(services, ctx),
 	'user wants holiday or cultural recipe suggestions': (ctx) =>
 		handleCulturalCalendarMessage(services, ctx),
-	'user wants to plan for hosting guests': async (ctx) => {
+	[HOSTING_MEAL_PLANNING_INTENT]: async (ctx) => {
 		const hh = await requireHouseholdOrMessage(ctx);
 		if (!hh) return;
 		await handleHostingCmd(services, ['plan', ctx.text], ctx.userId, hh.sharedStore);
@@ -453,7 +454,7 @@ export const SHADOW_HANDLERS: Partial<
 		if (isWasteIntent(lower)) return handleWasteIntent(ctx.text, ctx);
 		return handleLeftoversView(ctx);
 	},
-	'user wants to plan for hosting guests': async (ctx) => {
+	[HOSTING_MEAL_PLANNING_INTENT]: async (ctx) => {
 		const hh = await requireHouseholdOrMessage(ctx);
 		if (!hh) return;
 		await handleHostingCmd(services, ['plan', ctx.text], ctx.userId, hh.sharedStore);

@@ -17,6 +17,7 @@ import {
 	__setTargetsFlowAwaitingCustomInputForTests,
 } from '../handlers/targets-flow.js';
 import { handleMessage, init } from '../index.js';
+import { HOSTING_MEAL_PLANNING_INTENT } from '../routing/food-intents.js';
 import {
 	type ShadowClassifierInterface,
 	type ShadowLoggerInterface,
@@ -289,7 +290,7 @@ describe('route-dispatch integration', () => {
 			const ctx = createTestMessageContext({
 				userId: 'user1',
 				text: "i'm having company",
-				route: makeRoute('user wants to plan for hosting guests'),
+				route: makeRoute(HOSTING_MEAL_PLANNING_INTENT),
 			});
 
 			await handleMessage(ctx);
