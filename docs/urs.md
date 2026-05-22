@@ -9964,17 +9964,20 @@ Every route on the `/gui/regression` surface (GET page, drilldown, row partial, 
 
 ### REQ-REG-013 — The GUI MUST display per-case model IDs, token counts, cost, and timestamp for each completed run
 
-**Phase:** Chunk B.2 | **Status:** Implemented (token counts as `—` — see open-items.md)
+**Phase:** Chunk B.2 | **Status:** Implemented
 
-The case list on `/gui/regression` renders status icon, fast/standard model IDs, formatted cost (4 decimal places), and ISO timestamp for each cached case. Per-case token counts are rendered as `—` (em-dash) with a documented footnote — `LLMService.complete()` currently returns only the response string, dropping the `usage` object even though providers expose it via `completeWithUsage`. Cost is authoritative via `CostTracker` delta. A carry-forward in `docs/open-items.md` tracks plumbing usage through the LLMService boundary.
+The case list on `/gui/regression` renders status icon, fast/standard model IDs, formatted cost (4 decimal places), ISO timestamp, and real per-case token counts for each cached case. Token counts are sourced from `CostTracker.getTokenUsageTotals()` via the regression harness's before/after delta (see REQ-REG-018); they are best-effort: a provider that reports no `usage` contributes 0, and an all-prefilter case shows `0` (distinct from `—` which means never-run). Cost remains authoritative via `CostTracker`. `LLMService.complete()` was not changed.
 
 **Standard tests:**
 - `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders the case list with tier model badges + status icons
 - `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders the per-bucket cost estimate in the Run button label (REQ-REG-017)
-- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders the token-counts footnote (REQ-REG-013 token gap is documented)
 - `regression-routes.test.ts` > GET /gui/regression — client wiring (Codex P1) > renders the regression-live script block so the page is end-to-end wired
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > renders full result + oracle verdicts when cache hit
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/row — server-rendered row (Codex I7) > renders a single row with escaped HTML
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > (Happy) compare table renders a Tokens column header
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > (Happy) compare row renders per-case token counts
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > (Happy) drilldown renders real input/output token counts when cache hit
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/row — server-rendered row (Codex I7) > (State) server-rendered row reflects live token counts when ?runId= matches
 
 **Edge case tests:**
 - `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders "never run" (●) for a case with no cache
@@ -9984,11 +9987,17 @@ The case list on `/gui/regression` renders status icon, fast/standard model IDs,
 - `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders an empty-state when bucket filter matches nothing
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > renders inputs + expected from ListedCase even when never run
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/row — server-rendered row (Codex I7) > reflects the live run result when ?runId= matches the in-progress run (Codex I7)
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > (Config) does not render the stale "not yet plumbed" token footnote
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > (Edge) drilldown renders — for token counts on a never-run case
+- `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > (Edge) drilldown renders 0 token counts distinctly from — for a ran case that used no tokens
 
 **Security tests:**
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > returns 404 for unknown caseId (allowlist defense)
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > returns 404 for traversal-shaped caseId (defense in depth)
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/row — server-rendered row (Codex I7) > escapes hostile content in cached actuals (XSS via SSE→row flow)
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > (Security) token counts render as a numeric string, not raw object interpolation
+
+**Fixes:** None
 
 ---
 
@@ -10042,7 +10051,7 @@ The drilldown's History tab lazy-loads `GET /gui/regression/cases/:caseId/histor
 
 **Phase:** Chunk B.2 | **Status:** Implemented
 
-`estimator.ts` provides `estimateRunCostUsd(cases, {ceilingUsd})` returning total + per-bucket subtotals using documented per-bucket constants (routing $0.005, receipt $0.06, chatbot $0.04, recall $0.01). The constants are approximations — the production cost calculator (`CostTracker.estimateCost`) requires loaded model pricing and a different deps stack. The binding safety limit remains `regression.maxRunBudgetUsd` (default 5.00 USD). Estimates appear in the Run button label ("est. ≈ $0.18 (cap $5.00)") and are also returned as JSON from `GET /gui/regression/estimate` for the confirm-dialog flow.
+`estimator.ts` provides `estimateRunCostUsd(cases, {ceilingUsd})` returning total + per-bucket subtotals using documented per-bucket constants (routing $0.005, receipt $0.06, chatbot $0.04, recall $0.01). The constants are approximations — the production cost calculator (`CostTracker.estimateCost`) requires loaded model pricing and a different deps stack. The binding safety limit remains `regression.maxRunBudgetUsd` (default 5.00 USD). Estimates appear in the Run button label ("est. ≈ $0.18 (cap $5.00)") and are also returned as JSON from `GET /gui/regression/estimate` for the confirm-dialog flow. As of 2026-05-22, `RunResult.tokenCounts` now carries real per-case token data (see REQ-REG-018), meaning the estimator constants can be recalibrated against observed tokens; they remain documented approximations pending that numeric recalibration, which is tracked as a follow-up in `docs/open-items.md`.
 
 **Standard tests:**
 - `estimator.test.ts` > estimateRunCostUsd > sums per-bucket constants for a routing-only set
@@ -10058,6 +10067,70 @@ The drilldown's History tab lazy-loads `GET /gui/regression/cases/:caseId/histor
 - `estimator.test.ts` > estimateRunCostUsd > passes through the ceiling unchanged for the GUI banner
 - `estimator.test.ts` > estimateRunCostUsd > rejects NaN ceiling (defensive)
 - `estimator.test.ts` > estimateRunCostUsd > rejects negative ceiling (defensive)
+
+---
+
+### REQ-REG-018: The regression harness MUST meter per-call token usage and propagate it into RunResult.tokenCounts
+
+**Phase:** Chunk B.2 | **Status:** Implemented
+
+`CostTracker.getTokenUsageTotals()` is a sanitized (`safeTokenCount`), process-local running token counter. The regression dispatch layer (`meterCall` in `regression/src/runner/dispatch.ts`, and `buildRecallAdapter`) reads the before/after delta to populate `CallMeter.tokenIn`/`tokenOut`. The four case-runners (routing, recall, chatbot, receipt) sum deltas into `RunResult.tokenCounts`. Metering is throw-resilient: `MeteredError` carries spend before an adapter throw, and the chatbot/receipt runners read the delta in `try/finally`, so token spend that occurred before an error is still counted. Deltas are clamped non-negative and coerced finite. The delta is only correct under sequential dispatch (the orchestrator enforces it). `LLMService.complete()` was not modified. A provider that reports no `usage`, and a prefiltered/short-circuited call, contribute 0.
+
+**Standard tests:**
+- `cost-tracker.test.ts` > CostTracker > token usage counter > getTokenUsageTotals is {input:0,output:0} on a fresh tracker
+- `cost-tracker.test.ts` > CostTracker > token usage counter > record() increments token totals by the entry inputTokens/outputTokens
+- `cost-tracker.test.ts` > CostTracker > token usage counter > token totals accumulate across multiple record() calls
+- `cost-tracker.test.ts` > CostTracker > token usage counter > getTokenUsageTotals returns a fresh object each call
+- `cost-tracker.test.ts` > CostTracker > token usage counter > record() with a zero-token entry leaves token totals unchanged and finite
+- `cost-tracker.test.ts` > CostTracker > token usage counter > concurrent record() calls sum token totals correctly
+- `cost-tracker.test.ts` > CostTracker > token usage counter > a freshly constructed CostTracker reports {0,0} after loadMonthlyCache()
+- `dispatch.test.ts` > foodShadow adapter — meter reflects the before/after token delta > tokenIn and tokenOut match the tracker before/after delta
+- `dispatch.test.ts` > pas adapter — LLM path populates meter token counts > non-prefilter input yields a non-zero meter
+- `dispatch.test.ts` > sessionControl adapter — NL path populates meter token counts > natural-language phrasing that hits the LLM yields a non-zero meter
+- `dispatch.test.ts` > recall adapter — LLM path populates meter token counts > prefilter bypassed; token delta {300,45} reflected in meter
+- `routing-runner.test.ts` > runRoutingCase — token propagation > sums meter token counts into RunResult.tokenCounts
+- `routing-runner.test.ts` > runRoutingCase — token propagation > multi-input routing case sums token counts across inputs
+- `routing-runner.test.ts` > runRoutingCase — token propagation > dispatches inputs sequentially so token deltas do not interleave
+- `recall-runner.test.ts` > runRecallCase — token propagation > propagates adapter meter token counts into RunResult.tokenCounts
+- `recall-runner.test.ts` > runRecallCase — token propagation > multi-input recall case sums token deltas
+- `recall-runner.test.ts` > runRecallCase — token propagation > observational input still contributes its token counts
+- `chatbot-runner.test.ts` > token propagation > tokenCounts comes from one delta spanning route + oracle (no double-count)
+- `chatbot-runner.test.ts` > token propagation > chatbot multi-turn case sums token counts across turns
+- `receipt-runner.test.ts` > runReceiptCase — token propagation > records token counts from the CostTracker delta around parseReceiptFromPhoto
+- `receipt-runner.test.ts` > runReceiptCase — token propagation > multi-input receipt case sums continuation-call token deltas
+- `rubric-oracle.test.ts` > runRubricOracle > runRubricOracle CallMeter reports the judge-call token delta
+- `build-deps.test.ts` > build-deps — receipt runner CostTracker wiring > production deps thread the same CostTracker instance into the receipt runner
+- `evaluated-tier.test.ts` > looksLikeRunResult — tokenCounts validation > accepts a RunResult with non-zero tokenCounts
+- `evaluated-tier.test.ts` > looksLikeRunResult — tokenCounts validation > round-trips non-zero tokenCounts through JSON.stringify -> parse -> looksLikeRunResult
+
+**Edge case tests:**
+- `cost-tracker.test.ts` > CostTracker > token usage counter > token totals update synchronously even when the log write fails
+- `cost-tracker.test.ts` > CostTracker > token usage counter > record() coerces NaN / Infinity / -Infinity / negative token counts to 0
+- `cost-tracker.test.ts` > CostTracker > token usage counter > record() with a NaN token count does not poison the cost estimate
+- `dispatch.test.ts` > sessionControl adapter — prefilter path yields ZERO_METER > /newchat short-circuits without an LLM call; tokenIn===tokenOut===0
+- `dispatch.test.ts` > pas adapter — DATA_QUERY_PREFILTER short-circuit yields tokenIn/tokenOut=0 > prefilter message; no LLM call; token delta naturally 0
+- `dispatch.test.ts` > recall adapter — prefilter skip yields tokenIn/tokenOut=0 > short greeting is skipped by recallPreFilter; ZERO_METER returned
+- `dispatch.test.ts` > meterCall — clamps negative token delta to 0 > tracker reports after < before; tokenIn and tokenOut are 0, never negative
+- `dispatch.test.ts` > meterCall — non-finite token delta is clamped to 0 > $label → tokenIn===0
+- `dispatch.test.ts` > meterCall — throws MeteredError carrying the partial meter when fn() throws > fn() throws after tracker advanced {50,10}; caught error is MeteredError with tokenIn===50
+- `dispatch.test.ts` > meterCall — MeteredError with zero meter when fn() throws before any LLM call > tracker did not advance; meter.tokenIn===0
+- `dispatch.test.ts` > meterCall — provider with no usage object contributes 0 tokens > tracker returns identical before/after; tokenIn===0 while costUsd may be non-zero
+- `routing-runner.test.ts` > runRoutingCase — token propagation > classifier error before any LLM call contributes 0 tokens for that input
+- `routing-runner.test.ts` > runRoutingCase — token propagation > classifier error after the tracker advanced still counts the spent tokens
+- `routing-runner.test.ts` > runRoutingCase — token propagation > all-prefilter routing case yields tokenCounts {0,0}
+- `routing-runner.test.ts` > runRoutingCase — token propagation > budget-exceeded abort excludes unmetered inputs
+- `recall-runner.test.ts` > runRecallCase — token propagation > recall classifier error after partial spend still counts the spent tokens
+- `chatbot-runner.test.ts` > token propagation > routeMessage throw before any LLM call contributes 0 tokens for that turn
+- `chatbot-runner.test.ts` > token propagation > routeMessage throw after tracker advanced still counts the spent tokens
+- `chatbot-runner.test.ts` > token propagation > budget-exceeded abort yields partial token counts for completed turns
+- `chatbot-runner.test.ts` > token propagation > oracle throw after routeMessage succeeds: exactly one actuals entry, token spend counted
+- `receipt-runner.test.ts` > runReceiptCase — token propagation > parser throw before any LLM call contributes 0 tokens
+- `receipt-runner.test.ts` > runReceiptCase — token propagation > parser throw after the tracker advanced still counts the spent tokens
+- `receipt-runner.test.ts` > runReceiptCase — token propagation > budget-exceeded abort before dispatch contributes 0 tokens
+- `rubric-oracle.test.ts` > runRubricOracle > runRubricOracle on a judge throw still reports a finite token meter
+- `evaluated-tier.test.ts` > looksLikeRunResult — tokenCounts validation > rejects tokenCounts with %s
+
+**Fixes:** None
 
 ---
 
@@ -11707,11 +11780,12 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-012 | chatbot-environment.test.ts, orchestrator.test.ts | 5 | 2 | Implemented |
 | REQ-REG-003 | cache-reader.test.ts, case-discovery.test.ts, regression-routes.test.ts | 3 | 4 | Implemented |
 | REQ-REG-007 | regression-routes.test.ts, regression-routes-write.test.ts | 6 | 16 | Implemented |
-| REQ-REG-013 | regression-routes.test.ts | 6 | 7 | Implemented |
+| REQ-REG-013 | regression-routes.test.ts | 9 | 14 | Implemented |
 | REQ-REG-014 | validate-case.test.ts | 2 | 0 | Implemented |
 | REQ-REG-015 | cache-reader.test.ts, regression-routes.test.ts | 2 | 5 | Implemented |
 | REQ-REG-016 | run-registry.test.ts, regression-routes-write.test.ts, subprocess.test.ts, codex-corrections.test.ts | 3 | 10 | Implemented |
 | REQ-REG-017 | estimator.test.ts, regression-routes.test.ts | 6 | 5 | Implemented |
+| REQ-REG-018 | cost-tracker.test.ts, dispatch.test.ts, routing-runner.test.ts, recall-runner.test.ts, chatbot-runner.test.ts, receipt-runner.test.ts, rubric-oracle.test.ts, build-deps.test.ts, evaluated-tier.test.ts | 25 | 25 | Implemented |
 | REQ-REG-GUI-OV-001 | regression-routes-write.test.ts | 5 | 0 | Implemented |
 | REQ-REG-GUI-OV-002 | model-spec.test.ts | 7 | 14 | Implemented |
 | REQ-REG-GUI-OV-003 | regression-routes-write.test.ts | 4 | 6 | Implemented |
@@ -11783,4 +11857,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-LLAMA-CPP-008 | llama-cpp-provider.test.ts | 1 | 0 | Implemented |
 | REQ-LLM-LLAMA-CPP-009 | llama-cpp-provider.test.ts | 1 | 0 | Implemented |
 
-| **Totals** | **375 test files** | **2605** | **2653** | **5258 tests** |
+| **Totals** | **375 test files** | **2615** | **2663** | **5278 tests** |
