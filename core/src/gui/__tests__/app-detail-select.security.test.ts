@@ -21,6 +21,7 @@ import { AppToggleStore } from '../../services/app-toggle/index.js';
 import { CredentialService } from '../../services/credentials/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
+import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerAppsRoutes } from '../routes/apps.js';
@@ -117,7 +118,7 @@ async function buildHostileSelectApp(tempDir: string, options: string[], default
 			await registerCsrfProtection(gui);
 			registerAppsRoutes(gui, {
 				registry,
-				config: config as unknown as import('../../types/config.js').SystemConfig,
+				config: config as unknown as SystemConfig,
 				appToggle: toggle,
 				dataDir: tempDir,
 				logger,

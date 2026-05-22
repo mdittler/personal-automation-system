@@ -27,11 +27,13 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CredentialService } from '../../services/credentials/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
+import type { CostTracker } from '../../services/llm/cost-tracker.js';
 import type { LLMServiceImpl } from '../../services/llm/index.js';
 import type { ModelCatalog } from '../../services/llm/model-catalog.js';
 import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { ProviderRegistry } from '../../services/llm/providers/provider-registry.js';
 import { MessageRateTracker } from '../../services/metrics/message-rate-tracker.js';
+import type { UserManager } from '../../services/user-manager/index.js';
 import type { LLMSafeguardsConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
@@ -178,10 +180,8 @@ async function buildPersonaApp(options: BuildOptions = {}) {
 			await registerAuth(gui, {
 				authToken: AUTH_TOKEN,
 				credentialService: credService,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				userManager: makeUserManager() as unknown as import('../../services/user-manager/index.js').UserManager,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				householdService: makeAuthHouseholdService(userToHousehold) as unknown as import('../../services/household/index.js').HouseholdService,
+				userManager: makeUserManager() as unknown as UserManager,
+				householdService: makeAuthHouseholdService(userToHousehold) as unknown as HouseholdService,
 			});
 			await registerCsrfProtection(gui);
 			registerLlmUsageRoutes(gui, {
@@ -190,8 +190,7 @@ async function buildPersonaApp(options: BuildOptions = {}) {
 				modelCatalog: makeModelCatalog(),
 				providerRegistry: makeProviderRegistry(),
 				logger,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				costTracker: costTracker as unknown as import('../../services/llm/cost-tracker.js').CostTracker,
+				costTracker: costTracker as unknown as CostTracker,
 				householdService: makeHouseholdService(HOUSEHOLDS, MEMBERS_BY_HOUSEHOLD),
 				messageRateTracker: options.messageRateTracker,
 				llmSafeguards: options.llmSafeguards,
@@ -324,10 +323,10 @@ describe('LLM Ops Dashboard — Persona Tests', () => {
 				await registerAuth(gui, {
 					authToken: AUTH_TOKEN,
 					credentialService: credService,
-					// biome-ignore format: esbuild cannot parse import type assertions split across lines
-					userManager: makeUserManager() as unknown as import('../../services/user-manager/index.js').UserManager,
-					// biome-ignore format: esbuild cannot parse import type assertions split across lines
-					householdService: makeAuthHouseholdService(userToHousehold) as unknown as import('../../services/household/index.js').HouseholdService,
+					userManager: makeUserManager() as unknown as UserManager,
+					householdService: makeAuthHouseholdService(
+						userToHousehold,
+					) as unknown as HouseholdService,
 				});
 				await registerCsrfProtection(gui);
 				registerLlmUsageRoutes(gui, {
@@ -336,8 +335,7 @@ describe('LLM Ops Dashboard — Persona Tests', () => {
 					modelCatalog: makeModelCatalog(),
 					providerRegistry: makeProviderRegistry(),
 					logger,
-					// biome-ignore format: esbuild cannot parse import type assertions split across lines
-					costTracker: dynamicCostTracker as unknown as import('../../services/llm/cost-tracker.js').CostTracker,
+					costTracker: dynamicCostTracker as unknown as CostTracker,
 					householdService: makeHouseholdService(HOUSEHOLDS, MEMBERS_BY_HOUSEHOLD),
 				});
 			},

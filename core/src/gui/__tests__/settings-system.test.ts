@@ -16,6 +16,7 @@ import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
 import Fastify from 'fastify';
 import pino from 'pino';
+import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 import {
@@ -24,8 +25,10 @@ import {
 } from '../../services/config/settings-metadata.js';
 import { SystemConfigWriter } from '../../services/config/system-config-writer.js';
 import { CredentialService } from '../../services/credentials/index.js';
+import type { HouseholdService } from '../../services/household/index.js';
 import { buildSettingsRegistry } from '../../services/settings/build-registry.js';
 import { SettingsWriter } from '../../services/settings/settings-writer.js';
+import type { UserManager } from '../../services/user-manager/index.js';
 import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
@@ -119,8 +122,7 @@ async function buildTestServer(opts: {
 		registry,
 		appConfigResolver: () => undefined,
 		manifestResolver: () => [],
-		// biome-ignore format: esbuild cannot parse import type assertions split across lines
-		logger: mockLogger as unknown as import('pino').Logger,
+		logger: mockLogger as unknown as Logger,
 		systemConfigWriter,
 		systemConfig: config as SystemConfig,
 	});
@@ -161,15 +163,12 @@ async function buildTestServer(opts: {
 			await registerAuth(gui, {
 				authToken: AUTH_TOKEN,
 				credentialService: credService,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
+				userManager: userManager as unknown as UserManager,
+				householdService: householdService as unknown as HouseholdService,
 			});
 			await registerCsrfProtection(gui);
 			await registerViewLocals(gui, {
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
+				userManager: userManager as unknown as UserManager,
 			});
 			registerSettingsRoutes(gui, {
 				settingsRegistry: registry,

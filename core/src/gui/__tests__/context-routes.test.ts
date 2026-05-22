@@ -10,6 +10,8 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ContextStoreServiceImpl } from '../../services/context-store/index.js';
 import { CredentialService } from '../../services/credentials/index.js';
+import type { HouseholdService } from '../../services/household/index.js';
+import type { UserManager } from '../../services/user-manager/index.js';
 import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
@@ -97,18 +99,15 @@ async function buildApp(tempDir: string) {
 			await registerAuth(gui, {
 				authToken: AUTH_TOKEN,
 				credentialService: credService,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
+				userManager: userManager as unknown as UserManager,
+				householdService: householdService as unknown as HouseholdService,
 			});
 			await registerCsrfProtection(gui);
 			registerContextRoutes(gui, {
 				contextStore,
 				config,
 				logger,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
+				householdService: householdService as unknown as HouseholdService,
 			});
 		},
 		{ prefix: '/gui' },

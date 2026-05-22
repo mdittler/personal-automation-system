@@ -10,11 +10,13 @@ import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CredentialService } from '../../services/credentials/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
+import type { CostTracker } from '../../services/llm/cost-tracker.js';
 import type { LLMServiceImpl } from '../../services/llm/index.js';
 import type { CatalogModel, ModelCatalog } from '../../services/llm/model-catalog.js';
 import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { ProviderRegistry } from '../../services/llm/providers/provider-registry.js';
 import { MessageRateTracker } from '../../services/metrics/message-rate-tracker.js';
+import type { UserManager } from '../../services/user-manager/index.js';
 import type { LLMSafeguardsConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
@@ -92,10 +94,7 @@ async function buildApp(options?: {
 	usageContent?: string;
 	tempDir?: string;
 	// Chunk D extensions
-	monthlyCostTracker?: Pick<
-		import('../../services/llm/cost-tracker.js').CostTracker,
-		'getMonthlyHouseholdCost'
-	>;
+	monthlyCostTracker?: Pick<CostTracker, 'getMonthlyHouseholdCost'>;
 	householdServiceFull?: Pick<HouseholdService, 'listHouseholds' | 'getMembers'>;
 	messageRateTracker?: MessageRateTracker;
 	llmSafeguards?: LLMSafeguardsConfig;
@@ -140,10 +139,8 @@ async function buildApp(options?: {
 			await registerAuth(gui, {
 				authToken: AUTH_TOKEN,
 				credentialService: credService,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				householdService: householdService as unknown as import('../../services/household/index.js').HouseholdService,
+				userManager: userManager as unknown as UserManager,
+				householdService: householdService as unknown as HouseholdService,
 			});
 			await registerCsrfProtection(gui);
 			registerLlmUsageRoutes(gui, {
@@ -152,13 +149,11 @@ async function buildApp(options?: {
 				modelCatalog,
 				providerRegistry,
 				logger,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				costTracker: options?.monthlyCostTracker as unknown as import('../../services/llm/cost-tracker.js').CostTracker,
+				costTracker: options?.monthlyCostTracker as unknown as CostTracker,
 				householdService: options?.householdServiceFull,
 				messageRateTracker: options?.messageRateTracker,
 				llmSafeguards: options?.llmSafeguards,
-				// biome-ignore format: esbuild cannot parse import type assertions split across lines
-				userManager: userManager as unknown as import('../../services/user-manager/index.js').UserManager,
+				userManager: userManager as unknown as UserManager,
 			});
 		},
 		{ prefix: '/gui' },

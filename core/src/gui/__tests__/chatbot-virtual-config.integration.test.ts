@@ -39,8 +39,10 @@ import {
 	buildVirtualChatbotApp,
 } from '../../services/conversation/virtual-app.js';
 import { CredentialService } from '../../services/credentials/index.js';
+import type { HouseholdService } from '../../services/household/index.js';
 import { SettingsRegistry } from '../../services/settings/settings-registry.js';
 import { SettingsWriter } from '../../services/settings/settings-writer.js';
+import type { UserManager } from '../../services/user-manager/index.js';
 import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
@@ -143,10 +145,8 @@ describe('GUI — virtual chatbot registry entry (REQ-CONV-013)', () => {
 				await registerAuth(gui, {
 					authToken: AUTH_TOKEN,
 					credentialService: credService,
-					// biome-ignore format: inline import() type must stay on one line for esbuild compat
-					userManager: makeUserManager() as unknown as import('../../services/user-manager/index.js').UserManager,
-					// biome-ignore format: inline import() type must stay on one line for esbuild compat
-					householdService: makeHouseholdService() as unknown as import('../../services/household/index.js').HouseholdService,
+					userManager: makeUserManager() as unknown as UserManager,
+					householdService: makeHouseholdService() as unknown as HouseholdService,
 				});
 				await registerCsrfProtection(gui);
 				registerAppsRoutes(gui, {

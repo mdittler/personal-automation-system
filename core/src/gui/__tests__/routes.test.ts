@@ -543,10 +543,8 @@ describe('GUI Routes', () => {
 					await registerAuth(gui, {
 						authToken: AUTH_TOKEN,
 						credentialService: credSvc,
-						// biome-ignore format: inline import() type must stay on one line for esbuild compat
-						userManager: uMgr as unknown as import('../../services/user-manager/index.js').UserManager,
-						// biome-ignore format: inline import() type must stay on one line for esbuild compat
-						householdService: hhSvc as unknown as import('../../services/household/index.js').HouseholdService,
+						userManager: uMgr as unknown as UserManager,
+						householdService: hhSvc as unknown as HouseholdService,
 					});
 					await registerCsrfProtection(gui);
 					registerAppsRoutes(gui, {
@@ -1203,7 +1201,7 @@ describe('GUI Routes', () => {
 				getManifestCache: () => ({}) as ReturnType<AppRegistry['getManifestCache']>,
 			} as unknown as AppRegistry;
 
-			const flushConfig: import('../../types/config.js').SystemConfig = {
+			const flushConfig: SystemConfig = {
 				port: 3000,
 				dataDir: flushTempDir,
 				logLevel: 'info',
@@ -1222,7 +1220,7 @@ describe('GUI Routes', () => {
 						sharedScopes: [],
 					},
 				],
-			} as unknown as import('../../types/config.js').SystemConfig;
+			} as unknown as SystemConfig;
 
 			const credSvc = new CredentialService({ dataDir: flushTempDir });
 			await credSvc.setPassword(TEST_USER_ID, TEST_PASSWORD);
@@ -1248,10 +1246,8 @@ describe('GUI Routes', () => {
 					await registerAuth(gui, {
 						authToken: AUTH_TOKEN,
 						credentialService: credSvc,
-						// biome-ignore format: inline import() type must stay on one line for esbuild compat
-						userManager: uMgr as unknown as import('../../services/user-manager/index.js').UserManager,
-						// biome-ignore format: inline import() type must stay on one line for esbuild compat
-						householdService: hhSvc as unknown as import('../../services/household/index.js').HouseholdService,
+						userManager: uMgr as unknown as UserManager,
+						householdService: hhSvc as unknown as HouseholdService,
 					});
 					await registerCsrfProtection(gui);
 					registerAppsRoutes(gui, {
