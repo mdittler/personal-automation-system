@@ -92,7 +92,7 @@ function makeRunResult(
 		inputs: [{ payload: 'hi', expected: { intent: 'x' } }],
 		actuals: [{ intent: 'x' }],
 		oracleVerdicts: [{ verdict: VERDICT.pass, details: 'matches' }],
-		tokenCounts: { input: 0, output: 0 },
+		tokenCounts: { input: 412, output: 78 },
 		costUsd: 0.0042,
 		modelIds: { fast: 'fast-m', standard: 'std-m', reasoning: null },
 		timestamp: '2026-05-10T00:00:00Z',
@@ -393,11 +393,65 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 		}
 	});
 
-	it('renders the token-counts footnote (REQ-REG-013 token gap is documented)', async () => {
+	it('(Config) does not render the stale "not yet plumbed" token footnote', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {
 			const res = await getAuthed(app, '/gui/regression?view=compare');
-			expect(res.body).toMatch(/token counts.*not yet plumbed/i);
+			expect(res.body).not.toMatch(/not yet plumbed/i);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('(Happy) compare table renders a Tokens column header', async () => {
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'tok-hdr' })],
+		});
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=compare');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('<th>Tokens</th>');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('(Happy) compare row renders per-case token counts', async () => {
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'tok-row', currentCacheKey: HEX64('a') })],
+			cachedResults: [
+				{
+					caseId: 'tok-row',
+					cacheKey: HEX64('a'),
+					result: makeRunResult({ caseId: 'tok-row', cacheKey: HEX64('a') }),
+				},
+			],
+		});
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=compare');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('412');
+			expect(res.body).toContain('78');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('(Security) token counts render as a numeric string, not raw object interpolation', async () => {
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'tok-sec', currentCacheKey: HEX64('a') })],
+			cachedResults: [
+				{
+					caseId: 'tok-sec',
+					cacheKey: HEX64('a'),
+					result: makeRunResult({ caseId: 'tok-sec', cacheKey: HEX64('a') }),
+				},
+			],
+		});
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=compare');
+			expect(res.body).not.toContain('[object Object]');
+			expect(res.body).toContain('412');
 		} finally {
 			await app.close();
 		}
@@ -602,6 +656,70 @@ describe('GET /gui/regression/cases/:caseId — drilldown (Codex C5)', () => {
 		}
 	});
 
+	it('(Happy) drilldown renders real input/output token counts when cache hit', async () => {
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'tok-drill', currentCacheKey: HEX64('a') })],
+			cachedResults: [
+				{
+					caseId: 'tok-drill',
+					cacheKey: HEX64('a'),
+					result: makeRunResult({ caseId: 'tok-drill', cacheKey: HEX64('a') }),
+				},
+			],
+		});
+		try {
+			const res = await getAuthed(app, '/gui/regression/cases/tok-drill');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('412');
+			expect(res.body).toContain('78');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('(Edge) drilldown renders — for token counts on a never-run case', async () => {
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'tok-never' })],
+		});
+		try {
+			const res = await getAuthed(app, '/gui/regression/cases/tok-never');
+			expect(res.statusCode).toBe(200);
+			// Never-run: token row shows em-dash, no numbers
+			expect(res.body).toContain('Never run');
+			// The token row in result-fields is only rendered when it.result exists
+			// (never-run shows "Never run — execute the case" empty state, no dl.result-fields)
+			expect(res.body).not.toMatch(/<dt>Token counts<\/dt><dd>\d/);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('(Edge) drilldown renders 0 token counts distinctly from — for a ran case that used no tokens', async () => {
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'tok-zero', currentCacheKey: HEX64('a') })],
+			cachedResults: [
+				{
+					caseId: 'tok-zero',
+					cacheKey: HEX64('a'),
+					result: makeRunResult({
+						caseId: 'tok-zero',
+						cacheKey: HEX64('a'),
+						tokenCounts: { input: 0, output: 0 },
+					}),
+				},
+			],
+		});
+		try {
+			const res = await getAuthed(app, '/gui/regression/cases/tok-zero');
+			expect(res.statusCode).toBe(200);
+			// Should render "0 in / 0 out" (or similar), NOT an em-dash
+			expect(res.body).toMatch(/0.*in.*\/.*0.*out|0 in \/ 0 out/);
+			expect(res.body).not.toMatch(/<dt>Token counts<\/dt><dd>—/);
+		} finally {
+			await app.close();
+		}
+	});
+
 	it('returns 404 for unknown caseId (allowlist defense)', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {
@@ -696,6 +814,40 @@ describe('GET /gui/regression/cases/:caseId/row — server-rendered row (Codex I
 		try {
 			const res = await getAuthed(app, `/gui/regression/cases/live-case/row?runId=${runId}`);
 			expect(res.body).toContain('✗'); // fail icon
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('(State) server-rendered row reflects live token counts when ?runId= matches', async () => {
+		const registry = createRunRegistry();
+		const liveResult = makeRunResult({
+			caseId: 'live-tok',
+			cacheKey: HEX64('z'),
+			verdict: VERDICT.pass,
+			tokenCounts: { input: 412, output: 78 },
+		});
+		let runId: string;
+		let activeOnEvent!: (e: RegressionEvent) => void;
+		runId = (
+			await registry.createRun({
+				args: ['--json'],
+				runFactory: (onEvent) => {
+					activeOnEvent = onEvent;
+					return undefined;
+				},
+			})
+		).runId;
+		activeOnEvent({ type: 'case-result', result: liveResult });
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'live-tok', currentCacheKey: HEX64('z') })],
+			registry,
+		});
+		try {
+			const res = await getAuthed(app, `/gui/regression/cases/live-tok/row?runId=${runId}`);
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('412');
+			expect(res.body).toContain('78');
 		} finally {
 			await app.close();
 		}

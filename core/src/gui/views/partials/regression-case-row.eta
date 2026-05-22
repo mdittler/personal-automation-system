@@ -13,6 +13,7 @@
   <td><code><%= it.case.modelFast %></code></td>
   <td><code><%= it.case.modelStandard %></code></td>
   <td>$<%= it.case.costUsd %></td>
+  <td><%= it.case.tokensInput %> / <%= it.case.tokensOutput %></td>
   <td>
     <% if (it.case.timestamp) { %>
       <time datetime="<%= it.case.timestamp %>"><%= it.case.timestamp %></time>

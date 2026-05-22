@@ -7,8 +7,12 @@
  *
  * Constants are calibrated against the food-shadow / session-control /
  * PAS classifier observed costs (~$0.001–0.005 per case for fast-tier
- * routing). Recalibrate when LLMService usage plumbing lands — see
- * `docs/open-items.md` "LLMService.complete usage plumbing".
+ * routing). As of 2026-05-22, `RunResult.tokenCounts` carries real
+ * observed token data (REQ-REG-018), so the constants can be recalibrated
+ * from a fresh full-suite run. Numeric recalibration is deliberately
+ * deferred and tracked in `docs/open-items.md` ("Numeric recalibration of
+ * regression estimator constants"); the constants remain documented
+ * approximations. The binding safety limit is still the per-run budget cap.
  */
 
 const PER_CASE_USD_BY_BUCKET = {

@@ -7,10 +7,10 @@
  * REQ-REG-011 would otherwise miss. Infrastructure errors (LLM network
  * failures) DO throw and become `verdict: 'error'` at the runner.
  *
- * Cost is metered via `CostTracker.getMonthlyTotalCost()` delta. Token
- * counts are best-effort 0 (CostTracker has no per-call token surface);
- * cost is authoritative for REQ-REG-013. The delta is only correct under
- * sequential dispatch — the orchestrator enforces that invariant.
+ * Cost is metered via `CostTracker.getMonthlyTotalCost()` delta. Tokens are
+ * metered via the `getTokenUsageTotals()` delta (in `finally`, throw-resilient)
+ * under the same sequential-dispatch invariant as cost. The delta is only
+ * correct under sequential dispatch — the orchestrator enforces that invariant.
  */
 
 import {
@@ -32,6 +32,25 @@ import type {
 
 export interface CostMeterSource {
 	getMonthlyTotalCost(): number;
+	getTokenUsageTotals(): { input: number; output: number };
+}
+
+/** Non-negative, finite delta. Guards against a mis-reporting tracker. */
+function safeDelta(after: number, before: number): number {
+	const d = after - before;
+	return Number.isFinite(d) && d > 0 ? d : 0;
+}
+
+/** Error carrying the CallMeter for spend that occurred before the throw. */
+export class MeteredError extends Error {
+	constructor(
+		message: string,
+		readonly meter: CallMeter,
+		options?: ErrorOptions,
+	) {
+		super(message, options);
+		this.name = 'MeteredError';
+	}
 }
 
 export interface BuildAdaptersDeps {
@@ -53,19 +72,26 @@ async function meterCall<T>(
 	tier: keyof TierModelSnapshot,
 	fn: () => Promise<T>,
 ): Promise<{ value: T; meter: CallMeter }> {
-	const before = deps.costTracker.getMonthlyTotalCost();
-	const value = await fn();
-	const after = deps.costTracker.getMonthlyTotalCost();
-	const model = deps.modelIds[tier] ?? 'unknown';
-	return {
-		value,
-		meter: {
+	const costBefore = deps.costTracker.getMonthlyTotalCost();
+	const tokBefore = deps.costTracker.getTokenUsageTotals();
+	const buildMeter = (): CallMeter => {
+		const model = deps.modelIds[tier];
+		const tokAfter = deps.costTracker.getTokenUsageTotals();
+		return {
 			model: typeof model === 'string' ? model : 'unknown',
-			tokenIn: 0,
-			tokenOut: 0,
-			costUsd: Math.max(0, after - before),
-		},
+			tokenIn: safeDelta(tokAfter.input, tokBefore.input),
+			tokenOut: safeDelta(tokAfter.output, tokBefore.output),
+			costUsd: Math.max(0, deps.costTracker.getMonthlyTotalCost() - costBefore),
+		};
 	};
+	try {
+		const value = await fn();
+		return { value, meter: buildMeter() };
+	} catch (err) {
+		throw new MeteredError(err instanceof Error ? err.message : String(err), buildMeter(), {
+			cause: err,
+		});
+	}
 }
 
 export function buildClassifierAdapters(deps: BuildAdaptersDeps): RoutingClassifierAdapter {
@@ -96,9 +122,9 @@ export function buildClassifierAdapters(deps: BuildAdaptersDeps): RoutingClassif
 				return { raw: r.raw, meter };
 			}
 			if (r.kind === 'llm-error') {
-				throw new Error(`food-shadow infrastructure error: ${r.category}`);
+				throw new MeteredError(`food-shadow infrastructure error: ${r.category}`, meter);
 			}
-			throw new Error(`food-shadow unexpected kind: ${(r as { kind: string }).kind}`);
+			throw new MeteredError(`food-shadow unexpected kind: ${(r as { kind: string }).kind}`, meter);
 		},
 
 		sessionControl: async (text: string): Promise<AdapterResult> => {
@@ -171,23 +197,30 @@ export function buildRecallAdapter(deps: BuildRecallAdapterDeps): RecallAdapter 
 					meter: ZERO_METER(deps.modelIds.fast),
 				};
 			}
-			const before = deps.costTracker.getMonthlyTotalCost();
-			const verdict = await classifyRecallIntent(message, {
-				llm: deps.llm,
-				logger: widenedLogger,
-				today: effectiveToday,
-				...(deps.maxWindowDays !== undefined ? { maxWindowDays: deps.maxWindowDays } : {}),
-			});
-			const after = deps.costTracker.getMonthlyTotalCost();
-			return {
-				raw: JSON.stringify(verdict),
-				meter: {
+			const costBefore = deps.costTracker.getMonthlyTotalCost();
+			const tokBefore = deps.costTracker.getTokenUsageTotals();
+			const buildMeter = (): CallMeter => {
+				const tokAfter = deps.costTracker.getTokenUsageTotals();
+				return {
 					model: deps.modelIds.fast,
-					tokenIn: 0,
-					tokenOut: 0,
-					costUsd: Math.max(0, after - before),
-				},
+					tokenIn: safeDelta(tokAfter.input, tokBefore.input),
+					tokenOut: safeDelta(tokAfter.output, tokBefore.output),
+					costUsd: Math.max(0, deps.costTracker.getMonthlyTotalCost() - costBefore),
+				};
 			};
+			try {
+				const verdict = await classifyRecallIntent(message, {
+					llm: deps.llm,
+					logger: widenedLogger,
+					today: effectiveToday,
+					...(deps.maxWindowDays !== undefined ? { maxWindowDays: deps.maxWindowDays } : {}),
+				});
+				return { raw: JSON.stringify(verdict), meter: buildMeter() };
+			} catch (err) {
+				throw new MeteredError(err instanceof Error ? err.message : String(err), buildMeter(), {
+					cause: err,
+				});
+			}
 		},
 	};
 }

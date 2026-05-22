@@ -45,7 +45,7 @@
         <dt>Verdict</dt><dd><%= it.result.verdict %></dd>
         <dt>Timestamp</dt><dd><time datetime="<%= it.result.timestamp %>"><%= it.result.timestamp %></time></dd>
         <dt>Cost</dt><dd>$<%= it.result.costUsd.toFixed(4) %></dd>
-        <dt>Token counts</dt><dd>—<small> (plumbing pending — see open-items.md)</small></dd>
+        <dt>Token counts</dt><dd><%= it.result.tokenCounts.input %> in / <%= it.result.tokenCounts.output %> out</dd>
         <dt>Model — fast</dt><dd><code><%= it.result.modelIds.fast %></code></dd>
         <dt>Model — standard</dt><dd><code><%= it.result.modelIds.standard %></code></dd>
         <% if (it.result.modelIds.reasoning) { %>

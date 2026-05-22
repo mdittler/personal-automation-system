@@ -23,6 +23,7 @@ import {
 	applyModelMatrixOverride,
 	buildDryRunDeps,
 	buildMetadataDeps,
+	buildProductionDeps,
 	composeLLMService,
 	findRepoRoot,
 	resolveTierModelIds,
@@ -330,6 +331,29 @@ describe('composeLLMService — cost-tracker delta', () => {
 		// about: the LLM call completes and CostTracker.record() runs without
 		// throwing. Non-zero cost is provider-pricing-dependent.
 		expect(after).toBeGreaterThanOrEqual(before);
+	});
+});
+
+describe('build-deps — receipt runner CostTracker wiring', () => {
+	// Regression guard: the same CostTracker instance that meters routing/recall/
+	// chatbot costs must also be threaded into the receipt runner deps so all
+	// token deltas stay coherent under sequential dispatch.
+	it('production deps thread the same CostTracker instance into the receipt runner', async () => {
+		vi.stubEnv('TELEGRAM_BOT_TOKEN', 'stub-token');
+		vi.stubEnv('GUI_AUTH_TOKEN', 'stub-gui-token');
+		vi.stubEnv('ANTHROPIC_API_KEY', 'sk-stub-not-real');
+
+		const deps = await buildProductionDeps();
+
+		expect(deps.costTracker).toBeDefined();
+		// `costTracker` must be the real CostTracker the CLI builds, not a stub —
+		// index.ts plumbs this same reference into runReceiptCase.
+		expect(typeof deps.costTracker!.getMonthlyTotalCost).toBe('function');
+		expect(typeof deps.costTracker!.getTokenUsageTotals).toBe('function');
+		const { CostTracker } = await import('@core/services/llm/cost-tracker.js');
+		expect(deps.costTracker).toBeInstanceOf(CostTracker);
+
+		vi.unstubAllEnvs();
 	});
 });
 

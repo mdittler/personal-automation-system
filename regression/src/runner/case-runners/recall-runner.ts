@@ -22,7 +22,7 @@ import type {
 } from '@core/types/regression.js';
 import { VERDICT } from '@core/types/regression.js';
 import { type StructuralExpectation, runStructuralOracle } from '../../oracles/structural.js';
-import type { RecallAdapter } from '../dispatch.js';
+import { MeteredError, type RecallAdapter } from '../dispatch.js';
 import { type AdapterResult, ESTIMATE_TOKENS, type MinimalLogger } from './routing-runner.js';
 
 export interface RecallRunnerDeps {
@@ -73,6 +73,11 @@ export async function runRecallCase(c: PersonaCase, deps: RecallRunnerDeps): Pro
 				{ err: (err as Error).message, caseId: c.id, payload: input.payload },
 				'recall-runner: adapter threw (infrastructure error)',
 			);
+			if (err instanceof MeteredError) {
+				tokenIn += err.meter.tokenIn;
+				tokenOut += err.meter.tokenOut;
+				costUsd += err.meter.costUsd;
+			}
 			oracleVerdicts.push({
 				verdict: VERDICT.error,
 				details: `recall adapter error: ${(err as Error).message}`,

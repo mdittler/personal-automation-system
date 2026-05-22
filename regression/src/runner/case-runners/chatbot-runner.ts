@@ -55,7 +55,10 @@ export interface ChatbotRunnerDeps {
 	env: ChatbotEnvLike;
 	judgeLlm: Pick<LLMService, 'complete'>;
 	judgeModelId: string;
-	costTracker: { getMonthlyTotalCost: () => number };
+	costTracker: {
+		getMonthlyTotalCost: () => number;
+		getTokenUsageTotals: () => { input: number; output: number };
+	};
 	modelIds: TierModelSnapshot;
 	cacheKey: string;
 	caseBudgetUsd: number;
@@ -75,6 +78,8 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 	const actuals: string[] = [];
 	const oracleVerdicts: OracleVerdict[] = [];
 	let costUsd = 0;
+	let tokenIn = 0;
+	let tokenOut = 0;
 	let verdict: Verdict = VERDICT.pass;
 
 	for (let i = 0; i < c.inputs.length; i++) {
@@ -95,7 +100,18 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 
 		const beforeCount = deps.env.telegram.sent.length;
 		const beforeCost = deps.costTracker.getMonthlyTotalCost();
+		const tokBefore = deps.costTracker.getTokenUsageTotals();
+		// Declared before try so finally can assign and post-block code can read.
+		let tokAfter = tokBefore;
 		const readHandler = deps.env.captureHandler();
+		let routeErr: unknown;
+		// Invariant: exactly one actuals entry is pushed per turn regardless of
+		// where a throw occurs. Set true after the success-path push so the
+		// error-path fallback push is skipped when it already ran.
+		let routed = false;
+		// Which step a throw came from, so the error verdict names it accurately.
+		let stage: 'route' | 'oracle' = 'route';
+		let oracle: Awaited<ReturnType<typeof runRubricOracle>> | undefined;
 		try {
 			await deps.env.routeMessage({
 				userId: deps.env.userId,
@@ -104,55 +120,75 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 				messageId: i + 1,
 				timestamp: new Date(),
 			});
+
+			const newMessages = deps.env.telegram.sent
+				.slice(beforeCount)
+				.filter((m) => m.userId === deps.env.userId)
+				.map((m) => m.text)
+				.join('\n');
+			actuals.push(newMessages);
+			routed = true;
+
+			// Codex I6 — assert routing correctness BEFORE grading reply quality.
+			// expectedHandler lives on PersonaInput.expected.expectedHandler.
+			const expected = (input.expected as { expectedHandler?: string }).expectedHandler;
+			const actualHandler = readHandler();
+			if (expected && actualHandler !== null && actualHandler !== expected) {
+				oracleVerdicts.push({
+					verdict: VERDICT.fail,
+					details: `routing mismatch: expected handler '${expected}', got '${actualHandler}'`,
+				});
+				if (verdict === VERDICT.pass) verdict = VERDICT.fail;
+			} else if (expected && actualHandler === null) {
+				oracleVerdicts.push({
+					verdict: VERDICT.error,
+					details: `routing diagnostic captured no handler for case ${c.id} (env did not record one)`,
+				});
+				verdict = VERDICT.error;
+			}
+
+			stage = 'oracle';
+			oracle = await runRubricOracle({
+				rubric: c.rubric,
+				actualResponse: newMessages,
+				deps: {
+					llm: deps.judgeLlm,
+					standardModelId: deps.judgeModelId,
+					logger: deps.logger,
+					costMeter: deps.costTracker,
+				},
+			});
 		} catch (err) {
-			oracleVerdicts.push({
-				verdict: VERDICT.error,
-				details: `routeMessage threw: ${(err as Error).message}`,
-			});
-			verdict = VERDICT.error;
-			actuals.push('');
-			continue;
-		}
-		const newMessages = deps.env.telegram.sent
-			.slice(beforeCount)
-			.filter((m) => m.userId === deps.env.userId)
-			.map((m) => m.text)
-			.join('\n');
-		actuals.push(newMessages);
-
-		// Codex I6 — assert routing correctness BEFORE grading reply quality.
-		// expectedHandler lives on PersonaInput.expected.expectedHandler.
-		const expected = (input.expected as { expectedHandler?: string }).expectedHandler;
-		const actualHandler = readHandler();
-		if (expected && actualHandler !== null && actualHandler !== expected) {
-			oracleVerdicts.push({
-				verdict: VERDICT.fail,
-				details: `routing mismatch: expected handler '${expected}', got '${actualHandler}'`,
-			});
-			if (verdict === VERDICT.pass) verdict = VERDICT.fail;
-		} else if (expected && actualHandler === null) {
-			oracleVerdicts.push({
-				verdict: VERDICT.error,
-				details: `routing diagnostic captured no handler for case ${c.id} (env did not record one)`,
-			});
-			verdict = VERDICT.error;
+			routeErr = err;
+		} finally {
+			// Read after regardless of throw — tokens spent before any error are counted.
+			tokAfter = deps.costTracker.getTokenUsageTotals();
 		}
 
-		const oracle = await runRubricOracle({
-			rubric: c.rubric,
-			actualResponse: newMessages,
-			deps: {
-				llm: deps.judgeLlm,
-				standardModelId: deps.judgeModelId,
-				logger: deps.logger,
-				costMeter: deps.costTracker,
-			},
-		});
-		oracleVerdicts.push(oracle.verdict);
 		const afterCost = deps.costTracker.getMonthlyTotalCost();
 		costUsd += Math.max(0, afterCost - beforeCost);
-		if (oracle.verdict.verdict === VERDICT.fail && verdict === VERDICT.pass) verdict = VERDICT.fail;
-		if (oracle.verdict.verdict === VERDICT.error) verdict = VERDICT.error;
+		tokenIn += Math.max(0, tokAfter.input - tokBefore.input);
+		tokenOut += Math.max(0, tokAfter.output - tokBefore.output);
+
+		if (routeErr !== undefined) {
+			oracleVerdicts.push({
+				verdict: VERDICT.error,
+				details: `${stage === 'oracle' ? 'runRubricOracle' : 'routeMessage'} threw: ${(routeErr as Error).message}`,
+			});
+			verdict = VERDICT.error;
+			// Only push the fallback empty string when the success-path push
+			// did not already run (i.e. routeMessage threw before actuals was
+			// populated, or runRubricOracle threw after routeMessage succeeded).
+			if (!routed) actuals.push('');
+			continue;
+		}
+
+		if (oracle !== undefined) {
+			oracleVerdicts.push(oracle.verdict);
+			if (oracle.verdict.verdict === VERDICT.fail && verdict === VERDICT.pass)
+				verdict = VERDICT.fail;
+			if (oracle.verdict.verdict === VERDICT.error) verdict = VERDICT.error;
+		}
 	}
 
 	return {
@@ -163,7 +199,7 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 		inputs: c.inputs,
 		actuals,
 		oracleVerdicts,
-		tokenCounts: { input: 0, output: 0 },
+		tokenCounts: { input: tokenIn, output: tokenOut },
 		costUsd,
 		modelIds: deps.modelIds,
 		evaluatedTier: 'standard',

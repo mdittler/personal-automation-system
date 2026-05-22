@@ -671,7 +671,10 @@ describe('runSuite — chatbot bucket', () => {
 			chatbotBaseOpts({
 				chatbotEnvFactory: factory,
 				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
-				costTracker: { getMonthlyTotalCost: () => 0 },
+				costTracker: {
+					getMonthlyTotalCost: () => 0,
+					getTokenUsageTotals: () => ({ input: 0, output: 0 }),
+				},
 			}),
 		);
 		expect(factory).toHaveBeenCalledTimes(1);
@@ -688,7 +691,10 @@ describe('runSuite — chatbot bucket', () => {
 			chatbotBaseOpts({
 				chatbotEnvFactory: async () => env,
 				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
-				costTracker: { getMonthlyTotalCost: () => 0 },
+				costTracker: {
+					getMonthlyTotalCost: () => 0,
+					getTokenUsageTotals: () => ({ input: 0, output: 0 }),
+				},
 			}),
 		);
 		expect(env.dispose).toHaveBeenCalledTimes(1);
@@ -705,7 +711,10 @@ describe('runSuite — chatbot bucket', () => {
 			chatbotBaseOpts({
 				chatbotEnvFactory: async () => env,
 				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
-				costTracker: { getMonthlyTotalCost: () => 0 },
+				costTracker: {
+					getMonthlyTotalCost: () => 0,
+					getTokenUsageTotals: () => ({ input: 0, output: 0 }),
+				},
 			}),
 		);
 		expect(env.dispose).toHaveBeenCalledTimes(1);
@@ -725,7 +734,10 @@ describe('runSuite — chatbot bucket', () => {
 			chatbotBaseOpts({
 				chatbotEnvFactory: factory,
 				judgeLlm: new StubLLMService() as unknown as Pick<LLMService, 'complete'>,
-				costTracker: { getMonthlyTotalCost: () => 0 },
+				costTracker: {
+					getMonthlyTotalCost: () => 0,
+					getTokenUsageTotals: () => ({ input: 0, output: 0 }),
+				},
 			}),
 		);
 		expect(factory).toHaveBeenCalledTimes(1); // not retried per case
@@ -747,7 +759,10 @@ describe('runSuite — chatbot bucket', () => {
 			chatbotBaseOpts({
 				chatbotEnvFactory: async () => env,
 				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
-				costTracker: { getMonthlyTotalCost: () => 0 },
+				costTracker: {
+					getMonthlyTotalCost: () => 0,
+					getTokenUsageTotals: () => ({ input: 0, output: 0 }),
+				},
 				onResult: (r) => events.push(r.caseId),
 			}),
 		);

@@ -10,9 +10,10 @@
  *
  * Pass threshold: score >= 4 (spec line 210).
  *
- * Cost metering: CostTracker delta across the judge call. Token counts
- * are best-effort 0 — same constraint as the routing-runner adapter
- * (LLMService.complete returns only a string).
+ * Cost and token metering: CostTracker deltas across the judge call —
+ * `getMonthlyTotalCost()` for cost and `getTokenUsageTotals()` for the
+ * input/output token counts. Both are read in a `finally` so spend that
+ * occurred before a throw is still captured.
  *
  * Fencing reuses PAS production protections: `sanitizeContextContent` +
  * `buildMemoryContextBlock` strip zero-width / bidi controls, collapse
@@ -33,7 +34,10 @@ const FENCE_MAX_CHARS = 6000;
 export interface RubricOracleDeps {
 	llm: Pick<LLMService, 'complete'>;
 	standardModelId: string;
-	costMeter: { getMonthlyTotalCost: () => number };
+	costMeter: {
+		getMonthlyTotalCost: () => number;
+		getTokenUsageTotals: () => { input: number; output: number };
+	};
 	logger: { warn(...args: unknown[]): void };
 }
 
@@ -79,8 +83,12 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 	const { rubric, actualResponse, deps } = input;
 	const prompt = buildJudgePrompt(rubric, actualResponse);
 
-	const before = deps.costMeter.getMonthlyTotalCost();
-	let raw: string;
+	const costBefore = deps.costMeter.getMonthlyTotalCost();
+	const tokBefore = deps.costMeter.getTokenUsageTotals();
+	// Declared before try so finally can assign and post-block code can read.
+	let tokAfter = tokBefore;
+	let raw: string | undefined;
+	let thrownErr: unknown;
 	try {
 		raw = await deps.llm.complete(prompt, {
 			tier: 'standard',
@@ -93,35 +101,38 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 			responseFormat: 'json',
 		});
 	} catch (err) {
-		const after = deps.costMeter.getMonthlyTotalCost();
+		thrownErr = err;
+	} finally {
+		// Read token totals unconditionally so spend on throws is captured.
+		tokAfter = deps.costMeter.getTokenUsageTotals();
+	}
+	const costAfter = deps.costMeter.getMonthlyTotalCost();
+	const meter: CallMeter = {
+		model: deps.standardModelId,
+		tokenIn: Math.max(0, tokAfter.input - tokBefore.input),
+		tokenOut: Math.max(0, tokAfter.output - tokBefore.output),
+		costUsd: Math.max(0, costAfter - costBefore),
+	};
+
+	if (thrownErr !== undefined) {
 		return {
 			verdict: {
 				verdict: VERDICT.error,
-				details: `judge LLM threw: ${(err as Error).message}`,
+				details: `judge LLM threw: ${(thrownErr as Error).message}`,
 			},
-			meter: {
-				model: deps.standardModelId,
-				tokenIn: 0,
-				tokenOut: 0,
-				costUsd: Math.max(0, after - before),
-			},
+			meter,
 			score: null,
 		};
 	}
-	const after = deps.costMeter.getMonthlyTotalCost();
-	const meter: CallMeter = {
-		model: deps.standardModelId,
-		tokenIn: 0,
-		tokenOut: 0,
-		costUsd: Math.max(0, after - before),
-	};
 
-	const parsed = tryParseJsonStripFences(raw);
+	// thrownErr is undefined here, so the try completed without throwing → raw is defined.
+	const resolvedRaw = raw as string;
+	const parsed = tryParseJsonStripFences(resolvedRaw);
 	if (parsed === UNPARSEABLE_JSON) {
 		return {
 			verdict: {
 				verdict: VERDICT.error,
-				details: `judge JSON parse failed (empty or invalid); raw="${raw.slice(0, 200)}"`,
+				details: `judge JSON parse failed (empty or invalid); raw="${resolvedRaw.slice(0, 200)}"`,
 			},
 			meter,
 			score: null,

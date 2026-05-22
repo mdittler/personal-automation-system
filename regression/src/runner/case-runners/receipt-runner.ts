@@ -34,6 +34,7 @@ import {
 	VERDICT,
 	type Verdict,
 } from '../../shared/types.js';
+import type { CostMeterSource } from '../dispatch.js';
 
 /**
  * Combine two verdicts with set-based AND semantics:
@@ -70,6 +71,13 @@ export interface ReceiptRunnerDeps {
 	 * `CostTracker.estimateCost`. Unit tests inject a stub.
 	 */
 	estimateUsd: (call: { tokenIn: number; tokenOut: number }) => number;
+	/**
+	 * Token + cost meter source. Read before/after each `parseReceiptFromPhoto`
+	 * call (in `finally` so tokens are counted even when the parser throws
+	 * after an LLM call completes). Real wiring passes the shared `CostTracker`.
+	 * Unit tests inject a stub.
+	 */
+	costTracker: CostMeterSource;
 }
 
 interface ReceiptPayload {
@@ -213,8 +221,8 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 	const oracleVerdicts: OracleVerdict[] = [];
 	let aggregateVerdict: RunResult['verdict'] = VERDICT.pass;
 	let costUsd = 0;
-	const tokenIn = 0;
-	const tokenOut = 0;
+	let tokenIn = 0;
+	let tokenOut = 0;
 
 	// Construct minimal CoreServices shim. parseReceiptFromPhoto reads:
 	//   services.llm.completeWithMeta(prompt, options)
@@ -244,6 +252,10 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 		const sidecar = JSON.parse(sidecarText) as ReceiptSidecar;
 
 		let parsed: Awaited<ReturnType<typeof parseReceiptFromPhoto>>;
+		// Read token snapshot before dispatch. The `finally` block reads the
+		// snapshot again so tokens spent before a post-LLM throw are still
+		// counted (e.g. the model returned but JSON post-parsing threw).
+		const tokBefore = deps.costTracker.getTokenUsageTotals();
 		try {
 			parsed = await parseReceiptFromPhoto(services, photoBuf, mimeFor(payload.photoFixture));
 		} catch (err) {
@@ -255,6 +267,10 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 			aggregateVerdict = VERDICT.error;
 			actuals.push(null);
 			continue;
+		} finally {
+			const tokAfter = deps.costTracker.getTokenUsageTotals();
+			tokenIn += Math.max(0, tokAfter.input - tokBefore.input);
+			tokenOut += Math.max(0, tokAfter.output - tokBefore.output);
 		}
 		actuals.push(parsed);
 

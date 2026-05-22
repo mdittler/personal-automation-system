@@ -12,7 +12,7 @@ const baseDeps = (stub: StubLLMService) => ({
 		debug: () => {},
 		error: () => {},
 	},
-	costMeter: { getMonthlyTotalCost: () => 0 },
+	costMeter: { getMonthlyTotalCost: () => 0, getTokenUsageTotals: () => ({ input: 0, output: 0 }) },
 });
 
 describe('runRubricOracle', () => {
@@ -186,6 +186,7 @@ describe('runRubricOracle', () => {
 		let totalCost = 0;
 		const meter = {
 			getMonthlyTotalCost: () => totalCost,
+			getTokenUsageTotals: () => ({ input: 0, output: 0 }),
 		};
 		const deps = { ...baseDeps(stub), costMeter: meter };
 		// Simulate the LLM call mutating cost — the stub's complete() doesn't
@@ -226,5 +227,66 @@ describe('runRubricOracle', () => {
 		});
 		expect(result.verdict.verdict).toBe(VERDICT.error);
 		expect(result.verdict.details).toMatch(/empty or invalid/i);
+	});
+
+	it('runRubricOracle CallMeter reports the judge-call token delta', async () => {
+		const stub = new StubLLMService().queue('{"score": 5, "explanation": "ok"}');
+		let tokenIn = 0;
+		let tokenOut = 0;
+		const meter = {
+			getMonthlyTotalCost: () => 0,
+			getTokenUsageTotals: () => ({ input: tokenIn, output: tokenOut }),
+		};
+		const deps = {
+			llm: stub,
+			standardModelId: 'claude-sonnet-4-7',
+			logger: { warn: () => {}, info: () => {}, debug: () => {}, error: () => {} },
+			costMeter: meter,
+		};
+		// Simulate the judge LLM call advancing the token counter
+		const originalComplete = stub.complete.bind(stub);
+		stub.complete = async (prompt, options) => {
+			tokenIn += 45;
+			tokenOut += 12;
+			return originalComplete(prompt, options);
+		};
+
+		const result = await runRubricOracle({ rubric: 'r', actualResponse: 'a', deps });
+
+		expect(result.meter.tokenIn).toBe(45);
+		expect(result.meter.tokenOut).toBe(12);
+	});
+
+	it('runRubricOracle on a judge throw still reports a finite token meter', async () => {
+		const stub = new StubLLMService(); // empty queue → throws
+		let tokenIn = 0;
+		let tokenOut = 0;
+		const meter = {
+			getMonthlyTotalCost: () => 0,
+			getTokenUsageTotals: () => ({ input: tokenIn, output: tokenOut }),
+		};
+		const deps = {
+			llm: stub,
+			standardModelId: 'claude-sonnet-4-7',
+			logger: { warn: () => {}, info: () => {}, debug: () => {}, error: () => {} },
+			costMeter: meter,
+		};
+		// Simulate spending some tokens before throwing
+		const originalComplete = stub.complete.bind(stub);
+		stub.complete = async (prompt, options) => {
+			tokenIn += 30;
+			tokenOut += 8;
+			return originalComplete(prompt, options); // this throws
+		};
+
+		const result = await runRubricOracle({ rubric: 'r', actualResponse: 'a', deps });
+
+		expect(result.verdict.verdict).toBe(VERDICT.error);
+		// tokenIn/tokenOut must be finite numbers (0 is acceptable per spec)
+		expect(Number.isFinite(result.meter.tokenIn)).toBe(true);
+		expect(Number.isFinite(result.meter.tokenOut)).toBe(true);
+		// Tokens spent before the throw are captured (delta in finally)
+		expect(result.meter.tokenIn).toBe(30);
+		expect(result.meter.tokenOut).toBe(8);
 	});
 });

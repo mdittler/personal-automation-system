@@ -14,7 +14,11 @@
 
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { combineVerdicts, runReceiptCase } from '../runner/case-runners/receipt-runner.js';
+import {
+	type ReceiptRunnerDeps,
+	combineVerdicts,
+	runReceiptCase,
+} from '../runner/case-runners/receipt-runner.js';
 import type { Verdict } from '../shared/types.js';
 import { VERDICT } from '../shared/types.js';
 import {
@@ -1024,6 +1028,176 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 		const labels = result.oracleVerdicts.map((v) => v.label);
 		expect(labels).toContain('structural');
 		expect(labels).not.toContain('transcription');
+	});
+});
+
+describe('runReceiptCase — token propagation', () => {
+	/**
+	 * Builds a stepping `costTracker` stub. Each call to `getTokenUsageTotals()`
+	 * returns the next snapshot from `steps`. If more calls are made than steps
+	 * provided, the last step is repeated.
+	 */
+	function makeSteppingTracker(
+		steps: Array<{ input: number; output: number }>,
+	): ReceiptRunnerDeps['costTracker'] {
+		let callCount = 0;
+		return {
+			getMonthlyTotalCost: () => 0,
+			getTokenUsageTotals: () => {
+				const idx = Math.min(callCount++, steps.length - 1);
+				// biome-ignore lint/style/noNonNullAssertion: bounded by Math.min above
+				return steps[idx]!;
+			},
+		};
+	}
+
+	it('records token counts from the CostTracker delta around parseReceiptFromPhoto', async () => {
+		const photoPath = await stagePhoto('tok-happy');
+		const sidecarPath = await stageSidecar('tok-happy', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		// Before: {0,0}, after (in finally): {800,200} → delta {800,200}.
+		const costTracker = makeSteppingTracker([
+			{ input: 0, output: 0 },
+			{ input: 800, output: 200 },
+		]);
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+					subtotal: 4.99,
+					tax: 0,
+					total: 4.99,
+				}),
+			),
+			{ costTracker },
+		);
+		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'tok-happy'), deps);
+		expect(result.tokenCounts).toEqual({ input: 800, output: 200 });
+	});
+
+	it('multi-input receipt case sums continuation-call token deltas', async () => {
+		const photoPath = await stagePhoto('tok-multi');
+		const sidecarPath = await stageSidecar('tok-multi', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		// Input 1: before={0,0}, after={1200,300}  → delta {1200,300}
+		// Input 2: before={1200,300}, after={2100,510} → delta {900,210}
+		// Accumulated: {2100,510}
+		const costTracker = makeSteppingTracker([
+			{ input: 0, output: 0 },
+			{ input: 1200, output: 300 },
+			{ input: 1200, output: 300 }, // "before" snapshot for input 2 — same value as input 1's "after"
+			{ input: 2100, output: 510 },
+		]);
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+					subtotal: 4.99,
+					tax: 0,
+					total: 4.99,
+				}),
+			),
+			{ costTracker, caseBudgetUsd: 1.0, estimateUsd: () => 0.02 },
+		);
+		const c = makeCase(photoPath, sidecarPath, 'tok-multi');
+		c.inputs.push({
+			payload: { photoFixture: photoPath, sidecarFixture: sidecarPath },
+			expected: { kind: 'sidecar' },
+		});
+		const result = await runReceiptCase(c, deps);
+		expect(result.tokenCounts).toEqual({ input: 2100, output: 510 });
+	});
+
+	it('parser throw before any LLM call contributes 0 tokens', async () => {
+		const photoPath = await stagePhoto('tok-throw-before');
+		const sidecarPath = await stageSidecar('tok-throw-before', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		// Tracker never advances — both before and after reads return {0,0}.
+		const costTracker = makeSteppingTracker([{ input: 0, output: 0 }]);
+		const deps = makeReceiptDeps(
+			// 'not json{' causes the parser to throw before any LLM tokens are spent.
+			llmShim('not json{'),
+			{ costTracker },
+		);
+		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'tok-throw-before'), deps);
+		expect(result.verdict).toBe(VERDICT.error);
+		expect(result.tokenCounts).toEqual({ input: 0, output: 0 });
+	});
+
+	it('parser throw after the tracker advanced still counts the spent tokens', async () => {
+		// Simulate: LLM call completed (tracker advanced), but JSON post-parsing
+		// threw. The `finally` block must capture the delta even on throw.
+		const photoPath = await stagePhoto('tok-throw-after');
+		const sidecarPath = await stageSidecar('tok-throw-after', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		// Before: {0,0}, after (in finally): {500,150} → delta {500,150}.
+		// The parser throws (malformed JSON from LLM), but the tracker already
+		// advanced — tokens must still be counted.
+		const costTracker = makeSteppingTracker([
+			{ input: 0, output: 0 },
+			{ input: 500, output: 150 },
+		]);
+		const deps = makeReceiptDeps(
+			// Trigger a parse error so the parser throws after the LLM responds.
+			llmShim('not valid json at all'),
+			{ costTracker },
+		);
+		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'tok-throw-after'), deps);
+		expect(result.verdict).toBe(VERDICT.error);
+		expect(result.tokenCounts).toEqual({ input: 500, output: 150 });
+	});
+
+	it('budget-exceeded abort before dispatch contributes 0 tokens', async () => {
+		const photoPath = await stagePhoto('tok-budget');
+		const sidecarPath = await stageSidecar('tok-budget', {
+			store: 'Walmart',
+			date: '2026-04-15',
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		// The pre-charge gate fires before any LLM call — tracker never sampled
+		// around a dispatch, so token counts must remain zero.
+		const costTracker = makeSteppingTracker([{ input: 0, output: 0 }]);
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: '2026-04-15',
+					lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+					subtotal: 4.99,
+					tax: 0,
+					total: 4.99,
+				}),
+			),
+			{
+				costTracker,
+				caseBudgetUsd: 0.01,
+				estimateUsd: () => 0.05, // every call costs 5x the budget
+			},
+		);
+		const result = await runReceiptCase(makeCase(photoPath, sidecarPath, 'tok-budget'), deps);
+		expect(result.verdict).toBe(VERDICT.budgetExceeded);
+		expect(result.tokenCounts).toEqual({ input: 0, output: 0 });
 	});
 });
 

@@ -87,6 +87,32 @@ describe('getEvaluatedTier helper', () => {
 	});
 });
 
+describe('looksLikeRunResult — tokenCounts validation', () => {
+	it('accepts a RunResult with non-zero tokenCounts', () => {
+		const r = baseResult({ tokenCounts: { input: 412, output: 78 } });
+		expect(looksLikeRunResult(r, 'case-1', VALID_KEY)).toBe(true);
+	});
+
+	it('round-trips non-zero tokenCounts through JSON.stringify -> parse -> looksLikeRunResult', () => {
+		const r = baseResult({ tokenCounts: { input: 412, output: 78 } });
+		const parsed = JSON.parse(JSON.stringify(r)) as unknown;
+		expect(looksLikeRunResult(parsed, 'case-1', VALID_KEY)).toBe(true);
+		expect((parsed as RunResult).tokenCounts).toEqual({ input: 412, output: 78 });
+	});
+
+	it.each([
+		['NaN input', { input: Number.NaN, output: 0 }],
+		['NaN output', { input: 0, output: Number.NaN }],
+		['Infinity input', { input: Number.POSITIVE_INFINITY, output: 0 }],
+		['Infinity output', { input: 0, output: Number.POSITIVE_INFINITY }],
+		['negative input', { input: -1, output: 0 }],
+		['negative output', { input: 0, output: -1 }],
+	])('rejects tokenCounts with %s', (_label, tokenCounts) => {
+		const r = baseResult({ tokenCounts: tokenCounts as { input: number; output: number } });
+		expect(looksLikeRunResult(r, 'case-1', VALID_KEY)).toBe(false);
+	});
+});
+
 describe('ROUTING_TARGET_TIER lookup table', () => {
 	it('maps every RoutingTarget to a tier slot', () => {
 		expect(ROUTING_TARGET_TIER['food-shadow']).toBe('fast');

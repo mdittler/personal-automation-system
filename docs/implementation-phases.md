@@ -3445,6 +3445,40 @@ The W1 `implementation-phases.md` section and the `REQ-CHATBOT-CATALOG-*` URS tr
 
 ---
 
+## Regression Token Metering (2026-05-22)
+
+**Goal:** Surface real per-case token counts in the regression harness — replacing the hard-coded `{input: 0, output: 0}` zeroes that the GUI displayed for every case — so operators can see actual token spend per case in `RunResult.tokenCounts` and the regression GUI compare/drilldown views.
+
+**Approach:** Extend `CostTracker` with a process-local running token counter (`getTokenUsageTotals()`), then have each case-runner take a before/after delta around its LLM adapter calls to compute real per-case token counts. The key insight: `LLMService.complete()` was deliberately NOT changed — `completeWithMeta()` already exposes usage, and the regression harness meters closures around production classifiers via `CostTracker.record()`, which already accumulates token spend. The fix therefore belonged in `CostTracker` (adding a sanitized running total readable as `getTokenUsageTotals()`), not in the LLM service interface. A new `MeteredError` wrapper carries token spend that occurred before an adapter throws, ensuring error-path tokens are counted.
+
+**Codex plan review (Round 1 — 9 findings, all applied pre-implementation):**
+
+Notable corrections applied to the plan before any code was written:
+
+- (P1×4) Renamed the counter API to `getTokenUsageTotals()` (honest naming — the previously-planned name `getMonthlyTotalTokens()` falsely implied a persisted monthly figure when the counter is process-local and not persisted); added `safeTokenCount()` sanitization at the `record()` boundary to guard against NaN/Infinity/negative from provider adapters; required throw-resilient error-path metering (motivating `MeteredError`); mandated `try/finally` deltas in chatbot and receipt runners.
+- (P2×4) Specified process-local (not persisted) semantics; `CostMeterSource` interface gains `getTokenUsageTotals()`; `build-deps.ts` must thread the real `CostTracker` to the receipt runner; rubric oracle's `CallMeter` carries real tokens.
+- (P3×1) Confirmed `RunResult.tokenCounts` naming matches the existing type field.
+
+Each batch additionally went through spec-compliance + code-quality review during execution.
+
+**Batch-by-batch breakdown:**
+
+- **B1 — `CostTracker.getTokenUsageTotals()`** — Added a sanitized (`safeTokenCount`), process-local running token counter to `CostTracker`. Incremented synchronously inside `record()` via `safeTokenCount()` (guards NaN, Infinity, negative, non-number). Not persisted; only before/after deltas matter for the harness. `CostMeterSource` interface extended with `getTokenUsageTotals()` so the regression workspace can call it without importing from core directly.
+
+- **B2 — Throw-resilient dispatch metering** — Rewrote `meterCall()` in `regression/src/runner/dispatch.ts` to capture a token-count delta even when the adapter throws. Introduced `MeteredError` (an `Error` subclass carrying a `CallMeter`) so callers can catch throws and still recover spend. `buildRecallAdapter()` was updated with the same throw-resilient metering pattern — an inline metering block, not a call to `meterCall()`. `CostMeterSource` already gained `getTokenUsageTotals()` in B1.
+
+- **B3 — Case-runner token propagation** — All four case-runners (routing, recall, receipt, chatbot) aggregate real token counts into `RunResult.tokenCounts`. Routing and recall runners use `MeteredError` catch to count spend before an adapter throws. Chatbot and receipt runners use `try/finally` deltas. `build-deps.ts` threads the real `CostTracker` to the receipt runner. The rubric oracle's `CallMeter` now carries real tokens.
+
+- **B4 — Regression GUI display** — The compare table and per-case drilldown page in `/gui/regression` display real token counts from `RunResult.tokenCounts`. The stale "plumbing pending" copy was removed.
+
+- **B5 — Documentation (this phase)** — URS updates (B5a, already committed): REQ-REG-018 added (process-local token counter), REQ-REG-013 updated (display now shows real counts), REQ-REG-017 updated (estimator note references real token data). Traceability matrix updated. Documentation files (B5b = this commit): estimator.ts JSDoc updated, implementation-phases.md section added, CLAUDE.md status bullet added, open-items.md amended.
+
+**URS:** 1 new entry (REQ-REG-018) + 2 updated (REQ-REG-013, REQ-REG-017).
+
+**Tests:** All existing estimator, runner, and GUI regression tests remain green. The `PER_CASE_USD_BY_BUCKET` constants are unchanged; numeric recalibration is a deferred follow-up tracked in `docs/open-items.md`.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.

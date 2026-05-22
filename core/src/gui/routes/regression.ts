@@ -103,6 +103,8 @@ interface DisplayedCase {
 	modelStandard: string;
 	timestamp: string | null;
 	costUsd: string;
+	tokensInput: string;
+	tokensOutput: string;
 	hasResult: boolean;
 }
 
@@ -154,6 +156,8 @@ function buildDisplayedCase(listed: ListedCase, display: DisplayResult | null): 
 			modelStandard: '—',
 			timestamp: null,
 			costUsd: '—',
+			tokensInput: '—',
+			tokensOutput: '—',
 			hasResult: false,
 		};
 	}
@@ -175,6 +179,8 @@ function buildDisplayedCase(listed: ListedCase, display: DisplayResult | null): 
 		modelStandard: result.modelIds.standard,
 		timestamp: result.timestamp,
 		costUsd: result.costUsd.toFixed(4),
+		tokensInput: String(result.tokenCounts.input),
+		tokensOutput: String(result.tokenCounts.output),
 		hasResult: true,
 	};
 }

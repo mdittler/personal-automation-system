@@ -72,6 +72,9 @@ function queuedCostTracker(values: number[]): CostMeterSource {
 			if (v === undefined) throw new Error('cost tracker queue empty');
 			return v;
 		},
+		getTokenUsageTotals(): { input: number; output: number } {
+			return { input: 0, output: 0 };
+		},
 	};
 }
 

@@ -1173,6 +1173,163 @@ describe('CostTracker', () => {
 	});
 
 	// ---------------------------------------------------------------------------
+	// Token usage counter
+	// ---------------------------------------------------------------------------
+	describe('token usage counter', () => {
+		it('getTokenUsageTotals is {input:0,output:0} on a fresh tracker', () => {
+			const tracker = new CostTracker(tempDir, logger);
+			expect(tracker.getTokenUsageTotals()).toEqual({ input: 0, output: 0 });
+		});
+
+		it('record() increments token totals by the entry inputTokens/outputTokens', async () => {
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.record({
+				model: 'claude-sonnet-4-20250514',
+				inputTokens: 123,
+				outputTokens: 456,
+			});
+			expect(tracker.getTokenUsageTotals()).toEqual({ input: 123, output: 456 });
+		});
+
+		it('token totals accumulate across multiple record() calls', async () => {
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.record({
+				model: 'claude-sonnet-4-20250514',
+				inputTokens: 100,
+				outputTokens: 50,
+			});
+			await tracker.record({
+				model: 'claude-sonnet-4-20250514',
+				inputTokens: 200,
+				outputTokens: 75,
+			});
+			await tracker.record({
+				model: 'claude-sonnet-4-20250514',
+				inputTokens: 300,
+				outputTokens: 25,
+			});
+			expect(tracker.getTokenUsageTotals()).toEqual({ input: 600, output: 150 });
+		});
+
+		it('token totals update synchronously even when the log write fails', async () => {
+			// Mirror the existing write-failure pattern: block system dir with a file
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.loadMonthlyCache();
+
+			// Block system dir with a file to cause doAppendEntry to fail
+			await writeFile(join(tempDir, 'system'), 'blocking-file', 'utf-8');
+
+			await tracker.record({
+				model: 'claude-sonnet-4-20250514',
+				inputTokens: 1_000_000,
+				outputTokens: 1_000_000,
+				appId: 'test-app',
+			});
+
+			// Both the monthly cost cache AND token counter must be updated
+			// despite the file write failing
+			expect(tracker.getMonthlyTotalCost()).toBeGreaterThan(0);
+			expect(tracker.getTokenUsageTotals().input).toBeGreaterThan(0);
+		});
+
+		it('getTokenUsageTotals returns a fresh object each call', async () => {
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.record({ model: 'claude-sonnet-4-20250514', inputTokens: 10, outputTokens: 5 });
+
+			const first = tracker.getTokenUsageTotals();
+			first.input = 99999;
+			first.output = 99999;
+
+			const second = tracker.getTokenUsageTotals();
+			expect(second.input).toBe(10);
+			expect(second.output).toBe(5);
+		});
+
+		it('record() coerces NaN / Infinity / -Infinity / negative token counts to 0', async () => {
+			const badValues: unknown[] = [
+				Number.NaN,
+				Number.POSITIVE_INFINITY,
+				Number.NEGATIVE_INFINITY,
+				-1,
+				-100,
+			];
+			for (const bad of badValues) {
+				const tracker = new CostTracker(tempDir, logger);
+				await tracker.record({
+					model: 'claude-sonnet-4-20250514',
+					inputTokens: bad as number,
+					outputTokens: bad as number,
+				});
+				const totals = tracker.getTokenUsageTotals();
+				expect(Number.isFinite(totals.input)).toBe(true);
+				expect(totals.input).toBeGreaterThanOrEqual(0);
+				expect(Number.isFinite(totals.output)).toBe(true);
+				expect(totals.output).toBeGreaterThanOrEqual(0);
+			}
+		});
+
+		it('record() with a NaN token count does not poison the cost estimate', async () => {
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.loadMonthlyCache();
+
+			await tracker.record({
+				model: 'claude-sonnet-4-20250514',
+				inputTokens: Number.NaN,
+				outputTokens: Number.NaN,
+			});
+
+			// getMonthlyTotalCost() must stay finite (not NaN) after a bad entry
+			expect(Number.isFinite(tracker.getMonthlyTotalCost())).toBe(true);
+		});
+
+		it('record() with a zero-token entry leaves token totals unchanged and finite', async () => {
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.record({ model: 'claude-sonnet-4-20250514', inputTokens: 0, outputTokens: 0 });
+
+			const totals = tracker.getTokenUsageTotals();
+			expect(totals.input).toBe(0);
+			expect(totals.output).toBe(0);
+			expect(Number.isFinite(totals.input)).toBe(true);
+			expect(Number.isFinite(totals.output)).toBe(true);
+		});
+
+		it('concurrent record() calls sum token totals correctly', async () => {
+			const tracker = new CostTracker(tempDir, logger);
+
+			await Promise.all([
+				tracker.record({ model: 'claude-sonnet-4-20250514', inputTokens: 10, outputTokens: 1 }),
+				tracker.record({ model: 'claude-sonnet-4-20250514', inputTokens: 20, outputTokens: 2 }),
+				tracker.record({ model: 'claude-sonnet-4-20250514', inputTokens: 30, outputTokens: 3 }),
+				tracker.record({ model: 'claude-sonnet-4-20250514', inputTokens: 40, outputTokens: 4 }),
+				tracker.record({ model: 'claude-sonnet-4-20250514', inputTokens: 50, outputTokens: 5 }),
+			]);
+
+			expect(tracker.getTokenUsageTotals()).toEqual({ input: 150, output: 15 });
+		});
+
+		it('a freshly constructed CostTracker reports {0,0} after loadMonthlyCache()', async () => {
+			// The token counter is process-local — it must NOT be restored from YAML.
+			// Pre-seed a monthly-costs.yaml with costs from the current month to ensure
+			// loadMonthlyCache() actually loads the file (not just starts fresh).
+			const currentMonth = new Date().toISOString().slice(0, 7);
+			await writeYamlFile(join(tempDir, 'system', 'monthly-costs.yaml'), {
+				month: currentMonth,
+				apps: { 'some-app': 1.23 },
+				users: { 'user-x': 1.23 },
+				total: 1.23,
+			});
+
+			const tracker = new CostTracker(tempDir, logger);
+			await tracker.loadMonthlyCache();
+
+			// Monthly cost was loaded from YAML (proving loadMonthlyCache ran)
+			expect(tracker.getMonthlyTotalCost()).toBeCloseTo(1.23, 6);
+			// Token counter must still be zero — it is NOT restored from YAML
+			expect(tracker.getTokenUsageTotals()).toEqual({ input: 0, output: 0 });
+		});
+	});
+
+	// ---------------------------------------------------------------------------
 	// parseUsageMarkdown 9-col compatibility
 	// ---------------------------------------------------------------------------
 	describe('parseUsageMarkdown 9-col compatibility', () => {

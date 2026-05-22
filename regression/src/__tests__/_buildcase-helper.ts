@@ -116,10 +116,22 @@ export function makeLogger(): ReceiptRunnerDeps['logger'] {
 // ─── deps + case builders ──────────────────────────────────────────────────
 
 /**
+ * Builds a zero-cost `CostMeterSource` stub for tests that don't care about
+ * token metering. Tests that need to observe token counts should build their
+ * own stepping stub and pass it via `overrides.costTracker`.
+ */
+export function makeZeroCostTracker(): ReceiptRunnerDeps['costTracker'] {
+	return {
+		getMonthlyTotalCost: () => 0,
+		getTokenUsageTotals: () => ({ input: 0, output: 0 }),
+	};
+}
+
+/**
  * Returns a fully-formed `ReceiptRunnerDeps` with sane defaults. Each test
  * supplies the `llm` (the variable bit) and optionally overrides any other
  * field; the boilerplate (`logger`, `modelIds`, `cacheKey`, `caseBudgetUsd`,
- * `estimateUsd`, `timezone`) lives here.
+ * `estimateUsd`, `timezone`, `costTracker`) lives here.
  */
 export function makeReceiptDeps(
 	llm: ReceiptRunnerDeps['llm'],
@@ -133,6 +145,7 @@ export function makeReceiptDeps(
 		cacheKey: HEX_CACHE_KEY,
 		caseBudgetUsd: 0.05,
 		estimateUsd: () => 0.02,
+		costTracker: makeZeroCostTracker(),
 		...overrides,
 	};
 }
