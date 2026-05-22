@@ -8,6 +8,7 @@
  *     Zod and SettingDef bounds are always in sync.
  */
 import type { SettingDef } from '../settings/settings-registry.js';
+import { DEFAULT_ALWAYS_VERIFY_INTENTS } from './defaults.js';
 
 // ---------------------------------------------------------------------------
 // Shared bound constants (imported by pas-yaml-schema.ts)
@@ -39,6 +40,7 @@ export const SYSTEM_KEY_RUNTIME_PATH: Readonly<Record<string, string>> = {
 	'chat.sessions.auto_prune': 'chat.sessions.auto_prune',
 	'routing.verification.enabled': 'routing.verification.enabled',
 	'routing.verification.upper_bound': 'routing.verification.upperBound',
+	'routing.verification.always_verify_intents': 'routing.verification.alwaysVerifyIntents',
 };
 
 // ---------------------------------------------------------------------------
@@ -124,6 +126,24 @@ export const SYSTEM_SETTING_DEFS: ReadonlyArray<Omit<SettingDef, 'appId'>> = [
 		adminOnly: true,
 		dangerous: false,
 		hidden: false,
+		scope: 'system',
+		nlSafe: false,
+		restartRequired: true,
+	},
+	{
+		// hidden because the current GUI widget set (boolean/number/string/select)
+		// does not render arrays. The def exists so the writer's runtime-path
+		// allowlist and resetToSchemaDefault wiring stay uniform with the other
+		// system keys; operators edit this via pas.yaml directly.
+		key: 'routing.verification.always_verify_intents',
+		category: 'system',
+		label: 'Always-verify intents',
+		help: 'Intent description strings that must always go through route verification, even when classifier confidence is above the upper bound. Edit via pas.yaml.',
+		type: 'string',
+		default: [...DEFAULT_ALWAYS_VERIFY_INTENTS],
+		adminOnly: true,
+		dangerous: false,
+		hidden: true,
 		scope: 'system',
 		nlSafe: false,
 		restartRequired: true,

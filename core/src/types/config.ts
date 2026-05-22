@@ -236,6 +236,16 @@ export interface RoutingVerificationConfig {
 	enabled: boolean;
 	/** Confidence upper bound — above this, skip verification. */
 	upperBound: number;
+	/**
+	 * Intent description strings that MUST go through route verification even
+	 * when the classifier's confidence is above `upperBound`. Defaults in the
+	 * loader to the Food hosting intent so fresh deployments are protected
+	 * from the "inviting people" mis-route bug without operator action.
+	 *
+	 * See `DEFAULT_ALWAYS_VERIFY_INTENTS` in `services/config/defaults.ts`
+	 * and the matching `apps/food/src/routing/food-intents.ts` constant.
+	 */
+	alwaysVerifyIntents: string[];
 }
 
 /** App configuration service provided to apps via CoreServices. */

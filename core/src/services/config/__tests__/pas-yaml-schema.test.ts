@@ -208,6 +208,54 @@ describe('chat.recall.max_window_days — zod rejection', () => {
 	});
 });
 
+describe('routing.verification.always_verify_intents — schema validation', () => {
+	it('accepts an array of strings', () => {
+		expect(() =>
+			PasYamlConfigSchema.parse({
+				routing: { verification: { always_verify_intents: ['foo', 'bar'] } },
+			}),
+		).not.toThrow();
+	});
+
+	it('accepts an empty array (operator override)', () => {
+		expect(() =>
+			PasYamlConfigSchema.parse({
+				routing: { verification: { always_verify_intents: [] } },
+			}),
+		).not.toThrow();
+	});
+
+	it('accepts undefined / absent key', () => {
+		expect(() =>
+			PasYamlConfigSchema.parse({ routing: { verification: { enabled: true } } }),
+		).not.toThrow();
+	});
+
+	it('rejects a non-array value', () => {
+		expect(() =>
+			PasYamlConfigSchema.parse({
+				routing: { verification: { always_verify_intents: 'not-an-array' } },
+			}),
+		).toThrow();
+	});
+
+	it('rejects an array with non-string elements', () => {
+		expect(() =>
+			PasYamlConfigSchema.parse({
+				routing: { verification: { always_verify_intents: ['ok', 123] } },
+			}),
+		).toThrow();
+	});
+
+	it('rejects null', () => {
+		expect(() =>
+			PasYamlConfigSchema.parse({
+				routing: { verification: { always_verify_intents: null } },
+			}),
+		).toThrow();
+	});
+});
+
 describe('parsePasYamlConfig()', () => {
 	it('returns parsed config for valid input', () => {
 		const config = parsePasYamlConfig({ users: [{ id: '123', name: 'Alice' }] });

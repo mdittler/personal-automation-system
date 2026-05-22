@@ -136,6 +136,11 @@ export const PasYamlConfigSchema = z
 					.object({
 						enabled: z.boolean().optional(),
 						upper_bound: z.number().optional(),
+						// Defaults in code to the Food hosting intent
+						// (DEFAULT_ALWAYS_VERIFY_INTENTS). Schema only validates
+						// shape — the loader applies the default and sanitizes
+						// invalid input that bypasses the schema.
+						always_verify_intents: z.array(z.string()).optional(),
 					})
 					.passthrough()
 					.optional(),

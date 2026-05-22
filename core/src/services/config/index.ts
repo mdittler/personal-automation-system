@@ -25,7 +25,7 @@ import type { WebhookDefinition } from '../../types/webhooks.js';
 import { readYamlFileStrict } from '../../utils/yaml.js';
 import { isLocalProvider } from '../llm/model-pricing.js';
 import { DEFAULT_PROVIDERS } from './default-providers.js';
-import { DEFAULT_LLM_SAFEGUARDS } from './defaults.js';
+import { DEFAULT_ALWAYS_VERIFY_INTENTS, DEFAULT_LLM_SAFEGUARDS } from './defaults.js';
 import { parsePasYamlConfig } from './pas-yaml-schema.js';
 
 /** Shape of an LLM provider entry in pas.yaml. */
@@ -89,6 +89,7 @@ interface PasYamlConfig {
 		verification?: {
 			enabled?: boolean;
 			upper_bound?: number;
+			always_verify_intents?: unknown;
 		};
 	};
 	backup?: {
@@ -269,6 +270,9 @@ export async function loadSystemConfig(options?: {
 			verification: {
 				enabled: yamlConfig?.routing?.verification?.enabled ?? true,
 				upperBound: clampUpperBound(yamlConfig?.routing?.verification?.upper_bound),
+				alwaysVerifyIntents: sanitizeAlwaysVerifyIntents(
+					yamlConfig?.routing?.verification?.always_verify_intents,
+				),
 			},
 		},
 		users,
@@ -310,6 +314,29 @@ export async function loadSystemConfig(options?: {
 function clampUpperBound(value: number | undefined): number {
 	if (value === undefined) return 0.7;
 	return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Sanitize the `routing.verification.always_verify_intents` value.
+ *
+ * - `undefined` (key absent) → the production default `DEFAULT_ALWAYS_VERIFY_INTENTS`.
+ * - A valid `string[]` (including `[]`) → returned as-is, defensively copied.
+ * - Anything else (non-array, array with non-string elements, `null`) →
+ *   the production default. Codex feedback: defaulting invalid input to `[]`
+ *   would silently re-introduce the mis-route bug the default was added to
+ *   prevent. Returning the production default is the safe fallback.
+ *
+ * The schema layer (`pas-yaml-schema.ts`) rejects type-invalid input loudly;
+ * this sanitizer is the last line of defense for inputs that bypass schema
+ * validation (test fixtures, hot-reload paths).
+ */
+function sanitizeAlwaysVerifyIntents(value: unknown): string[] {
+	if (value === undefined) return [...DEFAULT_ALWAYS_VERIFY_INTENTS];
+	if (!Array.isArray(value)) return [...DEFAULT_ALWAYS_VERIFY_INTENTS];
+	if (!value.every((item) => typeof item === 'string')) {
+		return [...DEFAULT_ALWAYS_VERIFY_INTENTS];
+	}
+	return [...value];
 }
 
 /**

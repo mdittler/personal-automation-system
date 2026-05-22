@@ -137,6 +137,26 @@ describe('SYSTEM_SETTING_DEFS default values match config loader defaults', () =
 		expect(def, `no def found for key '${key}'`).toBeDefined();
 		expect(def!.default).toBe(expected);
 	});
+
+	it('routing.verification.always_verify_intents default is the hosting intent', () => {
+		const def = SYSTEM_SETTING_DEFS.find(
+			(d) => d.key === 'routing.verification.always_verify_intents',
+		);
+		expect(def, 'no def found for routing.verification.always_verify_intents').toBeDefined();
+		expect(def!.default).toEqual([
+			'user wants to plan a meal or menu for a dinner party or guests they are hosting',
+		]);
+	});
+
+	it('routing.verification.always_verify_intents is hidden (no GUI widget, YAML-only)', () => {
+		// The current GUI widget set (boolean/number/string/select) does not
+		// render arrays. Operators edit this via pas.yaml; the def exists so
+		// the writer's runtime-path allowlist + reset path are wired uniformly.
+		const def = SYSTEM_SETTING_DEFS.find(
+			(d) => d.key === 'routing.verification.always_verify_intents',
+		);
+		expect(def!.hidden).toBe(true);
+	});
 });
 
 // ---------------------------------------------------------------------------

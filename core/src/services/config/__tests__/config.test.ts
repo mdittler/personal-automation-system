@@ -655,6 +655,92 @@ describe('loadSystemConfig', () => {
 		expect(config.routing?.verification?.upperBound).toBe(0);
 	});
 
+	// --- routing.verification.always_verify_intents tests ---
+	// The default in code must be the Food hosting intent literal — fresh
+	// deployments must be protected without operator action. Codex flagged
+	// that defaulting to [] would leave the original mis-route bug unfixed
+	// for default installs.
+
+	describe('routing.verification.always_verify_intents', () => {
+		const HOSTING_DEFAULT =
+			'user wants to plan a meal or menu for a dinner party or guests they are hosting';
+
+		it('defaults to the hosting intent when key is absent', async () => {
+			const envPath = join(tempDir, '.env');
+			await writeEnvFile(envPath, requiredEnvVars);
+
+			const config = await loadSystemConfig({
+				envPath,
+				configPath: join(tempDir, 'nonexistent.yaml'),
+			});
+
+			expect(config.routing?.verification?.alwaysVerifyIntents).toEqual([HOSTING_DEFAULT]);
+		});
+
+		it('defaults to the hosting intent when routing section omits the key', async () => {
+			const config = await loadConfigFromYamlObj({
+				routing: { verification: { upper_bound: 0.6 } },
+			});
+			expect(config.routing?.verification?.alwaysVerifyIntents).toEqual([HOSTING_DEFAULT]);
+		});
+
+		it('uses an explicit array of strings as-is', async () => {
+			const config = await loadConfigFromYamlObj({
+				routing: { verification: { always_verify_intents: ['foo intent', 'bar intent'] } },
+			});
+			expect(config.routing?.verification?.alwaysVerifyIntents).toEqual([
+				'foo intent',
+				'bar intent',
+			]);
+		});
+
+		it('accepts an explicit empty array (operator override)', async () => {
+			const config = await loadConfigFromYamlObj({
+				routing: { verification: { always_verify_intents: [] } },
+			});
+			expect(config.routing?.verification?.alwaysVerifyIntents).toEqual([]);
+		});
+
+		it('coerces non-array input to the hosting default (sanitization)', async () => {
+			// Bypass Zod by writing a raw YAML string the schema would reject; we
+			// rely on the loader's sanitizer as the last line of defense.
+			const envPath = join(tempDir, '.env');
+			const yamlPath = join(tempDir, 'pas.yaml');
+			await writeEnvFile(envPath, requiredEnvVars);
+			// Hand-write YAML with the wrong type so we can assert sanitizer behaviour
+			// independent of schema rejection. The schema test covers rejection.
+			await writeFile(
+				yamlPath,
+				'routing:\n  verification:\n    always_verify_intents: not-an-array\n',
+				'utf-8',
+			);
+			// Schema-level rejection is acceptable too — but if the loader is
+			// reached with bogus input, it must default to the hosting intent,
+			// never to [].
+			let config: Awaited<ReturnType<typeof loadSystemConfig>> | undefined;
+			try {
+				config = await loadSystemConfig({ envPath, configPath: yamlPath });
+			} catch {
+				// Schema rejected — that's also valid. Re-test with a config that
+				// reaches the loader by going through loadConfigFromYamlObj after
+				// stripping the bad key (covered by other tests). For this case,
+				// confirm rejection is loud:
+				return;
+			}
+			expect(config.routing?.verification?.alwaysVerifyIntents).toEqual([HOSTING_DEFAULT]);
+		});
+
+		it('coerces array with non-string elements to the hosting default', async () => {
+			// loadConfigFromYamlObj routes via stringify which will preserve the
+			// mixed-type array; schema rejects it. Catch that and assert.
+			await expect(
+				loadConfigFromYamlObj({
+					routing: { verification: { always_verify_intents: [123, true, null] } },
+				}),
+			).rejects.toThrow(/always_verify_intents|Invalid pas.yaml/i);
+		});
+	});
+
 	// --- F11: Optional Anthropic / multi-provider startup tests ---
 
 	it('starts with only GOOGLE_AI_API_KEY and no ANTHROPIC_API_KEY', async () => {

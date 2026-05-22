@@ -46,7 +46,10 @@ import { createChatTranscriptIndex } from './services/chat-transcript-index/inde
 import { pruneExpiredSessions } from './services/chat-transcript-index/prune.js';
 import { ConditionEvaluatorServiceImpl } from './services/condition-evaluator/index.js';
 import { AppConfigServiceImpl } from './services/config/app-config-service.js';
-import { DEFAULT_LLM_SAFEGUARDS } from './services/config/defaults.js';
+import {
+	DEFAULT_ALWAYS_VERIFY_INTENTS,
+	DEFAULT_LLM_SAFEGUARDS,
+} from './services/config/defaults.js';
 import { loadSystemConfig } from './services/config/index.js';
 import {
 	SYSTEM_KEY_RUNTIME_PATH,
@@ -1303,6 +1306,12 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		userManager,
 		routeVerifier,
 		verificationUpperBound: verificationConfig?.upperBound,
+		// Task 3.2: defense-in-depth — these intents always go through route
+		// verification, even when classifier confidence is above the upper
+		// bound. Task 3.3 wires this into the router gate.
+		alwaysVerifyIntents: config.routing?.verification?.alwaysVerifyIntents ?? [
+			...DEFAULT_ALWAYS_VERIFY_INTENTS,
+		],
 		inviteService,
 		userMutationService,
 		interactionContext: interactionContextService,

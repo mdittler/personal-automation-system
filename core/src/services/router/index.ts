@@ -287,6 +287,12 @@ export interface RouterOptions {
 	routeVerifier?: RouteVerifier;
 	/** Confidence upper bound for verification (default: 0.7). */
 	verificationUpperBound?: number;
+	/**
+	 * Intents that MUST go through route verification even when classifier
+	 * confidence is above `verificationUpperBound`. Plumbed in Task 3.2 as
+	 * defense-in-depth; the router gate is wired in Task 3.3.
+	 */
+	alwaysVerifyIntents?: readonly string[];
 	/** Invite service for /invite command and /start code redemption. */
 	inviteService?: InviteService;
 	/** User mutation service for registering users via invite codes. */
