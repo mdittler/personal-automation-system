@@ -94,6 +94,7 @@
         <th>Fast model</th>
         <th>Standard model</th>
         <th>Cost</th>
+        <th>Tokens</th>
         <th>Timestamp</th>
         <th></th>
       </tr>
@@ -108,7 +109,6 @@
 
 <footer class="regression-footnote">
   <small>
-    Per-case token counts are not yet plumbed through <code>LLMService.complete()</code> — see
-    <code>docs/open-items.md</code>. Cost is authoritative via CostTracker.
+    Cost is authoritative via CostTracker. Token counts show totals across all LLM calls for the case.
   </small>
 </footer>
