@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, test, vi } from 'vitest';
 import {
+	type PlanEventResult,
 	formatEventPlan,
 	formatIngredient,
 	formatPrepTimeline,
 	generateDeltaGroceryList,
 	generatePrepTimeline,
+	isDegenerateEvent,
 	parseEventDescription,
 	planEvent,
 	suggestEventMenu,
@@ -431,6 +433,86 @@ describe('hosting-planner', () => {
 			await generatePrepTimeline(services as never, menu, '2026-04-12T18:00:00');
 			const prompt = services.llm.complete.mock.calls[0]![0] as string;
 			expect(prompt).not.toContain('```');
+		});
+	});
+
+	// ─── isDegenerateEvent ────────────────────────────────────
+	describe('isDegenerateEvent — untrusted LLM output', () => {
+		type Row = { name: string; input: Record<string, unknown>; expected: boolean };
+		const rows: Row[] = [
+			{
+				name: 'bug case: zero count, empty names',
+				input: { guestCount: 0, guestNames: [] },
+				expected: true,
+			},
+			{
+				name: 'negative count, empty names',
+				input: { guestCount: -3, guestNames: [] },
+				expected: true,
+			},
+			{ name: 'NaN count', input: { guestCount: Number.NaN, guestNames: [] }, expected: true },
+			{
+				name: 'Infinity count',
+				input: { guestCount: Number.POSITIVE_INFINITY, guestNames: [] },
+				expected: true,
+			},
+			{
+				name: 'absurd count over cap, no names',
+				input: { guestCount: 1e6, guestNames: [] },
+				expected: true,
+			},
+			{ name: 'wrong type for count', input: { guestCount: '6', guestNames: [] }, expected: true },
+			{ name: 'count + names missing entirely', input: {}, expected: true },
+			{
+				name: 'zero count with meta description',
+				input: {
+					guestCount: 0,
+					guestNames: [],
+					description: 'The user is inquiring about the process of inviting people.',
+				},
+				expected: true,
+			},
+			{
+				name: 'valid count BUT meta-phrase in description',
+				input: { guestCount: 4, guestNames: [], description: 'asking about how to invite people' },
+				expected: true,
+			},
+			{
+				name: 'valid count, no description (missing description alone is NOT disqualifying)',
+				input: { guestCount: 6, guestNames: [], description: 'dinner party Saturday' },
+				expected: false,
+			},
+			{
+				name: 'zero count rescued by non-empty guestNames',
+				input: { guestCount: 0, guestNames: ['Sarah', 'Tom'] },
+				expected: false,
+			},
+			{
+				name: 'valid count, empty description (empty description alone is not disqualifying)',
+				input: { guestCount: 8, guestNames: [], description: '' },
+				expected: false,
+			},
+		];
+		test.each(rows)('$name', ({ input, expected }) => {
+			expect(isDegenerateEvent(input as never)).toBe(expected);
+		});
+
+		it('PlanEventResult discriminated union compiles with both arms', () => {
+			const planArm: PlanEventResult = {
+				kind: 'plan',
+				plan: {
+					description: 'x',
+					eventTime: '',
+					guestCount: 2,
+					guests: [],
+					menu: [],
+					prepTimeline: [],
+					deltaGroceryItems: [],
+				},
+			};
+			const declinedArm: PlanEventResult = { kind: 'declined', reason: 'not-an-event' };
+			expect(planArm.kind).toBe('plan');
+			expect(declinedArm.kind).toBe('declined');
 		});
 	});
 

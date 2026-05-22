@@ -28,6 +28,57 @@ export interface ParsedEvent {
 	description: string;
 }
 
+/** Result of attempting to plan an event from a user description. */
+export type PlanEventResult =
+	| { kind: 'plan'; plan: EventPlan }
+	| { kind: 'declined'; reason: 'not-an-event' };
+
+const META_PHRASES = [
+	'inquiring about',
+	'asking about',
+	'wants to know',
+	'how to',
+	'how do',
+	'can you tell me',
+	'is asking',
+	'question about',
+] as const;
+
+const MAX_GUEST_COUNT = 1000;
+
+/**
+ * Treat ParsedEvent as untrusted LLM output. Returns true if the parse is
+ * degenerate — i.e. NOT an event-planning request — and should be declined
+ * instead of fed to downstream menu-suggestion and prep-timeline LLM calls.
+ *
+ * Degenerate iff (no guest signal) OR (description is a non-empty string
+ * containing a meta-phrase). A missing/empty description alone is NOT
+ * disqualifying — a valid guest signal is sufficient.
+ *
+ * Guest signal: finite guestCount in (0, MAX_GUEST_COUNT], OR a non-empty
+ * guestNames array of strings.
+ */
+export function isDegenerateEvent(parsed: ParsedEvent): boolean {
+	const count = (parsed as { guestCount?: unknown }).guestCount;
+	const names = (parsed as { guestNames?: unknown }).guestNames;
+	const description = (parsed as { description?: unknown }).description;
+
+	const hasValidCount =
+		typeof count === 'number' && Number.isFinite(count) && count > 0 && count <= MAX_GUEST_COUNT;
+	const hasNamedGuests =
+		Array.isArray(names) && names.length > 0 && names.every((n) => typeof n === 'string');
+	const hasGuestSignal = hasValidCount || hasNamedGuests;
+
+	if (!hasGuestSignal) return true;
+
+	if (typeof description === 'string' && description.length > 0) {
+		const normalized = description.trim().toLowerCase();
+		if (META_PHRASES.some((p) => normalized.includes(p))) return true;
+	}
+
+	return false;
+}
+
 export async function parseEventDescription(
 	services: CoreServices,
 	text: string,
