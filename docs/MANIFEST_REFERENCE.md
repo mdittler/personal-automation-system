@@ -112,6 +112,8 @@ export const handleScheduledJob: AppModule['handleScheduledJob'] = async (
 };
 ```
 
+If a `schedules` handler sends any user-visible Telegram message, the app SHOULD declare `app-outbound-bridge` under `requirements.services` and bridge every proactive send — the chatbot cannot answer follow-ups about messages it never saw. See [`docs/CREATING_AN_APP.md`](CREATING_AN_APP.md#proactive-messages-and-the-chatbot-bridge).
+
 ### `rules`
 
 Condition-evaluator rule files. Each file declares named conditions —
@@ -168,6 +170,7 @@ Infrastructure services your app needs. Only declared services are injected — 
 | `data-query` | `dataQuery` | Natural-language data queries over indexed app data files. Optional — `services.dataQuery` is `undefined` unless declared |
 | `interaction-context` | `interactionContext` | Per-user in-memory buffer of recent file interactions, for context-aware responses. Optional — `undefined` unless declared |
 | `edit-service` | `editService` | LLM-assisted file editing with a propose/confirm flow and stale-write guard. Optional — `undefined` unless declared |
+| `app-outbound-bridge` | `appOutboundBridge` | Records app-initiated (proactive, non-reply) Telegram messages into the chatbot transcript so the conversational chatbot can answer follow-ups about them. Optional — `services.appOutboundBridge` is `undefined` unless declared. Required for any app that sends scheduled summaries, alerts, voting prompts, or any cron-initiated user-visible message. See [Proactive Messages and the Chatbot Bridge](CREATING_AN_APP.md#proactive-messages-and-the-chatbot-bridge) for the helper + guard pattern. |
 
 Legacy service IDs `llm:ollama` and `llm:claude` are still accepted but map to the same `llm` service.
 
