@@ -553,10 +553,12 @@ describe('hosting-planner', () => {
 				pantry,
 			);
 
-			expect(result.guestCount).toBe(6);
-			expect(result.menu).toHaveLength(1);
-			expect(result.prepTimeline).toHaveLength(1);
-			expect(result.guests).toHaveLength(1);
+			expect(result.kind).toBe('plan');
+			if (result.kind !== 'plan') throw new Error('expected plan');
+			expect(result.plan.guestCount).toBe(6);
+			expect(result.plan.menu).toHaveLength(1);
+			expect(result.plan.prepTimeline).toHaveLength(1);
+			expect(result.plan.guests).toHaveLength(1);
 			expect(services.llm.complete).toHaveBeenCalledTimes(3);
 		});
 
@@ -598,10 +600,72 @@ describe('hosting-planner', () => {
 				[],
 			);
 
-			expect(result.prepTimeline).toEqual([]);
-			expect(result.timelineError).toBeDefined();
-			expect(result.menu).toHaveLength(1);
+			expect(result.kind).toBe('plan');
+			if (result.kind !== 'plan') throw new Error('expected plan');
+			expect(result.plan.prepTimeline).toEqual([]);
+			expect(result.plan.timelineError).toBeDefined();
+			expect(result.plan.menu).toHaveLength(1);
 			expect(services.logger.warn).toHaveBeenCalled();
+		});
+	});
+
+	// ─── planEvent — declines degenerate parses ──────────────
+	describe('planEvent — declines degenerate parses', () => {
+		it('short-circuits a degenerate parse and skips downstream LLM calls', async () => {
+			// The bug case: parse returns guestCount 0 + a meta-phrase description.
+			// planEvent should decline immediately — no menu suggestion, no prep
+			// timeline LLM calls — and return the discriminated 'declined' arm.
+			const services = createMockServices([
+				JSON.stringify({
+					guestCount: 0,
+					eventTime: '',
+					guestNames: [],
+					dietaryNotes: '',
+					description: 'The user is inquiring about the process of inviting people.',
+				}),
+			]);
+
+			const result = await planEvent(services as never, 'inviting people', [], [], []);
+
+			expect(result).toEqual({ kind: 'declined', reason: 'not-an-event' });
+			// Only the parseEventDescription call — suggestEventMenu and
+			// generatePrepTimeline must NOT have run.
+			expect(services.llm.complete).toHaveBeenCalledTimes(1);
+		});
+
+		it('passes a valid parse through to the full planning pipeline', async () => {
+			const services = createMockServices([
+				// parseEventDescription — valid
+				JSON.stringify({
+					guestCount: 6,
+					eventTime: 'Saturday 7pm',
+					guestNames: [],
+					dietaryNotes: '',
+					description: 'Dinner party for 6 on Saturday at 7pm',
+				}),
+				// suggestEventMenu
+				JSON.stringify([
+					{ recipeTitle: 'Pasta', recipeId: 'recipe-1', scaledServings: 6, dietaryNotes: [] },
+				]),
+				// generatePrepTimeline
+				JSON.stringify([{ time: 'T-2h', task: 'Start cooking' }]),
+			]);
+
+			const result = await planEvent(
+				services as never,
+				'dinner for 6 Saturday at 7pm',
+				[],
+				[makeRecipe()],
+				[],
+			);
+
+			expect(result.kind).toBe('plan');
+			if (result.kind !== 'plan') throw new Error('expected plan');
+			expect(result.plan.guestCount).toBe(6);
+			expect(result.plan.eventTime).toBe('Saturday 7pm');
+			expect(result.plan.menu).toHaveLength(1);
+			// All three LLM calls happened: parse + menu + timeline.
+			expect(services.llm.complete).toHaveBeenCalledTimes(3);
 		});
 	});
 });

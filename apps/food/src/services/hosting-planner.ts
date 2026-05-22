@@ -255,9 +255,18 @@ export async function planEvent(
 	guests: GuestProfile[],
 	recipes: Recipe[],
 	pantry: PantryItem[],
-): Promise<EventPlan> {
+): Promise<PlanEventResult> {
 	// Step 1: Parse the event description
 	const parsed = await parseEventDescription(services, text);
+
+	// Step 1a: Trust boundary — treat ParsedEvent as untrusted LLM output.
+	// Degenerate parses (e.g. guestCount 0 + meta-phrase description, the
+	// "inviting people" bug case) short-circuit BEFORE the two downstream
+	// LLM calls (suggestEventMenu, generatePrepTimeline) — saves cost and
+	// avoids rendering a hollow "Event Plan / 0 guests / Menu:" message.
+	if (isDegenerateEvent(parsed)) {
+		return { kind: 'declined', reason: 'not-an-event' };
+	}
 
 	// Step 2: Match named guests to profiles
 	const matchedGuests: GuestProfile[] = [];
@@ -282,7 +291,7 @@ export async function planEvent(
 	// Step 5: Calculate delta grocery list
 	const deltaGroceryItems = generateDeltaGroceryList(menu, recipes, pantry);
 
-	return {
+	const plan: EventPlan = {
 		description: parsed.description,
 		eventTime: parsed.eventTime,
 		guestCount: parsed.guestCount,
@@ -292,6 +301,8 @@ export async function planEvent(
 		deltaGroceryItems,
 		...(timelineError ? { timelineError } : {}),
 	};
+
+	return { kind: 'plan', plan };
 }
 
 export function formatEventPlan(plan: EventPlan): string {

@@ -209,8 +209,17 @@ export async function handleHostingCommand(
 			const recipes = await loadAllRecipes(sharedStore);
 			const pantry = await loadPantry(sharedStore);
 
-			const plan = await planEvent(services, description, guests, recipes, pantry);
-			const message = formatEventPlan(plan);
+			const result = await planEvent(services, description, guests, recipes, pantry);
+			if (result.kind === 'declined') {
+				// Fixed decline copy — must NOT echo any of the untrusted parsed
+				// description back to the user (trust-boundary discipline).
+				await services.telegram.send(
+					userId,
+					"That doesn't look like an event to plan. Try '/hosting plan dinner for 6 Saturday at 7pm'. If you wanted to invite someone to PAS, ask the assistant about invite codes.",
+				);
+				return;
+			}
+			const message = formatEventPlan(result.plan);
 			await services.telegram.send(userId, message);
 			return;
 		}
