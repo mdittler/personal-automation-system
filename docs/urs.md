@@ -9983,7 +9983,7 @@ The case list on `/gui/regression` renders status icon, fast/standard model IDs,
 - `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders "never run" (●) for a case with no cache
 - `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders "coverage changed" (⚠) when cached cacheKey differs from currentCacheKey
 - `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders discovery error banner + disables Run controls when --list fails closed (Codex I4)
-- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > filters by bucket via ?bucket= query param
+- `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > filters by bucket via ?view=compare&bucket=… query params
 - `regression-routes.test.ts` > GET /gui/regression — page rendering (REQ-REG-013) > renders an empty-state when bucket filter matches nothing
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId — drilldown (Codex C5) > renders inputs + expected from ListedCase even when never run
 - `regression-routes.test.ts` > GET /gui/regression/cases/:caseId/row — server-rendered row (Codex I7) > reflects the live run result when ?runId= matches the in-progress run (Codex I7)
@@ -10070,7 +10070,7 @@ The drilldown's History tab lazy-loads `GET /gui/regression/cases/:caseId/histor
 
 ---
 
-### REQ-REG-018: The regression harness MUST meter per-call token usage and propagate it into RunResult.tokenCounts
+### REQ-REG-018 — The regression harness MUST meter per-call token usage and propagate it into RunResult.tokenCounts
 
 **Phase:** Chunk B.2 | **Status:** Implemented
 
