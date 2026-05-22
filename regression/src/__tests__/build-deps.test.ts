@@ -356,9 +356,9 @@ describe('build-deps — receipt runner CostTracker wiring', () => {
 		// Verify it has the CostMeterSource shape the receipt runner expects.
 		expect(typeof deps.costTracker!.getMonthlyTotalCost).toBe('function');
 		expect(typeof deps.costTracker!.getTokenUsageTotals).toBe('function');
-		// The receipt-runner's costTracker is threaded via index.ts opts.costTracker
-		// which reads from this same deps.costTracker reference — assert the
-		// CostTracker instance is in fact a CostTracker (not a plain stub).
+		// index.ts plumbs deps.costTracker into runReceiptCase via opts.costTracker,
+		// so this instanceof check is the meaningful wiring assertion: if the same
+		// real CostTracker instance flows through, all runner deltas stay coherent.
 		const { CostTracker } = await import('@core/services/llm/cost-tracker.js');
 		expect(deps.costTracker).toBeInstanceOf(CostTracker);
 

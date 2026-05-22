@@ -4,6 +4,16 @@ import { runChatbotCase } from '../runner/case-runners/chatbot-runner.js';
 import { VERDICT } from '../shared/types.js';
 import { StubLLMService } from './_stub-provider.js';
 
+import * as rubricOracle from '../oracles/rubric.js';
+
+// Mock the rubric oracle so individual tests can force it to throw,
+// letting us verify the actuals double-push guard without depending on
+// runRubricOracle's internal catch behaviour.
+vi.mock('../oracles/rubric.js', async (importOriginal) => {
+	const real = await importOriginal<typeof import('../oracles/rubric.js')>();
+	return { ...real };
+});
+
 const modelIds: TierModelSnapshot = { fast: 'fast-m', standard: 'std-m', reasoning: null };
 const noopLogger = {
 	warn: () => {},
@@ -467,5 +477,52 @@ describe('token propagation', () => {
 		// tokenCounts reflects first turn only: {50, 10}
 		expect(r.tokenCounts.input).toBe(50);
 		expect(r.tokenCounts.output).toBe(10);
+	});
+
+	it('oracle throw after routeMessage succeeds: exactly one actuals entry, token spend counted', async () => {
+		// routeMessage succeeds (actuals success-path push runs), then
+		// runRubricOracle throws. The routed-flag guard must prevent a second
+		// actuals push, so actuals.length === inputs.length. Token spend that
+		// occurred during routeMessage is still captured via the finally delta.
+		const env = fakeEnv('reply text');
+
+		let tokenIn = 0;
+		let tokenOut = 0;
+		const tracker = {
+			getMonthlyTotalCost: () => 0,
+			getTokenUsageTotals: () => ({ input: tokenIn, output: tokenOut }),
+		};
+
+		env.routeMessage = vi.fn(async () => {
+			tokenIn += 60;
+			tokenOut += 12;
+			env.telegram.sent.push({ userId: 'regression-user-0', text: 'reply text' });
+		});
+
+		// Force runRubricOracle to throw (it normally never does — it catches LLM
+		// errors internally — so we stub it here to exercise the latent defect path).
+		vi.spyOn(rubricOracle, 'runRubricOracle').mockRejectedValueOnce(
+			new Error('oracle internal failure'),
+		);
+
+		const r = await runChatbotCase(chatbotCase(), {
+			env,
+			judgeLlm: new StubLLMService(),
+			judgeModelId: 'std-m',
+			costTracker: tracker,
+			modelIds,
+			cacheKey: 'k'.repeat(64),
+			caseBudgetUsd: 0.2,
+			estimateUsd: () => 0.001,
+			logger: noopLogger,
+		});
+
+		// Invariant: exactly one actuals entry per turn — no double-push.
+		expect(r.actuals).toHaveLength(1);
+		expect(r.verdict).toBe(VERDICT.error);
+		// Token spend from routeMessage is still captured.
+		expect(r.tokenCounts).toEqual({ input: 60, output: 12 });
+
+		vi.restoreAllMocks();
 	});
 });

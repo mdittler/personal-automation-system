@@ -1103,7 +1103,7 @@ describe('runReceiptCase — token propagation', () => {
 		const costTracker = makeSteppingTracker([
 			{ input: 0, output: 0 },
 			{ input: 1200, output: 300 },
-			{ input: 1200, output: 300 }, // re-read as "before" for input 2 (actually the before read starts new)
+			{ input: 1200, output: 300 }, // "before" snapshot for input 2 — same value as input 1's "after"
 			{ input: 2100, output: 510 },
 		]);
 		const deps = makeReceiptDeps(

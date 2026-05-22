@@ -105,6 +105,10 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 		let tokAfter = tokBefore;
 		const readHandler = deps.env.captureHandler();
 		let routeErr: unknown;
+		// Invariant: exactly one actuals entry is pushed per turn regardless of
+		// where a throw occurs. Set true after the success-path push so the
+		// error-path fallback push is skipped when it already ran.
+		let routed = false;
 		let oracle: Awaited<ReturnType<typeof runRubricOracle>> | undefined;
 		try {
 			await deps.env.routeMessage({
@@ -121,6 +125,7 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 				.map((m) => m.text)
 				.join('\n');
 			actuals.push(newMessages);
+			routed = true;
 
 			// Codex I6 — assert routing correctness BEFORE grading reply quality.
 			// expectedHandler lives on PersonaInput.expected.expectedHandler.
@@ -168,7 +173,10 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 				details: `routeMessage threw: ${(routeErr as Error).message}`,
 			});
 			verdict = VERDICT.error;
-			actuals.push('');
+			// Only push the fallback empty string when the success-path push
+			// did not already run (i.e. routeMessage threw before actuals was
+			// populated, or runRubricOracle threw after routeMessage succeeded).
+			if (!routed) actuals.push('');
 			continue;
 		}
 
