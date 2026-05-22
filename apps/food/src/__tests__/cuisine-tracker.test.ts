@@ -294,4 +294,75 @@ describe('checkCuisineDiversity', () => {
 		// Single meal can't have 3+ repetitions
 		expect(services.telegram.send).not.toHaveBeenCalled();
 	});
+
+	describe('bridges to chatbot transcript', () => {
+		let recordOutboundMessage: ReturnType<typeof vi.fn>;
+
+		beforeEach(() => {
+			recordOutboundMessage = vi.fn().mockResolvedValue(undefined);
+			(services as unknown as { appOutboundBridge: unknown }).appOutboundBridge = {
+				recordOutboundMessage,
+			};
+		});
+
+		it('records one bridge entry per household member with the raw body and no buttons', async () => {
+			const plan = makePlan([
+				makeMeal({ recipeTitle: 'Pasta Bolognese' }),
+				makeMeal({ recipeTitle: 'Margherita Pizza', recipeId: 'r2' }),
+				makeMeal({ recipeTitle: 'Risotto', recipeId: 'r3' }),
+			]);
+			setupHouseholdAndPlan(household, plan);
+
+			const classifications: CuisineClassification[] = [
+				{ recipe: 'Pasta Bolognese', cuisine: 'Italian' },
+				{ recipe: 'Margherita Pizza', cuisine: 'Italian' },
+				{ recipe: 'Risotto', cuisine: 'Italian' },
+			];
+			vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify(classifications));
+
+			await checkCuisineDiversity(services, store as unknown as ScopedDataStore);
+
+			const telegramCalls = vi.mocked(services.telegram.send).mock.calls;
+			expect(telegramCalls).toHaveLength(2);
+			const [, telegramBody] = telegramCalls[0]!;
+
+			expect(recordOutboundMessage).toHaveBeenCalledTimes(2);
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'matt',
+				appId: 'food',
+				kind: 'cuisine-diversity-nudge',
+				body: telegramBody,
+				buttons: undefined,
+			});
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'sarah',
+				appId: 'food',
+				kind: 'cuisine-diversity-nudge',
+				body: telegramBody,
+				buttons: undefined,
+			});
+		});
+
+		it('does not send or record when no repetition is detected', async () => {
+			const plan = makePlan([
+				makeMeal({ recipeTitle: 'Pasta Bolognese' }),
+				makeMeal({ recipeTitle: 'Tacos', recipeId: 'r2' }),
+				makeMeal({ recipeTitle: 'Sushi', recipeId: 'r3' }),
+			]);
+			setupHouseholdAndPlan(household, plan);
+
+			const classifications: CuisineClassification[] = [
+				{ recipe: 'Pasta Bolognese', cuisine: 'Italian' },
+				{ recipe: 'Tacos', cuisine: 'Mexican' },
+				{ recipe: 'Sushi', cuisine: 'Japanese' },
+			];
+			vi.mocked(services.llm.complete).mockResolvedValue(JSON.stringify(classifications));
+
+			await checkCuisineDiversity(services, store as unknown as ScopedDataStore);
+
+			expect(services.telegram.send).not.toHaveBeenCalled();
+			expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+			expect(recordOutboundMessage).not.toHaveBeenCalled();
+		});
+	});
 });

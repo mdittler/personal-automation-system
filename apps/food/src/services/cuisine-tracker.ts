@@ -10,6 +10,7 @@ import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import type { CuisineClassification, PlannedMeal } from '../types.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { sendProactiveMessage } from '../utils/proactive-message.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 import { loadCurrentPlan } from './meal-plan-store.js';
 import { parseJsonResponse } from './recipe-parser.js';
@@ -110,6 +111,10 @@ export async function checkCuisineDiversity(
 
 	const message = lines.join('\n');
 	for (const memberId of hh.members) {
-		await services.telegram.send(memberId, message);
+		await sendProactiveMessage(services, {
+			userId: memberId,
+			kind: 'cuisine-diversity-nudge',
+			body: message,
+		});
 	}
 }
