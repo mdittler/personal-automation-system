@@ -23,6 +23,7 @@ import type {
 	RouteVerifierStatus,
 	TelegramService,
 } from '../../types/telegram.js';
+import type { RegisteredUser } from '../../types/users.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
@@ -539,6 +540,21 @@ export class Router {
 			}
 		}
 
+		await this.routeOneTextRequest(enrichedCtx, user);
+	}
+
+	/**
+	 * Dispatch a single text segment: classify → access-check → grey-zone verify →
+	 * dispatchMessage/dispatchConversation → tryContextPromotion → sendToFallback.
+	 *
+	 * Extracted verbatim from routeMessage so future multi-intent splitting (Task 4.2/4.3)
+	 * can call this once per segment without duplicating the dispatch tail. Behavior is
+	 * unchanged: the single-message path still calls this exactly once.
+	 */
+	private async routeOneTextRequest(
+		enrichedCtx: MessageContext,
+		user: RegisteredUser,
+	): Promise<void> {
 		// 3. Free text → intent classification
 		const match = await this.intentClassifier.classify(
 			enrichedCtx.text,
