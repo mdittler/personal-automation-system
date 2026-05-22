@@ -75,10 +75,6 @@ function queuedCostTracker(values: number[]): CostMeterSource {
 	};
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Pre-existing tests (unchanged behaviour)
-// ─────────────────────────────────────────────────────────────────────────────
-
 describe('foodShadow adapter — happy path', () => {
 	it('returns {action, confidence} JSON when classifier kind is ok', async () => {
 		const llm = {
@@ -355,10 +351,6 @@ describe('buildRecallAdapter', () => {
 		expect(parsed.reason).toBe('llm-error');
 	});
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Batch 2: token-metering tests
-// ─────────────────────────────────────────────────────────────────────────────
 
 // (1) Happy — foodShadow adapter reflects before/after token delta
 describe('foodShadow adapter — meter reflects the before/after token delta', () => {

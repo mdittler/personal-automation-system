@@ -1031,14 +1031,6 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 	});
 });
 
-// =====================================================================
-// Token propagation tests (Batch 3b-2).
-//
-// These tests verify that `runReceiptCase` correctly meters tokens via
-// `costTracker.getTokenUsageTotals()` deltas around `parseReceiptFromPhoto`,
-// using `try/finally` so tokens spent before a post-LLM throw are not lost.
-// =====================================================================
-
 describe('runReceiptCase — token propagation', () => {
 	/**
 	 * Builds a stepping `costTracker` stub. Each call to `getTokenUsageTotals()`

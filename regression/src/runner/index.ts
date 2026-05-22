@@ -121,6 +121,12 @@ export interface RunSuiteOutcome {
 	targets: Map<string, RoutingTarget>;
 }
 
+/** Zero-valued cost/token meter used when no real CostTracker is supplied (dry runs). */
+const ZERO_COST_METER = {
+	getMonthlyTotalCost: () => 0,
+	getTokenUsageTotals: () => ({ input: 0, output: 0 }),
+};
+
 export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> {
 	const startedAt = new Date().toISOString();
 	const loaded = await loadCases(opts.casesDir);
@@ -288,10 +294,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 					},
 					judgeLlm: opts.judgeLlm,
 					judgeModelId: opts.modelIds.standard,
-					costTracker: opts.costTracker ?? {
-						getMonthlyTotalCost: () => 0,
-						getTokenUsageTotals: () => ({ input: 0, output: 0 }),
-					},
+					costTracker: opts.costTracker ?? ZERO_COST_METER,
 					modelIds: opts.modelIds,
 					cacheKey,
 					caseBudgetUsd: lc.case.budgetUsd,
@@ -312,10 +315,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 					cacheKey,
 					caseBudgetUsd: lc.case.budgetUsd,
 					estimateUsd: opts.estimateUsd,
-					costTracker: opts.costTracker ?? {
-						getMonthlyTotalCost: () => 0,
-						getTokenUsageTotals: () => ({ input: 0, output: 0 }),
-					},
+					costTracker: opts.costTracker ?? ZERO_COST_METER,
 				});
 			} else {
 				// Fallback for any future bucket not yet wired here.

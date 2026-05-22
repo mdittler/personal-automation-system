@@ -343,22 +343,13 @@ describe('build-deps — receipt runner CostTracker wiring', () => {
 		vi.stubEnv('GUI_AUTH_TOKEN', 'stub-gui-token');
 		vi.stubEnv('ANTHROPIC_API_KEY', 'sk-stub-not-real');
 
-		// buildProductionDeps constructs CostTracker internally. We verify the
-		// same object reference is exposed as `deps.costTracker` — the receipt
-		// runner and all other runners share it so sequential-dispatch deltas
-		// do not interleave.
 		const deps = await buildProductionDeps();
 
-		// `costTracker` is the real CostTracker instance threaded into RunCliDeps.
-		// It must be the same reference as what the receipt-runner and the
-		// chatbot-runner both see — not a separately-constructed stub.
 		expect(deps.costTracker).toBeDefined();
-		// Verify it has the CostMeterSource shape the receipt runner expects.
+		// `costTracker` must be the real CostTracker the CLI builds, not a stub —
+		// index.ts plumbs this same reference into runReceiptCase.
 		expect(typeof deps.costTracker!.getMonthlyTotalCost).toBe('function');
 		expect(typeof deps.costTracker!.getTokenUsageTotals).toBe('function');
-		// index.ts plumbs deps.costTracker into runReceiptCase via opts.costTracker,
-		// so this instanceof check is the meaningful wiring assertion: if the same
-		// real CostTracker instance flows through, all runner deltas stay coherent.
 		const { CostTracker } = await import('@core/services/llm/cost-tracker.js');
 		expect(deps.costTracker).toBeInstanceOf(CostTracker);
 

@@ -337,7 +337,7 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 		inputs: c.inputs,
 		actuals,
 		oracleVerdicts,
-		tokenCounts: { input: tokenIn, output: tokenOut }, // metered via CostTracker delta
+		tokenCounts: { input: tokenIn, output: tokenOut },
 		costUsd,
 		modelIds: deps.modelIds,
 		evaluatedTier: 'standard',

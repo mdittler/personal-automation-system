@@ -10,9 +10,10 @@
  *
  * Pass threshold: score >= 4 (spec line 210).
  *
- * Cost metering: CostTracker delta across the judge call. Token counts
- * are best-effort 0 — same constraint as the routing-runner adapter
- * (LLMService.complete returns only a string).
+ * Cost and token metering: CostTracker deltas across the judge call —
+ * `getMonthlyTotalCost()` for cost and `getTokenUsageTotals()` for the
+ * input/output token counts. Both are read in a `finally` so spend that
+ * occurred before a throw is still captured.
  *
  * Fencing reuses PAS production protections: `sanitizeContextContent` +
  * `buildMemoryContextBlock` strip zero-width / bidi controls, collapse
