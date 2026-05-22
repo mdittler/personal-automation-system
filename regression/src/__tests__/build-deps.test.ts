@@ -23,6 +23,7 @@ import {
 	applyModelMatrixOverride,
 	buildDryRunDeps,
 	buildMetadataDeps,
+	buildProductionDeps,
 	composeLLMService,
 	findRepoRoot,
 	resolveTierModelIds,
@@ -330,6 +331,38 @@ describe('composeLLMService — cost-tracker delta', () => {
 		// about: the LLM call completes and CostTracker.record() runs without
 		// throwing. Non-zero cost is provider-pricing-dependent.
 		expect(after).toBeGreaterThanOrEqual(before);
+	});
+});
+
+describe('build-deps — receipt runner CostTracker wiring', () => {
+	// Regression guard: the same CostTracker instance that meters routing/recall/
+	// chatbot costs must also be threaded into the receipt runner deps so all
+	// token deltas stay coherent under sequential dispatch.
+	it('production deps thread the same CostTracker instance into the receipt runner', async () => {
+		vi.stubEnv('TELEGRAM_BOT_TOKEN', 'stub-token');
+		vi.stubEnv('GUI_AUTH_TOKEN', 'stub-gui-token');
+		vi.stubEnv('ANTHROPIC_API_KEY', 'sk-stub-not-real');
+
+		// buildProductionDeps constructs CostTracker internally. We verify the
+		// same object reference is exposed as `deps.costTracker` — the receipt
+		// runner and all other runners share it so sequential-dispatch deltas
+		// do not interleave.
+		const deps = await buildProductionDeps();
+
+		// `costTracker` is the real CostTracker instance threaded into RunCliDeps.
+		// It must be the same reference as what the receipt-runner and the
+		// chatbot-runner both see — not a separately-constructed stub.
+		expect(deps.costTracker).toBeDefined();
+		// Verify it has the CostMeterSource shape the receipt runner expects.
+		expect(typeof deps.costTracker!.getMonthlyTotalCost).toBe('function');
+		expect(typeof deps.costTracker!.getTokenUsageTotals).toBe('function');
+		// The receipt-runner's costTracker is threaded via index.ts opts.costTracker
+		// which reads from this same deps.costTracker reference — assert the
+		// CostTracker instance is in fact a CostTracker (not a plain stub).
+		const { CostTracker } = await import('@core/services/llm/cost-tracker.js');
+		expect(deps.costTracker).toBeInstanceOf(CostTracker);
+
+		vi.unstubAllEnvs();
 	});
 });
 

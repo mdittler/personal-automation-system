@@ -312,6 +312,10 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 					cacheKey,
 					caseBudgetUsd: lc.case.budgetUsd,
 					estimateUsd: opts.estimateUsd,
+					costTracker: opts.costTracker ?? {
+						getMonthlyTotalCost: () => 0,
+						getTokenUsageTotals: () => ({ input: 0, output: 0 }),
+					},
 				});
 			} else {
 				// Fallback for any future bucket not yet wired here.
