@@ -6302,4 +6302,121 @@ describe('Natural Language — Real User Messages', () => {
 			);
 		});
 	});
+
+	// ═══════════════════════════════════════════════════════════════
+	// /hosting plan — PERSONA coverage for degenerate-event decline
+	// ═══════════════════════════════════════════════════════════════
+	//
+	// End-to-end persona-style coverage that complements the planner-level
+	// unit tests (hosting-planner.test.ts) and the handler-level integration
+	// tests (handlers/hosting-handler.test.ts). These tests dispatch through
+	// handleCommand with realistic user phrasings — meta-questions about
+	// inviting people, casual "tell me about hosting" curiosity, and
+	// legitimate event requests — and assert the user-visible outcome.
+	//
+	// Decline behavior added in commit a311539. The decline copy is fixed
+	// and must NEVER leak Event Plan / 0 guests / Menu: through to the user
+	// when the LLM returns a degenerate parse.
+	describe('/hosting plan — persona coverage for degenerate-event decline', () => {
+		// Byte-equal to the literal in handlers/hosting.ts. Any drift here
+		// is a real regression in the user-visible copy.
+		const DECLINE_MESSAGE =
+			"That doesn't look like an event to plan. Try '/hosting plan dinner for 6 Saturday at 7pm'. If you wanted to invite someone to PAS, ask the assistant about invite codes.";
+
+		// ── Negative: realistic non-event inputs must be declined ────
+		// Each row is `[userText, degenerateDescription]`. The degenerate
+		// description is what a real LLM would plausibly emit for that
+		// input — the goal here is handler-level behavior on realistic
+		// phrasings, so the LLM is mocked (we are not testing the LLM).
+		it.each([
+			['inviting people', 'user is inquiring about inviting people'],
+			['how do invite codes work', 'user is asking how invite codes work'],
+			['add my wife to the platform', 'user wants to add their wife to the platform'],
+			['can you tell me about hosting', 'user is asking a meta-question about the hosting feature'],
+			['whats hosting', 'user is asking what hosting means'],
+			['tell me about dinner parties', 'user wants to know about dinner parties in general'],
+		])(
+			'"%s" → exact decline message, no hollow Event Plan / 0 guests / Menu: leak',
+			async (userText, degenerateDescription) => {
+				setupHousehold();
+				// Only the parse call should fire — menu + timeline must be
+				// short-circuited by the degenerate guard.
+				vi.mocked(services.llm.complete).mockResolvedValueOnce(
+					JSON.stringify({
+						guestCount: 0,
+						guestNames: [],
+						dietaryNotes: '',
+						description: degenerateDescription,
+					}),
+				);
+
+				await handleCommand(
+					'hosting',
+					['plan', ...userText.split(/\s+/)],
+					msg(`/hosting plan ${userText}`),
+				);
+
+				// Exact decline copy — and never the hollow plan strings.
+				expect(services.telegram.send).toHaveBeenCalledWith('matt', DECLINE_MESSAGE);
+				const sendCalls = vi.mocked(services.telegram.send).mock.calls;
+				const planSends = sendCalls.filter(
+					(c) =>
+						typeof c[1] === 'string' &&
+						(c[1].includes('Event Plan') || c[1].includes('0 guests') || c[1].includes('Menu:')),
+				);
+				expect(planSends).toEqual([]);
+
+				// Downstream LLM calls (menu + timeline) must be skipped.
+				expect(services.llm.complete).toHaveBeenCalledOnce();
+			},
+		);
+
+		// ── Positive: legitimate hosting requests still produce a plan ──
+		// Each row is `[userText, guestCount, eventTime]`. The mocked parse
+		// returns the count + time, and the menu/timeline calls return
+		// minimal-but-valid payloads so formatEventPlan renders normally.
+		it.each([
+			["I'm hosting a dinner party for 6 Saturday", 6, 'Saturday'],
+			['having 8 people over for dinner saturday at 7', 8, 'Saturday 7pm'],
+			['plan a meal for 4 friends coming over tonight', 4, 'tonight'],
+			['dinner party for 10 guests next friday — vegetarian', 10, 'next Friday'],
+		])(
+			'"%s" → real plan rendered (Event Plan + %i guests)',
+			async (userText, guestCount, eventTime) => {
+				setupHousehold();
+				vi.mocked(services.llm.complete)
+					.mockResolvedValueOnce(
+						JSON.stringify({
+							guestCount,
+							eventTime,
+							guestNames: [],
+							dietaryNotes: '',
+							description: userText,
+						}),
+					)
+					.mockResolvedValueOnce(
+						JSON.stringify([
+							{ recipeTitle: 'Roast Chicken', scaledServings: guestCount, dietaryNotes: [] },
+						]),
+					)
+					.mockResolvedValueOnce(JSON.stringify([{ time: 'T-3h', task: 'Start prep' }]));
+
+				await handleCommand(
+					'hosting',
+					['plan', ...userText.split(/\s+/)],
+					msg(`/hosting plan ${userText}`),
+				);
+
+				const sendCalls = vi.mocked(services.telegram.send).mock.calls;
+				const planSend = sendCalls.find(
+					(c) => typeof c[1] === 'string' && c[1].includes('Event Plan'),
+				);
+				expect(planSend).toBeDefined();
+				const sentText = planSend![1] as string;
+				expect(sentText).toContain('Event Plan');
+				expect(sentText).toContain(`${guestCount} guests`);
+				expect(sentText).not.toBe(DECLINE_MESSAGE);
+			},
+		);
+	});
 });
