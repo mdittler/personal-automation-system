@@ -4,6 +4,7 @@
 
 import type { CoreServices } from '@pas/core/types';
 import { loadHousehold } from '../utils/household-guard.js';
+import { sendProactiveMessage } from '../utils/proactive-message.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 
 export async function handleSeasonalNudgeJob(services: CoreServices): Promise<void> {
@@ -29,7 +30,11 @@ Format as a friendly, concise Telegram message. Use bullet points. Keep it brief
 		const message = await services.llm.complete(prompt, { tier: 'fast' });
 
 		for (const memberId of household.members) {
-			await services.telegram.send(memberId, message);
+			await sendProactiveMessage(services, {
+				userId: memberId,
+				kind: 'seasonal-nudge',
+				body: message,
+			});
 		}
 	} catch (err) {
 		services.logger.error('Seasonal nudge job failed', err);
