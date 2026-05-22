@@ -24,6 +24,7 @@ import type {
 } from '@core/types/regression.js';
 import { VERDICT } from '@core/types/regression.js';
 import { type StructuralExpectation, runStructuralOracle } from '../../oracles/structural.js';
+import { MeteredError } from '../dispatch.js';
 
 export interface MinimalLogger {
 	warn(...args: unknown[]): void;
@@ -106,6 +107,11 @@ export async function runRoutingCase(c: PersonaCase, deps: RoutingRunnerDeps): P
 				{ err: (err as Error).message, caseId: c.id, payload: input.payload },
 				'routing-runner: classifier threw (infrastructure error)',
 			);
+			if (err instanceof MeteredError) {
+				tokenIn += err.meter.tokenIn;
+				tokenOut += err.meter.tokenOut;
+				costUsd += err.meter.costUsd;
+			}
 			oracleVerdicts.push({
 				verdict: VERDICT.error,
 				details: `classifier error: ${(err as Error).message}`,

@@ -1,7 +1,7 @@
 import type { PersonaCase, PersonaInput, TierModelSnapshot } from '@core/types/regression.js';
 import { describe, expect, it } from 'vitest';
 import { runRecallCase } from '../runner/case-runners/recall-runner.js';
-import type { RecallAdapter } from '../runner/dispatch.js';
+import { MeteredError, type RecallAdapter } from '../runner/dispatch.js';
 import { VERDICT } from '../shared/types.js';
 
 const modelIds: TierModelSnapshot = { fast: 'fast-m', standard: 'std-m', reasoning: null };
@@ -270,5 +270,107 @@ describe('runRecallCase', () => {
 		// The actual structural verdict is preserved in oracleVerdicts for review.
 		expect(r.oracleVerdicts).toHaveLength(1);
 		expect(r.oracleVerdicts[0]?.verdict).toBe(VERDICT.fail);
+	});
+});
+
+describe('runRecallCase — token propagation', () => {
+	it('propagates adapter meter token counts into RunResult.tokenCounts', async () => {
+		const adapter: RecallAdapter = {
+			recall: async () => ({
+				raw: '{"shouldRecall": false, "query": null, "timeAnchor": null, "reason": "r"}',
+				meter: { model: 'fast-m', tokenIn: 120, tokenOut: 25, costUsd: 0.0001 },
+			}),
+		};
+		const r = await runRecallCase(caseFixture(), {
+			adapter,
+			modelIds,
+			cacheKey: 'k'.repeat(64),
+			caseBudgetUsd: 0.05,
+			estimateUsd: () => 0.0001,
+			logger: noopLogger,
+		});
+		expect(r.tokenCounts).toEqual({ input: 120, output: 25 });
+	});
+
+	it('multi-input recall case sums token deltas', async () => {
+		// Input 1: prefilter skip → {0,0}; input 2: LLM call → {200,40}.
+		let call = 0;
+		const adapter: RecallAdapter = {
+			recall: async () => {
+				call++;
+				const meter =
+					call === 1
+						? { model: 'fast-m', tokenIn: 0, tokenOut: 0, costUsd: 0 }
+						: { model: 'fast-m', tokenIn: 200, tokenOut: 40, costUsd: 0.0002 };
+				return {
+					raw: '{"shouldRecall": false, "query": null, "timeAnchor": null, "reason": "r"}',
+					meter,
+				};
+			},
+		};
+		const c = caseFixture({
+			inputs: [
+				{ payload: 'p1', expected: { schema: caseSchema } },
+				{ payload: 'p2', expected: { schema: caseSchema } },
+			],
+		});
+		const r = await runRecallCase(c, {
+			adapter,
+			modelIds,
+			cacheKey: 'k'.repeat(64),
+			caseBudgetUsd: 0.05,
+			estimateUsd: () => 0.0001,
+			logger: noopLogger,
+		});
+		expect(r.tokenCounts).toEqual({ input: 200, output: 40 });
+	});
+
+	it('recall classifier error after partial spend still counts the spent tokens', async () => {
+		const partialMeter = { model: 'fast-m', tokenIn: 95, tokenOut: 18, costUsd: 0.00009 };
+		const adapter: RecallAdapter = {
+			recall: async () => {
+				throw new MeteredError('LLM network failure', partialMeter);
+			},
+		};
+		const r = await runRecallCase(caseFixture(), {
+			adapter,
+			modelIds,
+			cacheKey: 'k'.repeat(64),
+			caseBudgetUsd: 0.05,
+			estimateUsd: () => 0.0001,
+			logger: noopLogger,
+		});
+		expect(r.verdict).toBe(VERDICT.error);
+		expect(r.tokenCounts).toEqual({ input: 95, output: 18 });
+	});
+
+	it('observational input still contributes its token counts', async () => {
+		// Even though observational inputs do not escalate verdict, their tokens
+		// must be counted — real LLM spend occurred.
+		const adapter: RecallAdapter = {
+			recall: async () => ({
+				raw: '{"shouldRecall": false, "query": null, "timeAnchor": null, "reason": "r"}',
+				meter: { model: 'fast-m', tokenIn: 60, tokenOut: 12, costUsd: 0.00006 },
+			}),
+		};
+		const c = caseFixture({
+			inputs: [
+				{
+					payload: 'genuinely ambiguous',
+					expected: { schema: caseSchema },
+					observational: true,
+				} as PersonaInput & { observational?: boolean },
+			],
+		});
+		const r = await runRecallCase(c, {
+			adapter,
+			modelIds,
+			cacheKey: 'k'.repeat(64),
+			caseBudgetUsd: 0.05,
+			estimateUsd: () => 0.0001,
+			logger: noopLogger,
+		});
+		expect(r.verdict).toBe(VERDICT.pass);
+		expect(r.tokenCounts).toEqual({ input: 60, output: 12 });
 	});
 });
