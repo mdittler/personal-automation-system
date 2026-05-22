@@ -55,7 +55,10 @@ export interface ChatbotRunnerDeps {
 	env: ChatbotEnvLike;
 	judgeLlm: Pick<LLMService, 'complete'>;
 	judgeModelId: string;
-	costTracker: { getMonthlyTotalCost: () => number };
+	costTracker: {
+		getMonthlyTotalCost: () => number;
+		getTokenUsageTotals: () => { input: number; output: number };
+	};
 	modelIds: TierModelSnapshot;
 	cacheKey: string;
 	caseBudgetUsd: number;
@@ -75,6 +78,8 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 	const actuals: string[] = [];
 	const oracleVerdicts: OracleVerdict[] = [];
 	let costUsd = 0;
+	let tokenIn = 0;
+	let tokenOut = 0;
 	let verdict: Verdict = VERDICT.pass;
 
 	for (let i = 0; i < c.inputs.length; i++) {
@@ -95,7 +100,12 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 
 		const beforeCount = deps.env.telegram.sent.length;
 		const beforeCost = deps.costTracker.getMonthlyTotalCost();
+		const tokBefore = deps.costTracker.getTokenUsageTotals();
+		// Declared before try so finally can assign and post-block code can read.
+		let tokAfter = tokBefore;
 		const readHandler = deps.env.captureHandler();
+		let routeErr: unknown;
+		let oracle: Awaited<ReturnType<typeof runRubricOracle>> | undefined;
 		try {
 			await deps.env.routeMessage({
 				userId: deps.env.userId,
@@ -104,55 +114,70 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 				messageId: i + 1,
 				timestamp: new Date(),
 			});
+
+			const newMessages = deps.env.telegram.sent
+				.slice(beforeCount)
+				.filter((m) => m.userId === deps.env.userId)
+				.map((m) => m.text)
+				.join('\n');
+			actuals.push(newMessages);
+
+			// Codex I6 — assert routing correctness BEFORE grading reply quality.
+			// expectedHandler lives on PersonaInput.expected.expectedHandler.
+			const expected = (input.expected as { expectedHandler?: string }).expectedHandler;
+			const actualHandler = readHandler();
+			if (expected && actualHandler !== null && actualHandler !== expected) {
+				oracleVerdicts.push({
+					verdict: VERDICT.fail,
+					details: `routing mismatch: expected handler '${expected}', got '${actualHandler}'`,
+				});
+				if (verdict === VERDICT.pass) verdict = VERDICT.fail;
+			} else if (expected && actualHandler === null) {
+				oracleVerdicts.push({
+					verdict: VERDICT.error,
+					details: `routing diagnostic captured no handler for case ${c.id} (env did not record one)`,
+				});
+				verdict = VERDICT.error;
+			}
+
+			oracle = await runRubricOracle({
+				rubric: c.rubric,
+				actualResponse: newMessages,
+				deps: {
+					llm: deps.judgeLlm,
+					standardModelId: deps.judgeModelId,
+					logger: deps.logger,
+					costMeter: deps.costTracker,
+				},
+			});
 		} catch (err) {
+			routeErr = err;
+		} finally {
+			// Read after regardless of throw — tokens spent before any error are counted.
+			tokAfter = deps.costTracker.getTokenUsageTotals();
+		}
+
+		const afterCost = deps.costTracker.getMonthlyTotalCost();
+		costUsd += Math.max(0, afterCost - beforeCost);
+		tokenIn += Math.max(0, tokAfter.input - tokBefore.input);
+		tokenOut += Math.max(0, tokAfter.output - tokBefore.output);
+
+		if (routeErr !== undefined) {
 			oracleVerdicts.push({
 				verdict: VERDICT.error,
-				details: `routeMessage threw: ${(err as Error).message}`,
+				details: `routeMessage threw: ${(routeErr as Error).message}`,
 			});
 			verdict = VERDICT.error;
 			actuals.push('');
 			continue;
 		}
-		const newMessages = deps.env.telegram.sent
-			.slice(beforeCount)
-			.filter((m) => m.userId === deps.env.userId)
-			.map((m) => m.text)
-			.join('\n');
-		actuals.push(newMessages);
 
-		// Codex I6 — assert routing correctness BEFORE grading reply quality.
-		// expectedHandler lives on PersonaInput.expected.expectedHandler.
-		const expected = (input.expected as { expectedHandler?: string }).expectedHandler;
-		const actualHandler = readHandler();
-		if (expected && actualHandler !== null && actualHandler !== expected) {
-			oracleVerdicts.push({
-				verdict: VERDICT.fail,
-				details: `routing mismatch: expected handler '${expected}', got '${actualHandler}'`,
-			});
-			if (verdict === VERDICT.pass) verdict = VERDICT.fail;
-		} else if (expected && actualHandler === null) {
-			oracleVerdicts.push({
-				verdict: VERDICT.error,
-				details: `routing diagnostic captured no handler for case ${c.id} (env did not record one)`,
-			});
-			verdict = VERDICT.error;
+		if (oracle !== undefined) {
+			oracleVerdicts.push(oracle.verdict);
+			if (oracle.verdict.verdict === VERDICT.fail && verdict === VERDICT.pass)
+				verdict = VERDICT.fail;
+			if (oracle.verdict.verdict === VERDICT.error) verdict = VERDICT.error;
 		}
-
-		const oracle = await runRubricOracle({
-			rubric: c.rubric,
-			actualResponse: newMessages,
-			deps: {
-				llm: deps.judgeLlm,
-				standardModelId: deps.judgeModelId,
-				logger: deps.logger,
-				costMeter: deps.costTracker,
-			},
-		});
-		oracleVerdicts.push(oracle.verdict);
-		const afterCost = deps.costTracker.getMonthlyTotalCost();
-		costUsd += Math.max(0, afterCost - beforeCost);
-		if (oracle.verdict.verdict === VERDICT.fail && verdict === VERDICT.pass) verdict = VERDICT.fail;
-		if (oracle.verdict.verdict === VERDICT.error) verdict = VERDICT.error;
 	}
 
 	return {
@@ -163,7 +188,7 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 		inputs: c.inputs,
 		actuals,
 		oracleVerdicts,
-		tokenCounts: { input: 0, output: 0 },
+		tokenCounts: { input: tokenIn, output: tokenOut },
 		costUsd,
 		modelIds: deps.modelIds,
 		evaluatedTier: 'standard',
