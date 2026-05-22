@@ -25,8 +25,8 @@ const makeLogger = () => ({
 // now requires both getMonthlyTotalCost() and getTokenUsageTotals().
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Queued snapshots: each element is { cost, tokens }. Both counters advance
- *  together through the same queue position. */
+/** Queued snapshots: each element is { cost, tokens }. `queuedTracker` builds
+ *  one independent queue per getter from this list. */
 interface TrackerSnapshot {
 	cost: number;
 	tokens: { input: number; output: number };
@@ -34,10 +34,11 @@ interface TrackerSnapshot {
 
 /**
  * Returns a CostMeterSource driven by a queue of { cost, tokens } snapshots.
- * The first call to any getter returns snapshot[0], the second snapshot[1], etc.
- * The two getters share the same queue position so a single call to
- * getMonthlyTotalCost() AND getTokenUsageTotals() both return from the same
- * snapshot (callers invoke them together in the before/after pattern).
+ * Each getter has its OWN queue (cost / tokens) sliced from the snapshot list,
+ * and each call shifts that getter's queue independently. The two queues stay
+ * aligned only when both getters are called the same number of times — which
+ * holds for the before/after metering pattern, where each getter is invoked
+ * once per "before" read and once per "after" read.
  */
 function queuedTracker(snapshots: TrackerSnapshot[]): CostMeterSource {
 	const costQueue = snapshots.map((s) => s.cost);

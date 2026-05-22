@@ -3455,7 +3455,7 @@ The W1 `implementation-phases.md` section and the `REQ-CHATBOT-CATALOG-*` URS tr
 
 Notable corrections applied to the plan before any code was written:
 
-- (P1×4) Renamed the counter API to `getTokenUsageTotals()` (honest naming — the previous name `getLastUsageEntry()` suggested single-call semantics); added `safeTokenCount()` sanitization at the `record()` boundary to guard against NaN/Infinity/negative from provider adapters; required throw-resilient error-path metering (motivating `MeteredError`); mandated `try/finally` deltas in chatbot and receipt runners.
+- (P1×4) Renamed the counter API to `getTokenUsageTotals()` (honest naming — the previously-planned name `getMonthlyTotalTokens()` falsely implied a persisted monthly figure when the counter is process-local and not persisted); added `safeTokenCount()` sanitization at the `record()` boundary to guard against NaN/Infinity/negative from provider adapters; required throw-resilient error-path metering (motivating `MeteredError`); mandated `try/finally` deltas in chatbot and receipt runners.
 - (P2×4) Specified process-local (not persisted) semantics; `CostMeterSource` interface gains `getTokenUsageTotals()`; `build-deps.ts` must thread the real `CostTracker` to the receipt runner; rubric oracle's `CallMeter` carries real tokens.
 - (P3×1) Confirmed `RunResult.tokenCounts` naming matches the existing type field.
 
