@@ -338,6 +338,37 @@ export const FOOD_PERSONAS: readonly Persona[] = [
 					'isCulturalCalendarIntent (line 630) fires on Thanksgiving keyword; cultural calendar runs before hosting intent',
 				source: 'apps/food/src/index.ts:630',
 			},
+			// Platform-invite phrases — these are PAS-system questions ("how do
+			// I add a user to the platform") that semantically overlap with
+			// "hosting/inviting guests". They must NOT route to Food; they
+			// belong on the PAS-aware chatbot path. Task 3.1 renamed this
+			// intent to anchor on meal/menu/dinner-party precisely to keep
+			// platform-invite phrasings out. `'none'` is the shadow-taxonomy
+			// label for "no Food intent claims this — route elsewhere".
+			{
+				text: 'how do I invite someone to PAS',
+				correctLabel: 'none',
+				reason:
+					'platform-invite question — PAS user management (invite codes), not meal/menu planning for guests; HOSTING_MEAL_PLANNING_INTENT is anchored on meal/menu/dinner-party and intentionally does not claim invite phrasings',
+			},
+			{
+				text: 'inviting people to the platform',
+				correctLabel: 'none',
+				reason:
+					'platform-invite question — explicitly about adding users to the PAS platform, not hosting a meal; must reach the PAS-aware chatbot path, not Food',
+			},
+			{
+				text: 'how do invite codes work',
+				correctLabel: 'none',
+				reason:
+					'platform-invite question — PAS invite-code mechanism, no meal/menu/dinner-party signal; HOSTING_MEAL_PLANNING_INTENT does not claim this',
+			},
+			{
+				text: 'add a new user',
+				correctLabel: 'none',
+				reason:
+					'platform-invite question — adding a user to PAS, not a hosting/meal-planning request; routes to PAS-aware chatbot, not Food',
+			},
 		],
 		advisoryNearMisses: [],
 	},
