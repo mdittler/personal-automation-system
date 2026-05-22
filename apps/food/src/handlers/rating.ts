@@ -20,6 +20,7 @@ import {
 import { loadRecipe, updateRecipe } from '../services/recipe-store.js';
 import { isoNow, todayDate } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { sendProactiveMessage } from '../utils/proactive-message.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
@@ -207,6 +208,11 @@ export async function handleNightlyRatingPromptJob(
 	const buttons = buildRatingPromptButtons(uncookedMeals);
 
 	for (const memberId of household.members) {
-		await services.telegram.sendWithButtons(memberId, message, buttons);
+		await sendProactiveMessage(services, {
+			userId: memberId,
+			kind: 'nightly-rating-prompt',
+			body: message,
+			buttons,
+		});
 	}
 }
