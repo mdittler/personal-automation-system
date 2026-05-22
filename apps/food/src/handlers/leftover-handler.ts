@@ -22,6 +22,7 @@ import { appendWaste, appendWasteUnsafe } from '../services/waste-store.js';
 import type { FreezerItem, Leftover, WasteLogEntry } from '../types.js';
 import { todayDate } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { sendProactiveMessage } from '../utils/proactive-message.js';
 
 // ─── Callback handler ─────────────────────────────────────────────
 
@@ -339,12 +340,15 @@ export async function handleLeftoverCheckJob(
 		]);
 	}
 
-	// Send to all household members
+	// Send to all household members. The helper picks sendWithButtons vs
+	// send based on whether `buttons` is non-empty, so we can pass `undefined`
+	// when there are no actionable items (expired-only path).
 	for (const memberId of household.members) {
-		if (buttons.length > 0) {
-			await services.telegram.sendWithButtons(memberId, message, buttons);
-		} else {
-			await services.telegram.send(memberId, message);
-		}
+		await sendProactiveMessage(services, {
+			userId: memberId,
+			kind: 'leftover-check',
+			body: message,
+			buttons: buttons.length > 0 ? buttons : undefined,
+		});
 	}
 }
