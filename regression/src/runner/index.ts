@@ -89,7 +89,10 @@ export interface RunSuiteOptions {
 	 */
 	timezone?: string;
 	/** CostTracker proxy used by the rubric oracle to meter judge cost (and chatbot turn cost). */
-	costTracker?: { getMonthlyTotalCost: () => number };
+	costTracker?: {
+		getMonthlyTotalCost: () => number;
+		getTokenUsageTotals: () => { input: number; output: number };
+	};
 	logger: MinimalLogger;
 	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall';
 	rerunIds?: Set<string>;
@@ -285,7 +288,10 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 					},
 					judgeLlm: opts.judgeLlm,
 					judgeModelId: opts.modelIds.standard,
-					costTracker: opts.costTracker ?? { getMonthlyTotalCost: () => 0 },
+					costTracker: opts.costTracker ?? {
+						getMonthlyTotalCost: () => 0,
+						getTokenUsageTotals: () => ({ input: 0, output: 0 }),
+					},
 					modelIds: opts.modelIds,
 					cacheKey,
 					caseBudgetUsd: lc.case.budgetUsd,
