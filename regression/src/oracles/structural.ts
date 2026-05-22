@@ -3,7 +3,7 @@
  *
  * AJV-based JSON schema validation + targeted assertion engine.
  * Per the regression-suite design (spec line 180): non-parseable LLM output
- * emits `verdict: 'error'`; schema violations emit `verdict: 'fail'`.
+ * emits `verdict: VERDICT.error`; schema violations emit `verdict: VERDICT.fail`.
  *
  * Notes on calendar-strict dates: `Date.parse('2026-02-30')` does NOT throw —
  * it returns March 2 in UTC. We round-trip year/month/day through `Date.UTC`
@@ -15,7 +15,7 @@
 
 import { isCalendarStrict } from '@core/utils/temporal.js';
 import AjvModule from 'ajv';
-import type { OracleVerdict } from '../shared/types.js';
+import { type OracleVerdict, VERDICT } from '../shared/types.js';
 
 export interface StructuralExpectation {
 	schema: object;
@@ -73,7 +73,7 @@ export function runStructuralOracle(
 		parsed = JSON.parse(rawOutput);
 	} catch (err) {
 		return {
-			verdict: 'error',
+			verdict: VERDICT.error,
 			details: `JSON parse failed: ${(err as Error).message}`,
 		};
 	}
@@ -82,7 +82,7 @@ export function runStructuralOracle(
 	const validate = ajv.compile(expectation.schema);
 	if (!validate(parsed)) {
 		return {
-			verdict: 'fail',
+			verdict: VERDICT.fail,
 			details: `Schema: ${ajv.errorsText(validate.errors)}`,
 		};
 	}
@@ -91,11 +91,11 @@ export function runStructuralOracle(
 	for (const s of expectation.strings ?? []) {
 		const a = getByPath(parsed, s.path);
 		if (typeof a !== 'string') {
-			return { verdict: 'fail', details: `String ${s.path} missing or not string` };
+			return { verdict: VERDICT.fail, details: `String ${s.path} missing or not string` };
 		}
 		if (a.trim().toLowerCase() !== s.expectedCaseInsensitive.toLowerCase()) {
 			return {
-				verdict: 'fail',
+				verdict: VERDICT.fail,
 				details: `String ${s.path}: expected ~"${s.expectedCaseInsensitive}", got "${a}"`,
 			};
 		}
@@ -105,7 +105,7 @@ export function runStructuralOracle(
 	for (const set of expectation.setEquality ?? []) {
 		const arr = getByPath(parsed, set.path);
 		if (!Array.isArray(arr)) {
-			return { verdict: 'fail', details: `${set.path} not an array` };
+			return { verdict: VERDICT.fail, details: `${set.path} not an array` };
 		}
 		const actualKeys = new Set(
 			arr.map((x) => (x as Record<string, unknown>)[set.keyField] as string),
@@ -114,11 +114,11 @@ export function runStructuralOracle(
 		const missing = [...expectedKeys].filter((k) => !actualKeys.has(k));
 		const extra = [...actualKeys].filter((k) => !expectedKeys.has(k));
 		if (missing.length > 0) {
-			return { verdict: 'fail', details: `Missing at ${set.path}: ${missing.join(', ')}` };
+			return { verdict: VERDICT.fail, details: `Missing at ${set.path}: ${missing.join(', ')}` };
 		}
 		if (extra.length > 0) {
 			return {
-				verdict: 'fail',
+				verdict: VERDICT.fail,
 				details: `Hallucinated at ${set.path}: ${extra.join(', ')}`,
 			};
 		}
@@ -130,7 +130,7 @@ export function runStructuralOracle(
 	for (const ms of expectation.multisetRows ?? []) {
 		const arr = getByPath(parsed, ms.path);
 		if (!Array.isArray(arr)) {
-			return { verdict: 'fail', details: `${ms.path} not an array` };
+			return { verdict: VERDICT.fail, details: `${ms.path} not an array` };
 		}
 		// Bucket expected rows by keyField value.
 		const expByKey = new Map<string, Array<Record<string, unknown>>>();
@@ -138,7 +138,7 @@ export function runStructuralOracle(
 			const k = row[ms.keyField];
 			if (typeof k !== 'string') {
 				return {
-					verdict: 'error',
+					verdict: VERDICT.error,
 					details: `multisetRows expected row missing string key '${ms.keyField}': ${JSON.stringify(row)}`,
 				};
 			}
@@ -158,7 +158,7 @@ export function runStructuralOracle(
 				const v = obj[vf.field];
 				if (v !== undefined && (typeof v !== 'number' || !Number.isFinite(v))) {
 					return {
-						verdict: 'fail',
+						verdict: VERDICT.fail,
 						details: `Multiset row at ${ms.path}: ${vf.field} not finite (got ${JSON.stringify(v)})`,
 					};
 				}
@@ -198,11 +198,11 @@ export function runStructuralOracle(
 		}
 		if (missingRows.length > 0) {
 			const fmt = missingRows.map((r) => JSON.stringify(r)).join('; ');
-			return { verdict: 'fail', details: `Missing rows at ${ms.path}: ${fmt}` };
+			return { verdict: VERDICT.fail, details: `Missing rows at ${ms.path}: ${fmt}` };
 		}
 		if (extraRows.length > 0) {
 			const fmt = extraRows.map((r) => JSON.stringify(r)).join('; ');
-			return { verdict: 'fail', details: `Hallucinated rows at ${ms.path}: ${fmt}` };
+			return { verdict: VERDICT.fail, details: `Hallucinated rows at ${ms.path}: ${fmt}` };
 		}
 	}
 
@@ -211,13 +211,13 @@ export function runStructuralOracle(
 		const a = getByPath(parsed, sc.path);
 		if (typeof a !== 'number' || !Number.isFinite(a)) {
 			return {
-				verdict: 'fail',
+				verdict: VERDICT.fail,
 				details: `Scalar ${sc.path} not finite (got ${JSON.stringify(a)})`,
 			};
 		}
 		if (Math.abs(a - sc.expected) > sc.tolerance) {
 			return {
-				verdict: 'fail',
+				verdict: VERDICT.fail,
 				details: `Scalar ${sc.path}: expected ${sc.expected}±${sc.tolerance}, got ${a}`,
 			};
 		}
@@ -227,7 +227,7 @@ export function runStructuralOracle(
 	for (const ks of expectation.keyedScalars ?? []) {
 		const arr = getByPath(parsed, ks.path);
 		if (!Array.isArray(arr)) {
-			return { verdict: 'fail', details: `${ks.path} not an array` };
+			return { verdict: VERDICT.fail, details: `${ks.path} not an array` };
 		}
 		const byKey = new Map<string, number>();
 		for (const item of arr) {
@@ -242,13 +242,13 @@ export function runStructuralOracle(
 			const actual = byKey.get(k);
 			if (typeof actual !== 'number') {
 				return {
-					verdict: 'fail',
+					verdict: VERDICT.fail,
 					details: `Keyed scalar ${ks.path}[${k}].${ks.valueField} missing`,
 				};
 			}
 			if (Math.abs(actual - expected) > ks.tolerance) {
 				return {
-					verdict: 'fail',
+					verdict: VERDICT.fail,
 					details: `Keyed scalar ${ks.path}[${k}].${ks.valueField}: expected ${expected}±${ks.tolerance}, got ${actual}`,
 				};
 			}
@@ -262,25 +262,25 @@ export function runStructuralOracle(
 		// silently evaluates to false, letting bogus ranges pass through.
 		if (!isCalendarStrict(d.minIso) || !isCalendarStrict(d.maxIso)) {
 			return {
-				verdict: 'error',
+				verdict: VERDICT.error,
 				details: `Operator misconfigured date range: minIso=${d.minIso}, maxIso=${d.maxIso}`,
 			};
 		}
 		const a = getByPath(parsed, d.path);
 		if (typeof a !== 'string' || !isCalendarStrict(a)) {
 			return {
-				verdict: 'fail',
+				verdict: VERDICT.fail,
 				details: `Date ${d.path} not calendar-valid YYYY-MM-DD: ${JSON.stringify(a)}`,
 			};
 		}
 		const t = Date.parse(a);
 		if (t < Date.parse(d.minIso) || t > Date.parse(d.maxIso)) {
 			return {
-				verdict: 'fail',
+				verdict: VERDICT.fail,
 				details: `Date ${d.path} outside [${d.minIso}, ${d.maxIso}]: ${a}`,
 			};
 		}
 	}
 
-	return { verdict: 'pass', details: 'all assertions satisfied' };
+	return { verdict: VERDICT.pass, details: 'all assertions satisfied' };
 }

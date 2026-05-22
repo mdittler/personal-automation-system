@@ -12,10 +12,11 @@
  * Mixed-tier and unknown-tier caseResults are excluded from per-tier metrics.
  */
 
-import type {
-	ManifestCaseResult,
-	RunManifest,
-	TierModelSnapshot,
+import {
+	type ManifestCaseResult,
+	type RunManifest,
+	type TierModelSnapshot,
+	VERDICT,
 } from '../../../types/regression.js';
 
 export type LeaderboardTier = 'fast' | 'standard' | 'reasoning';
@@ -159,10 +160,10 @@ function countVerdicts(results: readonly ManifestCaseResult[]): {
 	let error = 0;
 	let budgetExceeded = 0;
 	for (const r of results) {
-		if (r.verdict === 'pass') pass++;
-		else if (r.verdict === 'fail') fail++;
-		else if (r.verdict === 'error') error++;
-		else if (r.verdict === 'budget-exceeded') budgetExceeded++;
+		if (r.verdict === VERDICT.pass) pass++;
+		else if (r.verdict === VERDICT.fail) fail++;
+		else if (r.verdict === VERDICT.error) error++;
+		else if (r.verdict === VERDICT.budgetExceeded) budgetExceeded++;
 	}
 	return { pass, fail, error, budgetExceeded };
 }
@@ -176,9 +177,9 @@ function groupByBucket(results: readonly ManifestCaseResult[]): LeaderboardBucke
 			map.set(r.bucket, row);
 		}
 		row.total++;
-		if (r.verdict === 'pass') row.pass++;
-		else if (r.verdict === 'fail') row.fail++;
-		else if (r.verdict === 'error') row.error++;
+		if (r.verdict === VERDICT.pass) row.pass++;
+		else if (r.verdict === VERDICT.fail) row.fail++;
+		else if (r.verdict === VERDICT.error) row.error++;
 		if (r.source === 'cached') row.cached++;
 	}
 	return Array.from(map.values()).sort((a, b) => a.bucket.localeCompare(b.bucket));

@@ -33,4 +33,5 @@ export {
 	SAFE_CASE_ID_RE,
 	VALID_BUCKETS,
 	VERDICT,
+	VERDICT_VALUES,
 } from '@core/types/regression.js';

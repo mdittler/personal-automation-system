@@ -23,7 +23,7 @@
 import { buildMemoryContextBlock } from '@core/services/prompt-assembly/memory-context.js';
 import type { LLMService } from '@core/types/llm.js';
 import { UNPARSEABLE_JSON, tryParseJsonStripFences } from '@core/utils/json-strip-fences.js';
-import type { CallMeter, OracleVerdict } from '../shared/types.js';
+import { type CallMeter, type OracleVerdict, VERDICT } from '../shared/types.js';
 
 const PASS_THRESHOLD = 4;
 const MIN_SCORE = 0;
@@ -96,7 +96,7 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 		const after = deps.costMeter.getMonthlyTotalCost();
 		return {
 			verdict: {
-				verdict: 'error',
+				verdict: VERDICT.error,
 				details: `judge LLM threw: ${(err as Error).message}`,
 			},
 			meter: {
@@ -120,7 +120,7 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 	if (parsed === UNPARSEABLE_JSON) {
 		return {
 			verdict: {
-				verdict: 'error',
+				verdict: VERDICT.error,
 				details: `judge JSON parse failed (empty or invalid); raw="${raw.slice(0, 200)}"`,
 			},
 			meter,
@@ -130,7 +130,7 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 
 	if (!parsed || typeof parsed !== 'object') {
 		return {
-			verdict: { verdict: 'error', details: 'judge output is not an object' },
+			verdict: { verdict: VERDICT.error, details: 'judge output is not an object' },
 			meter,
 			score: null,
 		};
@@ -139,7 +139,7 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 	if (typeof score !== 'number' || !Number.isFinite(score)) {
 		return {
 			verdict: {
-				verdict: 'error',
+				verdict: VERDICT.error,
 				details: `judge score is not a finite number (got ${JSON.stringify(score)})`,
 			},
 			meter,
@@ -149,7 +149,7 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 	if (score < MIN_SCORE || score > MAX_SCORE) {
 		return {
 			verdict: {
-				verdict: 'error',
+				verdict: VERDICT.error,
 				details: `judge score outside [${MIN_SCORE}, ${MAX_SCORE}] range (got ${score})`,
 			},
 			meter,
@@ -163,13 +163,13 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 
 	if (score >= PASS_THRESHOLD) {
 		return {
-			verdict: { verdict: 'pass', details: `judge score ${score}: ${explanation}` },
+			verdict: { verdict: VERDICT.pass, details: `judge score ${score}: ${explanation}` },
 			meter,
 			score,
 		};
 	}
 	return {
-		verdict: { verdict: 'fail', details: `judge score ${score}: ${explanation}` },
+		verdict: { verdict: VERDICT.fail, details: `judge score ${score}: ${explanation}` },
 		meter,
 		score,
 	};

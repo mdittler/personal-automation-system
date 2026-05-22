@@ -238,7 +238,8 @@ export const SAFE_CACHE_KEY_RE = /^[a-f0-9]{64}$/i;
 export const SAFE_RUN_ID_RE =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export const VERDICT_VALUES: readonly Verdict[] = ['pass', 'fail', 'error', 'budget-exceeded'];
+/** All verdict values — for validation allowlists. Single source of truth with VERDICT. */
+export const VERDICT_VALUES: readonly Verdict[] = Object.values(VERDICT);
 
 /**
  * REQ-REG-011 per-input routing-accuracy gate threshold. The regression

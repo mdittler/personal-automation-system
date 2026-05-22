@@ -16,10 +16,11 @@ import {
 	type RunManifest,
 	SAFE_RUN_ID_RE,
 	VALID_BUCKETS,
+	VERDICT_VALUES,
 	isPlainObject,
 } from '../../../types/regression.js';
 
-const VERDICTS = new Set(['pass', 'fail', 'error', 'budget-exceeded']);
+const VERDICTS = new Set<string>(VERDICT_VALUES);
 const SOURCES = new Set(['cached', 'fresh']);
 const TIERS = new Set(EVALUATED_TIER_VALUES as readonly string[]);
 const BUCKETS = new Set(VALID_BUCKETS as readonly string[]);

@@ -11,7 +11,7 @@
  * `chart-svg.ts`.
  */
 
-import type { ManifestCaseResult, RunManifest } from '../../../types/regression.js';
+import { type ManifestCaseResult, type RunManifest, VERDICT } from '../../../types/regression.js';
 import type { LineSeries, ScatterPoint } from './chart-svg.js';
 import type { LeaderboardTier } from './leaderboard-aggregator.js';
 
@@ -113,7 +113,7 @@ function computeTierMetrics(
 		if (bucket && r.bucket !== bucket) continue;
 		total++;
 		totalCostUsd += r.costUsd;
-		if (r.verdict === 'pass') pass++;
+		if (r.verdict === VERDICT.pass) pass++;
 	}
 	return { pass, total, passRate: total === 0 ? 0 : pass / total, totalCostUsd };
 }

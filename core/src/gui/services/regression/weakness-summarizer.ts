@@ -34,7 +34,7 @@ import type {
 	RunManifest,
 	RunResult,
 } from '../../../types/regression.js';
-import { isPlainObject, looksLikeRunResult } from '../../../types/regression.js';
+import { VERDICT, isPlainObject, looksLikeRunResult } from '../../../types/regression.js';
 import { atomicWriteJson } from '../../../utils/atomic-write.js';
 import { UNPARSEABLE_JSON, tryParseJsonStripFences } from '../../../utils/json-strip-fences.js';
 
@@ -148,7 +148,8 @@ export function createWeaknessSummarizer(opts: WeaknessSummarizerOptions): Weakn
 
 		const modelId = modelIdForTier(manifest, tier);
 		const failing = manifest.caseResults.filter(
-			(cr) => cr.evaluatedTier === tier && (cr.verdict === 'fail' || cr.verdict === 'error'),
+			(cr) =>
+				cr.evaluatedTier === tier && (cr.verdict === VERDICT.fail || cr.verdict === VERDICT.error),
 		);
 
 		if (failing.length === 0) {
@@ -280,7 +281,7 @@ async function loadFailingResults(
 			return {
 				caseId: cr.caseId,
 				bucket: cr.bucket,
-				verdict: cr.verdict === 'fail' ? 'fail' : 'error',
+				verdict: cr.verdict === VERDICT.fail ? VERDICT.fail : VERDICT.error,
 				inputs: r.inputs.map((i) => i.payload),
 				actuals: r.actuals,
 			};

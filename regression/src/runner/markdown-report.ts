@@ -12,7 +12,12 @@
  * the gate returns `null` and the CLI exits 0 with a warning rather than 1.
  */
 
-import type { RoutingTarget, RunResult, RunSummary } from '@core/types/regression.js';
+import {
+	type RoutingTarget,
+	type RunResult,
+	type RunSummary,
+	VERDICT,
+} from '@core/types/regression.js';
 
 export const ACCURACY_GATE_THRESHOLD = 0.95;
 export const FOOD_SHADOW_INPUT_FLOOR = 20;
@@ -27,7 +32,7 @@ export function computeRoutingAccuracy(
 		if (targets.get(r.caseId) !== 'food-shadow') continue;
 		for (const ov of r.oracleVerdicts) {
 			totalInputs++;
-			if (ov.verdict === 'pass') passInputs++;
+			if (ov.verdict === VERDICT.pass) passInputs++;
 			// 'fail' and 'error' both count against the gate.
 		}
 	}
@@ -53,10 +58,10 @@ export function buildSummary(
 	for (const r of results) {
 		summary.totalCostUsd += r.costUsd;
 		summary.totalDurationMs += r.durationMs;
-		if (r.verdict === 'pass') summary.pass++;
-		else if (r.verdict === 'fail') summary.fail++;
-		else if (r.verdict === 'error') summary.error++;
-		else if (r.verdict === 'budget-exceeded') summary.budgetExceeded++;
+		if (r.verdict === VERDICT.pass) summary.pass++;
+		else if (r.verdict === VERDICT.fail) summary.fail++;
+		else if (r.verdict === VERDICT.error) summary.error++;
+		else if (r.verdict === VERDICT.budgetExceeded) summary.budgetExceeded++;
 	}
 	summary.routingAccuracy = computeRoutingAccuracy(results, targets);
 	summary.routingInputsEvaluated = results
