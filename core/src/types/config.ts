@@ -157,6 +157,15 @@ export interface SystemConfig {
 	/** Routing configuration (optional in type for test compat — loader always populates with defaults). */
 	routing?: {
 		verification?: RoutingVerificationConfig;
+		/**
+		 * When true, inbound free-text messages that the synchronous prefilter flags
+		 * as potentially multi-intent are sent through the LLM segmenter and each
+		 * resulting segment is routed independently. Defaults IN CODE to `true`
+		 * (see `DEFAULT_MULTI_INTENT_SPLIT`) so the multi-question dropped-segment
+		 * bug is fixed on merge without an operator edit. Set to `false` in
+		 * pas.yaml to kill-switch the feature.
+		 */
+		multiIntentSplit?: boolean;
 	};
 
 	/** Registered users. */

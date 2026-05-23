@@ -741,6 +741,88 @@ describe('loadSystemConfig', () => {
 		});
 	});
 
+	// --- routing.multi_intent_split tests (Task 4.3/4.4) ---
+	// Defaults IN CODE to true so the multi-question dropped-segment bug is
+	// fixed on merge without an operator edit. Same Codex "protect fresh
+	// deployments" rule as always_verify_intents.
+	describe('routing.multi_intent_split', () => {
+		it('defaults to true when key is absent (no yaml file at all)', async () => {
+			const envPath = join(tempDir, '.env');
+			await writeEnvFile(envPath, requiredEnvVars);
+			const config = await loadSystemConfig({
+				envPath,
+				configPath: join(tempDir, 'nonexistent.yaml'),
+			});
+			expect(config.routing?.multiIntentSplit).toBe(true);
+		});
+
+		it('defaults to true when routing section omits the key', async () => {
+			const config = await loadConfigFromYamlObj({
+				routing: { verification: { upper_bound: 0.6 } },
+			});
+			expect(config.routing?.multiIntentSplit).toBe(true);
+		});
+
+		it('accepts explicit false as the kill-switch', async () => {
+			const config = await loadConfigFromYamlObj({
+				routing: { multi_intent_split: false },
+			});
+			expect(config.routing?.multiIntentSplit).toBe(false);
+		});
+
+		it('accepts explicit true', async () => {
+			const config = await loadConfigFromYamlObj({
+				routing: { multi_intent_split: true },
+			});
+			expect(config.routing?.multiIntentSplit).toBe(true);
+		});
+
+		it('coerces a string value to the true default (sanitizer fallback)', async () => {
+			// Bypass Zod by writing a raw YAML string the schema would reject; the
+			// sanitizer is the last line of defense for inputs that reach the loader.
+			const envPath = join(tempDir, '.env');
+			const yamlPath = join(tempDir, 'pas.yaml');
+			await writeEnvFile(envPath, requiredEnvVars);
+			await writeFile(yamlPath, 'routing:\n  multi_intent_split: "yes"\n', 'utf-8');
+			let config: Awaited<ReturnType<typeof loadSystemConfig>> | undefined;
+			try {
+				config = await loadSystemConfig({ envPath, configPath: yamlPath });
+			} catch {
+				// Schema-level rejection is acceptable; that's also loud + safe.
+				return;
+			}
+			expect(config.routing?.multiIntentSplit).toBe(true);
+		});
+
+		it('coerces a number value to the true default (sanitizer fallback)', async () => {
+			const envPath = join(tempDir, '.env');
+			const yamlPath = join(tempDir, 'pas.yaml');
+			await writeEnvFile(envPath, requiredEnvVars);
+			await writeFile(yamlPath, 'routing:\n  multi_intent_split: 0\n', 'utf-8');
+			let config: Awaited<ReturnType<typeof loadSystemConfig>> | undefined;
+			try {
+				config = await loadSystemConfig({ envPath, configPath: yamlPath });
+			} catch {
+				return;
+			}
+			expect(config.routing?.multiIntentSplit).toBe(true);
+		});
+
+		it('coerces null to the true default (sanitizer fallback)', async () => {
+			const envPath = join(tempDir, '.env');
+			const yamlPath = join(tempDir, 'pas.yaml');
+			await writeEnvFile(envPath, requiredEnvVars);
+			await writeFile(yamlPath, 'routing:\n  multi_intent_split: null\n', 'utf-8');
+			let config: Awaited<ReturnType<typeof loadSystemConfig>> | undefined;
+			try {
+				config = await loadSystemConfig({ envPath, configPath: yamlPath });
+			} catch {
+				return;
+			}
+			expect(config.routing?.multiIntentSplit).toBe(true);
+		});
+	});
+
 	// --- F11: Optional Anthropic / multi-provider startup tests ---
 
 	it('starts with only GOOGLE_AI_API_KEY and no ANTHROPIC_API_KEY', async () => {

@@ -121,6 +121,7 @@ import { ReportService } from './services/reports/index.js';
 import { getEffectiveCommandCatalog } from './services/router/command-catalog.js';
 import { FallbackHandler } from './services/router/fallback.js';
 import { Router, buildUserOverrideRouteInfo } from './services/router/index.js';
+import { preFilterMultiIntent, segmentMessage } from './services/router/message-segmenter.js';
 import { PendingVerificationStore } from './services/router/pending-verification-store.js';
 import { RouteVerifier } from './services/router/route-verifier.js';
 import {
@@ -1312,6 +1313,12 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		alwaysVerifyIntents: config.routing?.verification?.alwaysVerifyIntents ?? [
 			...DEFAULT_ALWAYS_VERIFY_INTENTS,
 		],
+		// Task 4.3/4.4: multi-intent split. Defaults IN CODE to true (see
+		// DEFAULT_MULTI_INTENT_SPLIT) so the dropped-segment bug is fixed on
+		// merge without an operator edit; operators can set
+		// `routing.multi_intent_split: false` in pas.yaml to kill-switch.
+		multiIntentSplit: config.routing?.multiIntentSplit ?? true,
+		messageSegmenter: { preFilter: preFilterMultiIntent, segment: segmentMessage },
 		inviteService,
 		userMutationService,
 		interactionContext: interactionContextService,

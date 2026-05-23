@@ -230,6 +230,23 @@ describe('SystemConfigWriter.write() — happy path', () => {
 				.upper_bound,
 		).toBe(0.5);
 	});
+
+	it('writes routing.multi_intent_split via the YAML key (Task 4.3/4.4)', async () => {
+		const p = makePath();
+		await writeSeedConfig(p);
+		const config = makeConfig();
+		const writer = makeWriter(p);
+
+		await writer.write('routing.multi_intent_split', false, config);
+
+		// In-memory mutation visible at the camelCase runtime path.
+		expect((config.routing as unknown as { multiIntentSplit: boolean }).multiIntentSplit).toBe(
+			false,
+		);
+		// YAML serialized at the snake_case path.
+		const parsed = parse(await readFile(p, 'utf-8')) as Record<string, unknown>;
+		expect((parsed.routing as Record<string, unknown>).multi_intent_split).toBe(false);
+	});
 });
 
 // ---------------------------------------------------------------------------

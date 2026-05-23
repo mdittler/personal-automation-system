@@ -64,6 +64,7 @@ import type { UserMutationService } from '../user-manager/user-mutation-service.
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
+import type { preFilterMultiIntent, segmentMessage } from './message-segmenter.js';
 import { PhotoClassifier } from './photo-classifier.js';
 import type { RouteVerifier, VerifyAction } from './route-verifier.js';
 
@@ -294,6 +295,28 @@ export interface RouterOptions {
 	 * defense-in-depth; the router gate is wired in Task 3.3.
 	 */
 	alwaysVerifyIntents?: readonly string[];
+	/**
+	 * Master switch for multi-intent message splitting (Task 4.3/4.4). When
+	 * `true` AND `messageSegmenter` is wired AND the prefilter fires AND the
+	 * segmenter returns ≥2 segments, the router dispatches each segment as an
+	 * independent text request via `routeOneTextRequest`. When `false`, the
+	 * router takes the single-message path (byte-equivalent to the
+	 * pre-feature behavior). Defaults to `true` in compose-runtime per the
+	 * operator's explicit decision so the dropped-segment bug is fixed on
+	 * merge without an operator edit.
+	 */
+	multiIntentSplit?: boolean;
+	/**
+	 * Optional message segmenter dependency for Task 4.3/4.4. Built in
+	 * `compose-runtime.ts` from the `message-segmenter` module exports so the
+	 * router can call them through a single injected seam (mirrors the
+	 * `routeVerifier` and `intentClassifier` patterns). When omitted, the
+	 * multi-intent split path is disabled regardless of `multiIntentSplit`.
+	 */
+	messageSegmenter?: {
+		preFilter: typeof preFilterMultiIntent;
+		segment: typeof segmentMessage;
+	};
 	/** Invite service for /invite command and /start code redemption. */
 	inviteService?: InviteService;
 	/** User mutation service for registering users via invite codes. */
@@ -346,6 +369,11 @@ export class Router {
 	private readonly routeVerifier?: RouteVerifier;
 	private readonly verificationUpperBound: number;
 	private readonly alwaysVerifyIntents: readonly string[];
+	private multiIntentSplit: boolean;
+	private readonly messageSegmenter?: {
+		preFilter: typeof preFilterMultiIntent;
+		segment: typeof segmentMessage;
+	};
 	private readonly inviteService?: InviteService;
 	private readonly userMutationService?: UserMutationService;
 	private readonly interactionContext?: InteractionContextService;
@@ -378,6 +406,8 @@ export class Router {
 		this.routeVerifier = options.routeVerifier;
 		this.verificationUpperBound = options.verificationUpperBound ?? 0.7;
 		this.alwaysVerifyIntents = options.alwaysVerifyIntents ?? [];
+		this.multiIntentSplit = options.multiIntentSplit ?? false;
+		this.messageSegmenter = options.messageSegmenter;
 		this.inviteService = options.inviteService;
 		this.userMutationService = options.userMutationService;
 		this.interactionContext = options.interactionContext;
@@ -405,6 +435,17 @@ export class Router {
 		if (this.idleResetDeps) {
 			this.idleResetDeps.idleMinutes = n;
 		}
+	}
+
+	/**
+	 * Hot-update the multi-intent-split kill switch without restart. Mirrors the
+	 * `setIdleMinutes` setter pattern. Compose-runtime wires this into the
+	 * SettingsWriter post-write hook (same as `chat.sessions.auto_reset_idle_minutes`)
+	 * if/when operators want to flip the feature live; today it is restart-required
+	 * via the SettingDef and this setter is invoked only from tests.
+	 */
+	setMultiIntentSplit(value: boolean): void {
+		this.multiIntentSplit = value;
 	}
 
 	/** Build routing tables from the registry's manifest cache. */
@@ -540,7 +581,77 @@ export class Router {
 			}
 		}
 
+		// 3b. Multi-intent split (Task 4.3/4.4). When the message looks like it
+		// contains multiple independent requests, dispatch each segment as its
+		// own text request via routeOneTextRequest. When the gate declines
+		// (feature off, prefilter false, segmenter degraded, or <2 segments),
+		// we fall through to the single-message path — byte-equivalent to the
+		// pre-feature behavior.
+		if (await this.tryMultiIntentSplit(enrichedCtx, user)) return;
+
 		await this.routeOneTextRequest(enrichedCtx, user);
+	}
+
+	/**
+	 * Multi-intent split gate (Task 4.3/4.4).
+	 *
+	 * Returns `true` when the message was handled by the split path (caller
+	 * should return without doing single-message dispatch). Returns `false`
+	 * when the caller should continue with the single-message path.
+	 *
+	 * Gate order (each short-circuits to `false`):
+	 *   1. Feature flag disabled.
+	 *   2. No segmenter dep wired.
+	 *   3. Synchronous prefilter rejects the message (cheap path — no LLM call).
+	 *   4. Segmenter throws OR returns <2 segments → degrade to single dispatch.
+	 *
+	 * On a successful split (≥2 segments):
+	 *   - Send ONE preamble telegram message.
+	 *   - Dispatch each segment via `routeOneTextRequest` in input order.
+	 *   - Each segment is wrapped in try/catch — a thrown handler does NOT
+	 *     abort later segments; we send a per-segment apology and continue.
+	 *
+	 * Strict sequential dispatch (Option A from the plan): replies arrive in
+	 * input order. A reply-collector (collect all replies, send one batched
+	 * message) is out of scope and tracked in `docs/open-items.md`.
+	 */
+	private async tryMultiIntentSplit(
+		enrichedCtx: MessageContext,
+		user: RegisteredUser,
+	): Promise<boolean> {
+		if (!this.multiIntentSplit) return false;
+		if (!this.messageSegmenter) return false;
+		if (!this.messageSegmenter.preFilter(enrichedCtx.text)) return false;
+
+		let segments: string[];
+		try {
+			segments = await this.messageSegmenter.segment(enrichedCtx.text, {
+				llm: this.llm,
+				logger: this.logger,
+			});
+		} catch (err) {
+			this.logger.warn(
+				{ err },
+				'tryMultiIntentSplit: segmenter threw; falling back to single dispatch',
+			);
+			return false;
+		}
+		if (segments.length < 2) return false;
+
+		await this.trySend(enrichedCtx.userId, "Got it — I'll cover all of those:");
+
+		for (const segment of segments) {
+			try {
+				await this.routeOneTextRequest({ ...enrichedCtx, text: segment }, user);
+			} catch (err) {
+				this.logger.warn(
+					{ err, segment },
+					'tryMultiIntentSplit: segment handler threw; continuing',
+				);
+				await this.trySend(enrichedCtx.userId, "(I couldn't handle that part — sorry.)");
+			}
+		}
+		return true;
 	}
 
 	/**

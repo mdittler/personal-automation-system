@@ -37,3 +37,17 @@ export const DEFAULT_LLM_SAFEGUARDS: typeof _defaults = Object.freeze({
 export const DEFAULT_ALWAYS_VERIFY_INTENTS: readonly string[] = Object.freeze([
 	'user wants to plan a meal or menu for a dinner party or guests they are hosting',
 ]);
+
+/**
+ * Default value for `routing.multi_intent_split`.
+ *
+ * Defaults IN CODE to `true` so the multi-intent-message bug is fixed in
+ * production on merge without a config edit (operator's explicit decision —
+ * multi-question messages were silently dropping a question). Operators can
+ * set `routing.multi_intent_split: false` in pas.yaml to kill-switch the
+ * feature if it misbehaves.
+ *
+ * Same rationale as `DEFAULT_ALWAYS_VERIFY_INTENTS`: fresh deployments must
+ * be protected without operator action (Codex review feedback on Task 3.2).
+ */
+export const DEFAULT_MULTI_INTENT_SPLIT = true;

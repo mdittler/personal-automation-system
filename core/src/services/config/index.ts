@@ -25,7 +25,11 @@ import type { WebhookDefinition } from '../../types/webhooks.js';
 import { readYamlFileStrict } from '../../utils/yaml.js';
 import { isLocalProvider } from '../llm/model-pricing.js';
 import { DEFAULT_PROVIDERS } from './default-providers.js';
-import { DEFAULT_ALWAYS_VERIFY_INTENTS, DEFAULT_LLM_SAFEGUARDS } from './defaults.js';
+import {
+	DEFAULT_ALWAYS_VERIFY_INTENTS,
+	DEFAULT_LLM_SAFEGUARDS,
+	DEFAULT_MULTI_INTENT_SPLIT,
+} from './defaults.js';
 import { parsePasYamlConfig } from './pas-yaml-schema.js';
 
 /** Shape of an LLM provider entry in pas.yaml. */
@@ -91,6 +95,7 @@ interface PasYamlConfig {
 			upper_bound?: number;
 			always_verify_intents?: unknown;
 		};
+		multi_intent_split?: unknown;
 	};
 	backup?: {
 		enabled?: boolean;
@@ -274,6 +279,7 @@ export async function loadSystemConfig(options?: {
 					yamlConfig?.routing?.verification?.always_verify_intents,
 				),
 			},
+			multiIntentSplit: sanitizeMultiIntentSplit(yamlConfig?.routing?.multi_intent_split),
 		},
 		users,
 		backup: {
@@ -337,6 +343,28 @@ function sanitizeAlwaysVerifyIntents(value: unknown): string[] {
 		return [...DEFAULT_ALWAYS_VERIFY_INTENTS];
 	}
 	return [...value];
+}
+
+/**
+ * Sanitize the `routing.multi_intent_split` value.
+ *
+ * - `undefined` (key absent)  → `DEFAULT_MULTI_INTENT_SPLIT` (currently `true`).
+ * - A literal boolean         → returned as-is.
+ * - Anything else (string,
+ *   number, `null`, object,
+ *   array, …)                 → `DEFAULT_MULTI_INTENT_SPLIT`. Codex feedback on
+ *   Task 3.2's `always_verify_intents` sanitizer applies here too: defaulting
+ *   invalid input to `false` would silently re-introduce the multi-question
+ *   dropped-segment bug the default was added to prevent. Returning the
+ *   production default is the safe fallback.
+ *
+ * The schema layer (`pas-yaml-schema.ts`) rejects type-invalid input loudly;
+ * this sanitizer is the last line of defense for inputs that bypass schema
+ * validation (test fixtures, hot-reload paths).
+ */
+function sanitizeMultiIntentSplit(value: unknown): boolean {
+	if (typeof value === 'boolean') return value;
+	return DEFAULT_MULTI_INTENT_SPLIT;
 }
 
 /**

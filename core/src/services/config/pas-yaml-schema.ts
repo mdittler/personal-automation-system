@@ -144,6 +144,11 @@ export const PasYamlConfigSchema = z
 					})
 					.passthrough()
 					.optional(),
+				// Defaults in code to `true` (DEFAULT_MULTI_INTENT_SPLIT). Schema
+				// only validates shape — the loader applies the default and
+				// sanitizes invalid input that bypasses the schema. Same Codex
+				// "protect fresh deployments" rule as always_verify_intents.
+				multi_intent_split: z.boolean().optional(),
 			})
 			.passthrough()
 			.optional(),

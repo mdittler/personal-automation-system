@@ -157,6 +157,19 @@ describe('SYSTEM_SETTING_DEFS default values match config loader defaults', () =
 		);
 		expect(def!.hidden).toBe(true);
 	});
+
+	it('routing.multi_intent_split default is true (Task 4.3/4.4)', () => {
+		const def = SYSTEM_SETTING_DEFS.find((d) => d.key === 'routing.multi_intent_split');
+		expect(def, 'no def found for routing.multi_intent_split').toBeDefined();
+		expect(def!.default).toBe(true);
+		expect(def!.type).toBe('boolean');
+	});
+
+	it('routing.multi_intent_split is NOT hidden (boolean widget renders)', () => {
+		// Unlike always_verify_intents (array — no widget), boolean has a widget.
+		const def = SYSTEM_SETTING_DEFS.find((d) => d.key === 'routing.multi_intent_split');
+		expect(def!.hidden).toBe(false);
+	});
 });
 
 // ---------------------------------------------------------------------------

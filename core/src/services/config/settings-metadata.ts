@@ -8,7 +8,7 @@
  *     Zod and SettingDef bounds are always in sync.
  */
 import type { SettingDef } from '../settings/settings-registry.js';
-import { DEFAULT_ALWAYS_VERIFY_INTENTS } from './defaults.js';
+import { DEFAULT_ALWAYS_VERIFY_INTENTS, DEFAULT_MULTI_INTENT_SPLIT } from './defaults.js';
 
 // ---------------------------------------------------------------------------
 // Shared bound constants (imported by pas-yaml-schema.ts)
@@ -41,6 +41,7 @@ export const SYSTEM_KEY_RUNTIME_PATH: Readonly<Record<string, string>> = {
 	'routing.verification.enabled': 'routing.verification.enabled',
 	'routing.verification.upper_bound': 'routing.verification.upperBound',
 	'routing.verification.always_verify_intents': 'routing.verification.alwaysVerifyIntents',
+	'routing.multi_intent_split': 'routing.multiIntentSplit',
 };
 
 // ---------------------------------------------------------------------------
@@ -144,6 +145,25 @@ export const SYSTEM_SETTING_DEFS: ReadonlyArray<Omit<SettingDef, 'appId'>> = [
 		adminOnly: true,
 		dangerous: false,
 		hidden: true,
+		scope: 'system',
+		nlSafe: false,
+		restartRequired: true,
+	},
+	{
+		// Multi-intent message splitting (Task 4.3/4.4). Defaults IN CODE to true
+		// per DEFAULT_MULTI_INTENT_SPLIT so fresh deployments are protected from
+		// the dropped-segment bug without an operator edit. Boolean widget is
+		// supported in the current GUI so this is NOT hidden — operators can
+		// flip it from the system settings page.
+		key: 'routing.multi_intent_split',
+		category: 'system',
+		label: 'Split multi-intent messages',
+		help: 'When enabled, inbound messages flagged as containing multiple independent requests are split into segments and dispatched independently. Set to off to kill-switch the feature.',
+		type: 'boolean',
+		default: DEFAULT_MULTI_INTENT_SPLIT,
+		adminOnly: true,
+		dangerous: false,
+		hidden: false,
 		scope: 'system',
 		nlSafe: false,
 		restartRequired: true,

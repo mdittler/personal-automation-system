@@ -208,6 +208,36 @@ describe('chat.recall.max_window_days — zod rejection', () => {
 	});
 });
 
+describe('routing.multi_intent_split — schema validation', () => {
+	it('accepts true', () => {
+		expect(() =>
+			PasYamlConfigSchema.parse({ routing: { multi_intent_split: true } }),
+		).not.toThrow();
+	});
+
+	it('accepts false (kill switch)', () => {
+		expect(() =>
+			PasYamlConfigSchema.parse({ routing: { multi_intent_split: false } }),
+		).not.toThrow();
+	});
+
+	it('accepts the key being absent', () => {
+		expect(() => PasYamlConfigSchema.parse({ routing: {} })).not.toThrow();
+	});
+
+	it('rejects a string value', () => {
+		expect(() => PasYamlConfigSchema.parse({ routing: { multi_intent_split: 'yes' } })).toThrow();
+	});
+
+	it('rejects a number value', () => {
+		expect(() => PasYamlConfigSchema.parse({ routing: { multi_intent_split: 1 } })).toThrow();
+	});
+
+	it('rejects null', () => {
+		expect(() => PasYamlConfigSchema.parse({ routing: { multi_intent_split: null } })).toThrow();
+	});
+});
+
 describe('routing.verification.always_verify_intents — schema validation', () => {
 	it('accepts an array of strings', () => {
 		expect(() =>
