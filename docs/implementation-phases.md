@@ -3445,6 +3445,58 @@ The W1 `implementation-phases.md` section and the `REQ-CHATBOT-CATALOG-*` URS tr
 
 ---
 
+## Chatbot Context & Routing Fixes (2026-05-22)
+
+**Goal:** Fix four distinct bugs surfaced in one chatbot transcript — the chatbot couldn't see proactive Food messages, a conversational invite question mis-routed to the Food app, a multi-question message dropped its second question, and the Food `/hosting plan` handler rendered a hollow "Event Plan" block on non-event input.
+
+**Approach:** Four independent work parts plus a documentation footprint. Part 1 routes every proactive Food send through one `sendProactiveMessage` helper so the chatbot transcript records them, backed by an entrypoint-scoped static guard that prevents future drift. Part 2 introduces an `isDegenerateEvent` untrusted-output guard so `/hosting plan` declines instead of rendering a hollow plan. Part 3 sharpens the ambiguous hosting intent string and adds a `routing.verification.always_verify_intents` config (defaulting to the hosting intent) so high-confidence-but-ambiguous classifications are still verified above the upper bound — for both text and photo paths. Part 4 adds LLM-segmented multi-intent message splitting, default ON behind a `routing.multi_intent_split` kill-switch, with `MAX_SEGMENTS = 3` and merge-overflow so a 4th question is never dropped. Part 5 is the documentation footprint (URS, traceability matrix, this section, CLAUDE.md status bullet, open-items.md).
+
+**Per-Part detail (commits, newest first within each Part):**
+
+- **Part 1 — Proactive Food message bridge (Error 1).** Introduces the `sendProactiveMessage` helper (`apps/food/src/utils/proactive-message.ts`), routes eight cron-driven Food jobs through it, migrates the five already-correct bridge sites onto the same helper so it becomes the *only* proactive send path, and locks the property in with a build-failing entrypoint-scoped AST scanner.
+  - `5aded07` `feat(food): add sendProactiveMessage send+bridge helper` — typed `FoodProactiveKind` union, fail-open bridge call only after the send resolves, returns `SentMessage` from the buttons path.
+  - `2d66d69` `fix(food): bridge nightly-rating-prompt proactive message into chatbot transcript`
+  - `a3b7e92` `fix(food): bridge leftover-check proactive message into chatbot transcript`
+  - `14f18cb` `fix(food): bridge perishable-check proactive message into chatbot transcript`
+  - `52d7bbb` `fix(food): bridge freezer-check proactive message into chatbot transcript`
+  - `b59055d` `fix(food): bridge defrost-reminder proactive message into chatbot transcript`
+  - `67a0265` `fix(food): bridge cuisine-diversity-nudge proactive message into chatbot transcript`
+  - `0288292` `fix(food): bridge seasonal-nudge proactive message into chatbot transcript`
+  - `e1b94fe` `fix(food): bridge cultural-calendar proactive message into chatbot transcript`
+  - `ec17849` `refactor(food): route existing bridge sites through sendProactiveMessage` — the 5 already-bridged sites (weekly-menu, weekly-health, weekly-nutrition, batch-prep with `SentMessage` return wiring for `setBatchFreezeRecipes`, voting) migrated so the helper is the sole proactive path.
+  - `fb44721` `test(food): static guard against unbridged proactive sends` — entrypoint-scoped scanner over a named set of proactive functions plus their helpers (not whole-file, which would false-positive on the many reactive sends in `index.ts`).
+  - `e62a2dc` `test(food): wiring + sanitization coverage for bridged proactive jobs` — dispatch case per job id against the real `createAppOutboundBridge`, plus a sanitization integration test asserting the trust boundary still holds end-to-end even though the helper passes the body raw.
+  - `b51a566` `docs: document the proactive-message bridge pattern for app developers` — `CREATING_AN_APP.md` "Pair the send and the bridge call" subsection, `MANIFEST_REFERENCE.md` `app-outbound-bridge` row, four verified-reactive worked examples.
+  - `99e822d` `test(food): persona coverage for proactive-message chatbot visibility` — reuses the `app-message-bridge.persona.test.ts` pattern, asserts the captured chatbot system prompt contains the `[App: food] <kind>` header + body excerpt.
+
+- **Part 2 — Degenerate hosting-plan guard (Error 4).** Treats the LLM `parseEventDescription` output as untrusted and short-circuits before the two expensive downstream LLM calls when the parse lacks a guest signal or carries a meta-phrase (e.g. `"asking about how to invite people"`).
+  - `40e4631` `feat(food): isDegenerateEvent guard for untrusted event parses` — precise predicate (guest signal = valid `guestCount` 1–1000 OR non-empty `guestNames`; meta-phrase decline on non-empty description only) + `PlanEventResult` discriminated union.
+  - `a311539` `fix(food): /hosting plan declines non-event input instead of a hollow plan` — handler renders a fixed actionable decline; never echoes the untrusted description back to the user.
+  - `3938507` `test(food): /hosting plan handler integration coverage for degenerate decline`
+  - `49accc4` `test(food): persona coverage for degenerate-event decline`
+
+- **Part 3 — Intent precision + always-verify (Error 2).** Sharpens the Food hosting intent to disambiguate from platform-invite questions, single-sources the string through `HOSTING_MEAL_PLANNING_INTENT`, and adds an `always_verify_intents` config so the route-verifier still fires on configured ambiguous intents at confidence ≥ `verificationUpperBound` — closing the high-confidence-bypass gap exposed by the original bug.
+  - `f0f27ca` `fix(food): scope the hosting intent to meal planning; single-source the string` — new `apps/food/src/routing/food-intents.ts`; updated `manifest.yaml`, route maps, shadow taxonomy, and ~10 test references via `rg` sweep; contract test asserts every copy matches the constant.
+  - `7ef6973` `feat(config): routing.verification.always_verify_intents (defaults to the hosting intent)` — full config surface: type, parser/sanitizer, YAML schema, settings metadata, system-config writer, example config; defaults to `[HOSTING_MEAL_PLANNING_INTENT]` so the incident is prevented out of the box on fresh setups.
+  - `0ca49b6` `fix(router): always-verify configured ambiguous intents above the upper bound (text + photo)` — private `shouldVerifyIntent(name, confidence)` gate; called with `match.intent` for the text path, `match.photoType` for the photo path (closing the photo-vs-text identifier mismatch noted in Codex Round 1 §11).
+  - `893a208` `test(routing): regression + persona coverage for platform-invite vs food-hosting` — `regression/src/cases/routing/pas/invite-platform.case.ts` (five platform-invite phrasings); FOOD_PERSONAS deterministic-reject entries for platform-invite phrasings on the hosting persona.
+
+- **Part 4 — Multi-intent message splitting (Error 3).** Extracts the per-message route flow into a reusable function, adds an LLM-segmented multi-intent splitter behind a kill-switch, and dispatches each segment through the existing route flow (per-segment auth recheck preserved).
+  - `5bbde63` `refactor(router): extract routeOneTextRequest for reuse` — pure refactor; single-message path becomes a one-line call to the extracted function.
+  - `0b2df54` `feat(router): message-segmenter (prefilter + LLM segmentation)` — `preFilterMultiIntent` synchronous zero-cost gate (word-bounded continuation markers, not bare `and`); `segmentMessage` fast-tier LLM call with `responseFormat:'json'`, fenced untrusted input; `MAX_SEGMENTS = 3` with merge-overflow into segment 3 (no question dropped); degrade-to-single on 0 usable segments or reconstructed length > 1.5× original.
+  - `4c792be` `feat(router): multi-intent message splitting (default on, config-gated)` — `tryMultiIntentSplit` invoked before `classify`; sequential per-segment dispatch through `routeOneTextRequest`; per-segment try/catch isolation; `routing.multi_intent_split` config (default `true`); byte-identical single-message behavior when off.
+  - `030599d` `test(router): persona coverage for multi-intent splitting` — includes the literal bug message ("Good morning! Can you tell me about inviting people? Also...") asserting cross-Part-1+4 integration: seg 1 routes to chatbot (invite help), seg 2 routes to chatbot with the bridged Food turn visible. ≥50 unique messages spanning two/three/four-question splits, must-NOT-split cases, dependent clauses, partial failure.
+
+- **Part 5 — Documentation footprint.**
+  - `fbf9bdd` `docs(urs): document Parts 1-4 of chatbot-context-and-routing fix` — 19 new URS entries (REQ-FOOD-PROACTIVE-BRIDGE-001..007, REQ-FOOD-HOST-DEGENERATE-001..003, REQ-ROUTE-008..016) plus Fixes: amendments to REQ-ROUTE-002 (sharpened + single-sourced hosting intent), REQ-ROUTE-006 (`always_verify_intents` + `shouldVerifyIntent` text + photo), and REQ-CONFIG-001 (routing verification + multi-intent-split config keys). Traceability matrix updated.
+  - This commit — implementation-phases.md section, CLAUDE.md status bullet (oldest entry demoted per anti-bloat rule), open-items.md ("Bridge additional food proactive jobs" marked resolved; new deferreds added).
+
+**Codex review:** One round at the plan stage (Round 1, pre-execution) surfaced 13 Critical/Important findings (helper return type for `setBatchFreezeRecipes`, import-path/`InlineButton` shape, missing `weekly-nutrition` migration, hard-coded hosting-intent references in 13+ places, `isDegenerateEvent` empty-description ambiguity, bridge fail-open path untested, file-scoped guard would false-positive on `index.ts`, sanitization-vs-byte-identity assertion conflict, `always_verify_intents` defaulting to `[]` doesn't fix fresh setups, config wiring surface incomplete, photo verification uses `intent` but photo matches use `photoType`, segment-overflow drops vs merges, no test for the literal bug's 2nd question routing through the chatbot, persona tests should assert the real prompt). Every finding was applied in-place with a change table embedded in the plan before any code was written, matching the established cadence of one review at the single review point per plan phase. The post-execution Codex review is queued in Task 5.6's verification step.
+
+**Tests:** 12099 root tests pass (+217 from this phase across helper unit tests, eight bridged-job handler tests, the static guard self-test + project scan, wiring + sanitization integration coverage, persona NL coverage for both bridged jobs and multi-intent splits, `isDegenerateEvent` table-driven tests + `/hosting plan` handler integration, hosting intent contract test + shadow-classifier persona updates, `shouldVerifyIntent` gate tests for text + photo, `always_verify_intents` config tests across the YAML / settings-metadata / writer surface, `message-segmenter` unit + 4-question merge tests, `router-multi-intent` dispatch + per-segment failure isolation, `routing.multi_intent_split` config tests, and the platform-invite regression case in `regression/src/cases/routing/pas/`). `pnpm lint` zero errors; `pnpm build` clean.
+
+---
+
 ## Regression Token Metering (2026-05-22)
 
 **Goal:** Surface real per-case token counts in the regression harness — replacing the hard-coded `{input: 0, output: 0}` zeroes that the GUI displayed for every case — so operators can see actual token spend per case in `RunResult.tokenCounts` and the regression GUI compare/drilldown views.
