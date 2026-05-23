@@ -1319,20 +1319,20 @@ New system config key `routing.verification.always_verify_intents: string[]` lis
 - `config.test.ts` > routing.verification.always_verify_intents > defaults to the hosting intent when routing section omits the key
 - `config.test.ts` > routing.verification.always_verify_intents > uses an explicit array of strings as-is
 - `config.test.ts` > routing.verification.always_verify_intents > accepts an explicit empty array (operator override)
-- `pas-yaml-schema.test.ts` > accepts an array of strings
-- `pas-yaml-schema.test.ts` > accepts an empty array (operator override)
-- `pas-yaml-schema.test.ts` > accepts undefined / absent key
-- `settings-metadata.test.ts` > routing.verification.always_verify_intents default is the hosting intent
-- `settings-metadata.test.ts` > routing.verification.always_verify_intents is hidden (no GUI widget, YAML-only)
-- `system-config-writer.test.ts` > writes routing.verification.always_verify_intents via the YAML key
-- `system-config-writer.test.ts` > resets routing.verification.always_verify_intents to the hosting default
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > accepts an array of strings
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > accepts an empty array (operator override)
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > accepts undefined / absent key
+- `settings-metadata.test.ts` > SYSTEM_SETTING_DEFS default values match config loader defaults > routing.verification.always_verify_intents default is the hosting intent
+- `settings-metadata.test.ts` > SYSTEM_SETTING_DEFS default values match config loader defaults > routing.verification.always_verify_intents is hidden (no GUI widget, YAML-only)
+- `system-config-writer.test.ts` > SystemConfigWriter.write() — happy path > writes routing.verification.always_verify_intents via the YAML key
+- `system-config-writer.test.ts` > SystemConfigWriter.resetToSchemaDefault() > resets routing.verification.always_verify_intents to the hosting default
 
 **Edge case tests:**
 - `config.test.ts` > routing.verification.always_verify_intents > coerces non-array input to the hosting default (sanitization)
 - `config.test.ts` > routing.verification.always_verify_intents > coerces array with non-string elements to the hosting default
-- `pas-yaml-schema.test.ts` > rejects a non-array value
-- `pas-yaml-schema.test.ts` > rejects an array with non-string elements
-- `pas-yaml-schema.test.ts` > rejects null
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > rejects a non-array value
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > rejects an array with non-string elements
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > rejects null
 
 ---
 
@@ -1506,20 +1506,20 @@ New system config key `routing.multi_intent_split: boolean` controls multi-inten
 - `config.test.ts` > routing.multi_intent_split > defaults to true when routing section omits the key
 - `config.test.ts` > routing.multi_intent_split > accepts explicit false as the kill-switch
 - `config.test.ts` > routing.multi_intent_split > accepts explicit true
-- `pas-yaml-schema.test.ts` > accepts true
-- `pas-yaml-schema.test.ts` > accepts false (kill switch)
-- `pas-yaml-schema.test.ts` > accepts the key being absent
-- `settings-metadata.test.ts` > routing.multi_intent_split default is true (Task 4.3/4.4)
-- `settings-metadata.test.ts` > routing.multi_intent_split is NOT hidden (boolean widget renders)
-- `system-config-writer.test.ts` > writes routing.multi_intent_split via the YAML key (Task 4.3/4.4)
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > accepts true
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > accepts false (kill switch)
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > accepts the key being absent
+- `settings-metadata.test.ts` > SYSTEM_SETTING_DEFS default values match config loader defaults > routing.multi_intent_split default is true (Task 4.3/4.4)
+- `settings-metadata.test.ts` > SYSTEM_SETTING_DEFS default values match config loader defaults > routing.multi_intent_split is NOT hidden (boolean widget renders)
+- `system-config-writer.test.ts` > SystemConfigWriter.write() — happy path > writes routing.multi_intent_split via the YAML key (Task 4.3/4.4)
 
 **Edge case tests:**
 - `config.test.ts` > routing.multi_intent_split > coerces a string value to the true default (sanitizer fallback)
 - `config.test.ts` > routing.multi_intent_split > coerces a number value to the true default (sanitizer fallback)
 - `config.test.ts` > routing.multi_intent_split > coerces null to the true default (sanitizer fallback)
-- `pas-yaml-schema.test.ts` > rejects a string value
-- `pas-yaml-schema.test.ts` > rejects a number value
-- `pas-yaml-schema.test.ts` > rejects null
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > rejects a string value
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > rejects a number value
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > rejects null
 
 ---
 
