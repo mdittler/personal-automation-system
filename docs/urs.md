@@ -5713,6 +5713,56 @@ End-to-end coverage that realistic Telegram phrasings — multi-question dinner+
 - `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "show me recipes with chicken and pasta" → no preamble, single-message path`
 - `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "add salt and pepper to my list" → no preamble, single-message path`
 
+### REQ-FOOD-PROACTIVE-BRIDGE — Strategy B transitive call-graph guard
+
+Deliverable 3 of the Classifier + Reply-Collector + Call-Graph Guard phase. The Strategy A "direct helpers" enumeration on the proactive-send guard (`apps/food/src/testing/proactive-send-scan.ts`) was brittle and drift-prone — any new helper added between a `PROACTIVE_ENTRYPOINTS` member and a `telegram.send*` would silently bypass the guard until manually added. Strategy B replaces it with a true transitive call-graph reachability analysis built on the TypeScript compiler API: from each named entrypoint, walk the call graph BFS through `ts.Program` + the type checker (so cross-file helpers resolve), and flag any reachable `telegram.send*` call outside sanctioned files. Cycle-safe via a visited Set; supports all four send variants; the explicit helper list is gone.
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-008: `findReachableSends` builds a function-level call graph and BFS-walks from each named entrypoint
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`findReachableSends({ projectRoot, entrypoints, excludeFiles? })` (`apps/food/src/testing/proactive-send-call-graph.ts`) builds a function-level adjacency map keyed by stable `${fileName}#${declarationStart}` IDs, then BFS-walks from each entrypoint name to collect every reachable function. Cross-file call targets resolve through `ts.TypeChecker.getSymbolAtLocation(...).getAliasedSymbol(...)` so ES-module imports (with `.js` extensions) are followed back to the original declaration. The internal `buildGraph` helper stays module-private — only `findReachableSends` and the `ProactiveSendHit` type are exported (Codex Round 1 #15). Function-shape coverage includes named declarations, methods, `const X = () =>`, and `{ X: () => }` property assignments. Direct entrypoint sends, transitive same-file helpers, transitive cross-file helpers, and aliased call sites (`const { telegram } = services`) are all detected. Non-reachable code (e.g., reactive handlers in the same file as an entrypoint) is correctly NOT flagged.
+
+**Standard tests** (`proactive-send-call-graph.test.ts`):
+- `Strategy B call-graph guard — direct entrypoint sends > flags a raw telegram.send inside an entrypoint (no helper involved)`
+- `Strategy B — transitive same-file helper > flags a telegram.send inside a helper that the entrypoint calls`
+- `Strategy B — cross-file helper resolution > flags a telegram.send in a helper defined in another file`
+- `Strategy B — non-reachable code is not flagged > does not flag a telegram.send that no entrypoint can reach`
+- `Strategy B — alias / aliased call sites > flags telegram.send through a destructured alias`
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-009: `findReachableSends` detects all four `telegram.send*` variants (Codex #14)
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The `isTelegramSendCall` predicate matches `send`, `sendWithButtons`, `sendPhoto`, AND `sendOptions` — the four `TelegramService` methods that emit a user-visible message and therefore must be bridged. Each variant is exercised individually as a transitive call through a helper. Direct/transitive coverage is established for every variant; receiver detection accepts both property-access (`services.telegram.send`) and bare-identifier (`telegram.send` after destructuring) shapes.
+
+**Standard tests** (`proactive-send-call-graph.test.ts`):
+- `Strategy B — all telegram.send* variants (Codex #14) > flags telegram.send reachable via a transitive helper`
+- `Strategy B — all telegram.send* variants (Codex #14) > flags telegram.sendWithButtons reachable via a transitive helper`
+- `Strategy B — all telegram.send* variants (Codex #14) > flags telegram.sendPhoto reachable via a transitive helper`
+- `Strategy B — all telegram.send* variants (Codex #14) > flags telegram.sendOptions reachable via a transitive helper`
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-010: BFS visited-set guard makes the scanner cycle-safe; exclusions match against `projectRoot`-relative POSIX paths
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The BFS in `findReachableSends` uses a `reachable: Set<FnId>` visited guard — mutually-recursive helpers (`a` → `b` → `a`) terminate within the per-test 3-second cap and the recursion-induced send inside `b` is still flagged. Exclusion strings are matched relative to the passed `projectRoot` (default `apps/food/src`), via a POSIX-normalized prefix slice; the canonical `utils/proactive-message.ts` exclusion holds regardless of OS path separator or absolute-vs-relative root (Codex Round 1 #12). `__tests__/` and `testing/` are excluded unconditionally as scaffolding.
+
+**Standard tests** (`proactive-send-call-graph.test.ts`):
+- `Strategy B — cycle safety > does not infinite-loop on mutually-recursive helpers` (3-second cap)
+- `Strategy B — exclusions > excludes __tests__/, testing/, and utils/proactive-message.ts even when reachable`
+- `Strategy B — production-root exclusion shape (Codex #12) > the real sanctioned bridge path "utils/proactive-message.ts" is excluded under projectRoot=apps/food/src`
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-011: `proactive-send-scan.ts` delegates the production sweep to Strategy B; in-memory self-test API preserved (Codex #16)
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`scanFoodProactiveSends(projectRoot = 'apps/food/src')` now delegates to `findReachableSends` with `entrypoints = [...PROACTIVE_ENTRYPOINTS]`. The explicit "direct helpers" list that Strategy A required is gone — any helper transitively reachable from a `PROACTIVE_ENTRYPOINTS` member is automatically chased. `scanFoodProactiveSendsFromSources(sources)` is retained as a thin Strategy-A-style in-memory scanner for the guard self-test fixture only (Codex Round 1 #16), so the guard does not need a real `ts.Program` for its self-test. `PROACTIVE_ENTRYPOINTS` (13 names) remains as the semantic anchor list — the closed catalog of Food functions that perform proactive Telegram sends. The real Strategy B sweep against `apps/food/src` returns `[]`, confirming Strategy A's helper list was already accurate (no latent bugs surfaced by the migration). The build-failing guard test uses `fileURLToPath(import.meta.url)` per the project's pure-ESM contract (Codex Round 1 #13).
+
+**Standard tests** (`proactive-send-guard.test.ts`):
+- `Food proactive-send guard (Strategy B) > self-test: in-memory scanner flags a raw telegram.send inside a named entrypoint`
+- `Food proactive-send guard (Strategy B) > real: no unbridged proactive sends reachable in apps/food/src (Strategy B sweep)`
+
 ---
 
 ## App-Message Memory Bridge (2026-05-18)
@@ -5827,10 +5877,12 @@ When `recordOutboundMessage` rejects but Telegram delivery succeeded, `sendProac
 The `scanFoodProactiveSends` AST scanner (`apps/food/src/testing/proactive-send-scan.ts`) walks every `.ts` file under `apps/food/src/` (excluding `__tests__/`, `testing/`, and `utils/proactive-message.ts`); inside any function whose name is in the explicit `PROACTIVE_ENTRYPOINTS` set, it flags every `CallExpression` whose callee is a `PropertyAccessExpression` ending in `.telegram.send` or `.telegram.sendWithButtons`. The build-failing test asserts (a) the scanner self-test detects a fixture violation and (b) the real project tree has zero flagged sites. A new proactive job either routes through `sendProactiveMessage` or must be deliberately added to the entrypoint set (reviewed edit).
 
 **Standard tests:**
-- `proactive-send-guard.test.ts` > Food proactive-send guard > real: no unbridged proactive sends in apps/food/src
+- `proactive-send-guard.test.ts` > Food proactive-send guard (Strategy B) > real: no unbridged proactive sends reachable in apps/food/src (Strategy B sweep)
 
 **Security tests:**
-- `proactive-send-guard.test.ts` > Food proactive-send guard > self-test: scanner flags a raw telegram.send inside a proactive entrypoint name
+- `proactive-send-guard.test.ts` > Food proactive-send guard (Strategy B) > self-test: in-memory scanner flags a raw telegram.send inside a named entrypoint
+
+**Fixes (2026-05-24):** Strategy A entrypoint-scoped enumeration replaced by Strategy B transitive call-graph reachability (REQ-FOOD-PROACTIVE-BRIDGE-008..011). The guard's contract is unchanged — the real sweep still must return zero hits — but the implementation now chases helpers transitively via the TypeScript type checker. Test describe-block renamed to `(Strategy B)`; the in-memory self-test fixture is preserved via `scanFoodProactiveSendsFromSources`.
 
 #### REQ-FOOD-PROACTIVE-BRIDGE-007: `FoodProactiveKind` is the closed catalog; reactive Food paths MUST NOT bridge separately
 
@@ -12509,5 +12561,9 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-ROUTE-020 | request-context-reply-buffer.test.ts, reply-buffer.test.ts, router-context-merge.test.ts, router-multi-intent.test.ts, router-multi-intent-reply-buffer.test.ts | 10 | 0 | Implemented |
 | REQ-ROUTE-021 | reply-buffer.test.ts, router-multi-intent.test.ts, router-multi-intent-reply-buffer.test.ts | 3 | 0 | Implemented |
 | REQ-ROUTE-022 | multi-intent-natural-language.persona.test.ts | 0 | 13 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-008 | proactive-send-call-graph.test.ts | 5 | 0 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-009 | proactive-send-call-graph.test.ts | 4 | 0 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-010 | proactive-send-call-graph.test.ts | 3 | 0 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-011 | proactive-send-guard.test.ts | 1 | 1 | Implemented |
 
-| **Totals** | **402 test files** | **2792** | **2750** | **5542 tests** |
+| **Totals** | **403 test files** | **2805** | **2751** | **5556 tests** |
