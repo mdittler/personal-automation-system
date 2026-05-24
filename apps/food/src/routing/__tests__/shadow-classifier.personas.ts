@@ -25,6 +25,7 @@
  *                             invented rather than drawn from existing test suites
  */
 
+import { HOSTING_MEAL_PLANNING_INTENT } from '../food-intents.js';
 import type { FoodShadowLabel } from '../shadow-taxonomy.js';
 
 export interface RejectEntry {
@@ -315,7 +316,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
 	},
 
 	{
-		label: 'user wants to plan for hosting guests',
+		label: HOSTING_MEAL_PLANNING_INTENT,
 		accept: [
 			'hosting a dinner party next Saturday',
 			"we're having 8 people over for dinner",
@@ -336,6 +337,37 @@ export const FOOD_PERSONAS: readonly Persona[] = [
 				reason:
 					'isCulturalCalendarIntent (line 630) fires on Thanksgiving keyword; cultural calendar runs before hosting intent',
 				source: 'apps/food/src/index.ts:630',
+			},
+			// Platform-invite phrases — these are PAS-system questions ("how do
+			// I add a user to the platform") that semantically overlap with
+			// "hosting/inviting guests". They must NOT route to Food; they
+			// belong on the PAS-aware chatbot path. Task 3.1 renamed this
+			// intent to anchor on meal/menu/dinner-party precisely to keep
+			// platform-invite phrasings out. `'none'` is the shadow-taxonomy
+			// label for "no Food intent claims this — route elsewhere".
+			{
+				text: 'how do I invite someone to PAS',
+				correctLabel: 'none',
+				reason:
+					'platform-invite question — PAS user management (invite codes), not meal/menu planning for guests; HOSTING_MEAL_PLANNING_INTENT is anchored on meal/menu/dinner-party and intentionally does not claim invite phrasings',
+			},
+			{
+				text: 'inviting people to the platform',
+				correctLabel: 'none',
+				reason:
+					'platform-invite question — explicitly about adding users to the PAS platform, not hosting a meal; must reach the PAS-aware chatbot path, not Food',
+			},
+			{
+				text: 'how do invite codes work',
+				correctLabel: 'none',
+				reason:
+					'platform-invite question — PAS invite-code mechanism, no meal/menu/dinner-party signal; HOSTING_MEAL_PLANNING_INTENT does not claim this',
+			},
+			{
+				text: 'add a new user',
+				correctLabel: 'none',
+				reason:
+					'platform-invite question — adding a user to PAS, not a hosting/meal-planning request; routes to PAS-aware chatbot, not Food',
 			},
 		],
 		advisoryNearMisses: [],
@@ -756,7 +788,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
 		advisoryNearMisses: [
 			{
 				text: "we're having 10 people over for Thanksgiving dinner",
-				correctLabel: 'user wants to plan for hosting guests',
+				correctLabel: HOSTING_MEAL_PLANNING_INTENT,
 				reason:
 					'isHostingIntent (line 636) may capture "people over" phrasing if isCulturalCalendarIntent (line 630) does not match the Thanksgiving keyword in this phrasing; outcome depends on LLM routing for this ambiguous combination',
 				source: 'apps/food/src/index.ts:636',

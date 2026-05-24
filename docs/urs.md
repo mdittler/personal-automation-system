@@ -1040,6 +1040,7 @@ The system must load configuration from `.env` files and `pas.yaml`. Environment
 
 **Fixes:**
 - **D14 (2026-04-13):** Malformed pas.yaml now fails fast at startup — `readYamlFileStrict()` catches YAML syntax errors before Zod runs, and Zod validates object shape. Added Zod schema validation (`pas-yaml-schema.ts`) for users, LLM providers, webhooks, and all top-level config sections. CL: D14-fix.
+- **CR8 (2026-05-22):** Two new routing config keys plumbed through the full surface (types, defaults, parser, `pas-yaml-schema`, `settings-metadata`, `system-config-writer`, `compose-runtime`, `pas.yaml.example`): `routing.verification.always_verify_intents: string[]` (default `[HOSTING_MEAL_PLANNING_INTENT]` — see REQ-ROUTE-009) and `routing.multi_intent_split: boolean` (default `true` — see REQ-ROUTE-016). Both defaults are in code so fresh deployments are protected without a YAML edit. Invalid input on either key coerces to the in-code default. CL: chatbot-context-routing.
 
 ### REQ-CONFIG-002: Built-in provider defaults
 
@@ -1146,7 +1147,8 @@ Free text messages must be classified by the LLM against all apps' declared inte
 - `intent-classifier.test.ts` > should use exact threshold boundary (equal = pass)
 - `router.test.ts` > routeMessage — intent classification > should fall back when classification confidence is low
 
-**Fixes:** None
+**Fixes:**
+- **CR8 (2026-05-22):** Sharpened the Food hosting intent description from `"user wants to plan for hosting guests"` to `"user wants to plan a meal or menu for a dinner party or guests they are hosting"` so platform-invite questions ("Can you tell me about inviting people?", "how do invite codes work") no longer mis-classify to Food at high confidence. The string is single-sourced via the exported `HOSTING_MEAL_PLANNING_INTENT` constant (`apps/food/src/routing/food-intents.ts`); a contract test asserts the literal stays in lockstep across `apps/food/manifest.yaml`, `shadow-taxonomy.ts` (both the label tuple and `REGEX_TO_MANIFEST_MAP.hosting`), and `FOOD_PERSONAS`. Closes Error 2 of the 2026-05-22 Chatbot Context & Routing fix. CL: chatbot-context-routing.
 
 ### REQ-ROUTE-003: Photo message routing
 
@@ -1250,7 +1252,8 @@ When intent classification confidence falls in the grey zone (>= 0.4 and < upper
 - `route-verifier.test.ts` > photo saving > does not save photo when photoDir is not configured
 - `route-verifier.test.ts` > photo saving > includes saved photo path in the pending entry
 
-**Fixes:** None
+**Fixes:**
+- **CR8 (2026-05-22):** Added `routing.verification.always_verify_intents` (REQ-ROUTE-009). Configured intents (defaulting in code to the Food hosting intent) are verified even when classifier confidence is above `verificationUpperBound`. The grey-zone gate is centralized in a private `shouldVerifyIntent(name, confidence)` helper on the Router, called by both the text path (with `match.intent`) and the photo path (with `match.photoType`) — closing the prior text-only gap where the photo verifier read `match.intent`. See REQ-ROUTE-008 / REQ-ROUTE-009 / REQ-ROUTE-010 for the full surface. CL: chatbot-context-routing.
 
 ---
 
@@ -1287,6 +1290,236 @@ Every app handler invocation must receive a `route?: RouteInfo` field on its `Me
 - `router.test.ts` > buildUserOverrideRouteInfo > always produces confidence 1.0 and source user-override regardless of inputs
 
 **Fixes:** None
+
+---
+
+### REQ-ROUTE-008: Food hosting intent scoped to meal/menu planning; single-sourced via `HOSTING_MEAL_PLANNING_INTENT`
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+The Food hosting intent is now `"user wants to plan a meal or menu for a dinner party or guests they are hosting"` (was: `"user wants to plan for hosting guests"`) so platform-invite questions ("inviting people", "invite codes") no longer mis-classify to Food at high confidence. The string is exported as `HOSTING_MEAL_PLANNING_INTENT` from `apps/food/src/routing/food-intents.ts` and is the single source of truth for every TypeScript reference (manifest still carries the literal because YAML cannot import constants). A contract test asserts the literal stays identical across `apps/food/manifest.yaml`, the constant, `shadow-taxonomy.ts` (label tuple + `REGEX_TO_MANIFEST_MAP.hosting`), and `FOOD_PERSONAS` — drift between copies is impossible without a contract failure.
+
+**Standard tests:**
+- `shadow-taxonomy.contract.test.ts` > hosting-intent string is identical across all copies (contract — pas-testing-standards) > food-intents constant matches the expected target
+- `shadow-taxonomy.contract.test.ts` > hosting-intent string is identical across all copies (contract — pas-testing-standards) > manifest.yaml literal matches the constant and old string is gone
+- `shadow-taxonomy.contract.test.ts` > hosting-intent string is identical across all copies (contract — pas-testing-standards) > shadow-taxonomy FOOD_SHADOW_LABELS tuple contains the constant
+- `shadow-taxonomy.contract.test.ts` > hosting-intent string is identical across all copies (contract — pas-testing-standards) > shadow-taxonomy REGEX_TO_MANIFEST_MAP.hosting equals the constant
+- `shadow-taxonomy.contract.test.ts` > hosting-intent string is identical across all copies (contract — pas-testing-standards) > FOOD_PERSONAS hosting persona uses the constant for its label
+
+---
+
+### REQ-ROUTE-009: `routing.verification.always_verify_intents` config (defaults to the hosting intent)
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+New system config key `routing.verification.always_verify_intents: string[]` lists intent names that MUST be sent to route verification even when classifier confidence is above `verificationUpperBound`. The code-level default — applied when the key is absent from `pas.yaml` — is `[HOSTING_MEAL_PLANNING_INTENT]`, NOT `[]`. Fresh deployments are therefore protected from the "inviting people" mis-route bug out of the box; an operator can opt out by writing an explicit empty array. The key is plumbed through the full config surface: `core/src/types/config.ts`, `core/src/services/config/{index.ts,defaults.ts,pas-yaml-schema.ts,settings-metadata.ts,system-config-writer.ts}`, `core/src/compose-runtime.ts`, and `config/pas.yaml.example`. Invalid input (non-array, array with non-string elements, null) coerces safely to the hosting default. The GUI widget is hidden (YAML-only) because the settings form does not render arrays.
+
+**Standard tests:**
+- `config.test.ts` > routing.verification.always_verify_intents > defaults to the hosting intent when key is absent
+- `config.test.ts` > routing.verification.always_verify_intents > defaults to the hosting intent when routing section omits the key
+- `config.test.ts` > routing.verification.always_verify_intents > uses an explicit array of strings as-is
+- `config.test.ts` > routing.verification.always_verify_intents > accepts an explicit empty array (operator override)
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > accepts an array of strings
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > accepts an empty array (operator override)
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > accepts undefined / absent key
+- `settings-metadata.test.ts` > SYSTEM_SETTING_DEFS default values match config loader defaults > routing.verification.always_verify_intents default is the hosting intent
+- `settings-metadata.test.ts` > SYSTEM_SETTING_DEFS default values match config loader defaults > routing.verification.always_verify_intents is hidden (no GUI widget, YAML-only)
+- `system-config-writer.test.ts` > SystemConfigWriter.write() — happy path > writes routing.verification.always_verify_intents via the YAML key
+- `system-config-writer.test.ts` > SystemConfigWriter.resetToSchemaDefault() > resets routing.verification.always_verify_intents to the hosting default
+
+**Edge case tests:**
+- `config.test.ts` > routing.verification.always_verify_intents > coerces non-array input to the hosting default (sanitization)
+- `config.test.ts` > routing.verification.always_verify_intents > coerces array with non-string elements to the hosting default
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > rejects a non-array value
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > rejects an array with non-string elements
+- `pas-yaml-schema.test.ts` > routing.verification.always_verify_intents — schema validation > rejects null
+
+---
+
+### REQ-ROUTE-010: `shouldVerifyIntent` centralizes the grey-zone gate for text + photo
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+A private `shouldVerifyIntent(name: string, confidence: number): boolean` helper on the Router returns `confidence >= confidenceThreshold && (confidence < verificationUpperBound || alwaysVerifyIntents.includes(name))`. The free-text gate calls `shouldVerifyIntent(match.intent, match.confidence)`; the photo gate calls `shouldVerifyIntent(match.photoType, match.confidence)` — closing the prior bug where the photo path read `match.intent` (always `undefined` for a photo) and could never trigger always-verify. When the verifier disagrees and suggests `chatbot`, `dispatchConversation` runs instead of `dispatchMessage` to the originally-classified app (post-routing handoff).
+
+**Standard tests:**
+- `router-verification.test.ts` > alwaysVerifyIntents — force verify above the upper bound > text path: high-confidence intent in alwaysVerifyIntents → verifier IS called
+- `router-verification.test.ts` > alwaysVerifyIntents — force verify above the upper bound > text path: high-confidence intent NOT in alwaysVerifyIntents → verifier NOT called
+- `router-verification.test.ts` > alwaysVerifyIntents — force verify above the upper bound > text path: always-verify + verifier picks chatbot → ConversationService dispatches, NOT original app
+- `router-verification.test.ts` > alwaysVerifyIntents — force verify above the upper bound > photo path: high-confidence photoType in alwaysVerifyIntents → verifier IS called
+- `router-verification.test.ts` > alwaysVerifyIntents — force verify above the upper bound > photo path: high-confidence photoType NOT in alwaysVerifyIntents → verifier NOT called
+
+**Regression cases:**
+- `regression/src/cases/routing/pas/invite-platform.case.ts` — platform-invite phrasings ("Can you tell me about inviting people?", "how do invite codes work", "add a new user to the platform", "invite my wife to use this", "how do I add my partner", "can I give my kids access") classify as `pasRelated: true` (chatbot route), never to Food hosting. (Lives in the `regression/` workspace — excluded from root `pnpm test` totals; covered by `pnpm test:regression`.)
+
+**Persona tests:** `shadow-classifier.personas.ts` carries `deterministicRejectFor` entries on the hosting persona for the platform-invite phrasings, asserted by `shadow-classifier.persona.test.ts`'s structural roundtrip suite.
+
+---
+
+### REQ-ROUTE-011: Multi-intent message splitting — each segment routed via `routeOneTextRequest`
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+`tryMultiIntentSplit` runs at the top of `routeMessage` for free-text inputs. When it returns `true`, the router emits a single preamble (`"Got it — I'll cover all of those:"`) and then dispatches each segment sequentially via the extracted `routeOneTextRequest(enrichedCtx, user)` — the same dispatch path the single-message route uses (classify → verifier → post-routing access check → `dispatchMessage`/`dispatchConversation` → `tryContextPromotion` → `sendToFallback`). No segment is silently dropped. When `tryMultiIntentSplit` returns `false`, the single-message path runs unchanged (byte-identical to pre-change).
+
+**Standard tests:**
+- `router-multi-intent.test.ts` > Router — multi-intent split (Task 4.3/4.4) > splits a two-question message and dispatches both segments in order, with one preamble
+- `router-multi-intent.test.ts` > Router — multi-intent split (Task 4.3/4.4) > dispatches three segments when the segmenter returns three
+- `router-multi-intent.test.ts` > Router — multi-intent split (Task 4.3/4.4) > setMultiIntentSplit hot-update flips the gate at runtime
+
+**Persona tests:**
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (A) Two-question messages — split into 2 and dispatch both > 'literal bug message (greeting + invit…'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (B) Three-question messages — split into 3 and dispatch all three > 'dinner + pantry + calendar'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (G) Literal-bug integration — bridged Food context visible to chatbot > literal bug message: both segments dispatch; segment 2 sees bridged [App: food] nightly-rating-prompt
+
+(Plus 15 additional two-question persona cases, 7 additional three-question persona cases — see REQ-ROUTE-013 / REQ-ROUTE-014 for the must-not-split and dependent-clause coverage.)
+
+---
+
+### REQ-ROUTE-012: Synchronous `preFilterMultiIntent` heuristic gate (zero-cost no-op for single intents)
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+`preFilterMultiIntent(text): boolean` is a synchronous, zero-cost gate that runs before any LLM call. Returns `true` only if the message length is >= 25 chars AND one of: (a) a sentence-final `?` is followed by more text, or (b) a word-bounded continuation marker matches — `also`, `additionally`, `as well`, `one more thing`, `plus`, `then`. Bare `and` is intentionally NOT a marker (too common in single-intent lists like "add milk and eggs"). Matching is case-insensitive and word-bounded, so `plussed`, `thence`, and `alsace` do not false-trigger.
+
+**Standard tests:**
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns true (potential multi-intent) > returns true for sentence-final "?" followed by more text
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns true (potential multi-intent) > returns true for "also" continuation marker
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns true (potential multi-intent) > returns true for "additionally" continuation marker
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns true (potential multi-intent) > returns true for "as well" continuation marker
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns true (potential multi-intent) > returns true for "one more thing" continuation marker
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns true (potential multi-intent) > returns true for "plus" continuation marker (word-bounded)
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns true (potential multi-intent) > returns true for "then" continuation marker
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns true (potential multi-intent) > is case-insensitive ("ALSO ...")
+
+**Edge case tests:**
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns false (single-intent or below length floor) > returns false for very short message ("hello")
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns false (single-intent or below length floor) > returns false for short single question ("what's for dinner?")
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns false (single-intent or below length floor) > returns false for internal-comma list ("add milk, eggs, and bread to the grocery list")
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns false (single-intent or below length floor) > returns false for bare "and" only ("show me the menu and the groceries please")
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns false (single-intent or below length floor) > returns false for single-sentence-with-comma ("after the meeting, send me the notes please")
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns false (single-intent or below length floor) > returns false for very short message even when a marker appears ("also hi")
+- `message-segmenter.test.ts` > preFilterMultiIntent > returns true (potential multi-intent) > does NOT match marker substring inside a longer word ("plussed", "thence", "alsace")
+
+---
+
+### REQ-ROUTE-013: Segmentation LLM output is untrusted; `MAX_SEGMENTS = 3` with merge-overflow (no question dropped)
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+`segmentMessage(text, deps)` makes one fast-tier LLM call (`responseFormat:'json'`, `temperature:0`) with the user input wrapped in a `<message>` fence and sanitized for backticks. The LLM response is treated as untrusted: only trimmed, non-empty string elements are accepted. The function degrades to `[text]` (single-segment, unchanged) on: empty array, non-string elements, null, malformed JSON, missing `segments` wrapper, all-whitespace strings, LLM throw, or when the reconstructed total length exceeds 1.5× the original (hallucination guard). When the LLM returns more than `MAX_SEGMENTS = 3` valid segments, the helper MERGES the overflow (segments 4, 5, …) into segment 3 — preserving the user's last question rather than dropping it. Markdown fences and prompt-injection content in the LLM output do not alter behavior.
+
+**Standard tests:**
+- `message-segmenter.test.ts` > segmentMessage > returns [text] unchanged for a single request (LLM returns one segment)
+- `message-segmenter.test.ts` > segmentMessage > splits a two-question message and drops the greeting fragment
+- `message-segmenter.test.ts` > segmentMessage > returns 3 segments for three distinct requests
+- `message-segmenter.test.ts` > segmentMessage > MERGES overflow into segment 3 when LLM returns 4 segments (no question dropped)
+- `message-segmenter.test.ts` > segmentMessage > MERGES overflow into segment 3 when LLM returns 5 segments
+- `message-segmenter.test.ts` > segmentMessage > trims whitespace from returned segments
+- `message-segmenter.test.ts` > segmentMessage > strips markdown fences from LLM JSON output
+- `message-segmenter.test.ts` > segmentMessage > exports MAX_SEGMENTS = 3
+
+**Edge case tests:**
+- `message-segmenter.test.ts` > segmentMessage > degrades to [text] when LLM returns empty segments array
+- `message-segmenter.test.ts` > segmentMessage > degrades to [text] when LLM returns non-string elements
+- `message-segmenter.test.ts` > segmentMessage > degrades to [text] when reconstructed total length > 1.5x original (hallucination guard)
+- `message-segmenter.test.ts` > segmentMessage > degrades to [text] when LLM returns null
+- `message-segmenter.test.ts` > segmentMessage > degrades to [text] when LLM returns malformed JSON
+- `message-segmenter.test.ts` > segmentMessage > degrades to [text] when LLM returns an array directly (missing "segments" wrapper)
+- `message-segmenter.test.ts` > segmentMessage > degrades to [text] when "segments" contains only empty/whitespace strings
+
+**Error handling tests:**
+- `message-segmenter.test.ts` > segmentMessage > degrades to [text] when LLM call throws
+- `router-multi-intent.test.ts` > Router — multi-intent split (Task 4.3/4.4) > segmenter throws: degrade to single dispatch (no preamble, single-message path runs)
+- `router-multi-intent.test.ts` > Router — multi-intent split (Task 4.3/4.4) > segmenter returns <2 segments: no preamble, single-message path runs
+
+**Persona tests (4-question merge-into-3):**
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (C) Four-question messages — segmenter merges overflow into segment 3 > 'dinner + pantry + spending + calendar…'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (C) Four-question messages — segmenter merges overflow into segment 3 > 'four food asks (merge 3+4)'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (C) Four-question messages — segmenter merges overflow into segment 3 > 'four chatbot questions (merge 3+4)'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (C) Four-question messages — segmenter merges overflow into segment 3 > 'mixed four asks (merge 3+4)'
+
+**Security tests:**
+- `message-segmenter.test.ts` > segmentMessage > wraps user input in <message> fence and sanitizes backticks before sending to LLM
+- `message-segmenter.test.ts` > segmentMessage > returns sane fallback when the LLM echoes hostile content as a single segment
+
+---
+
+### REQ-ROUTE-014: Greeting fragments dropped; dependent clauses kept attached
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+The segmenter prompt instructs the LLM to drop leading greeting fragments ("Good morning!", "hi", "hey") rather than emitting them as a standalone segment, and to keep dependent clauses attached to their parent ask ("...and do that for tomorrow too", "...and also butter"). Dependent-clause messages return a single segment from `segmentMessage`, which means `tryMultiIntentSplit` returns `false` and the single-message path runs unchanged. The router does not need any special handling — correctness comes from segmenter prompt design + the `<2 segments` short-circuit.
+
+**Standard tests:**
+- `message-segmenter.test.ts` > segmentMessage > splits a two-question message and drops the greeting fragment
+- `message-segmenter.test.ts` > segmentMessage > keeps a dependent clause attached (LLM returns 1 segment for "...and do that for tomorrow too")
+
+**Persona tests:**
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (E) Dependent-clause messages — kept attached, single dispatch > 'plan dinner Saturday and do that for …'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (E) Dependent-clause messages — kept attached, single dispatch > 'spending yesterday and also for last …'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (E) Dependent-clause messages — kept attached, single dispatch > 'dinner tonight and also for tomorrow …'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (E) Dependent-clause messages — kept attached, single dispatch > 'pantry items and also expiring soon'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (E) Dependent-clause messages — kept attached, single dispatch > 'add eggs and also butter to the list'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (E) Dependent-clause messages — kept attached, single dispatch > 'calendar today and also tomorrow'
+
+**Must-NOT-split persona tests (real prefilter returns false):**
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (D) Must-NOT-split messages — real prefilter returns false > 'short single question'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (D) Must-NOT-split messages — real prefilter returns false > 'short imperative'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (D) Must-NOT-split messages — real prefilter returns false > 'comma list — milk eggs bread'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (D) Must-NOT-split messages — real prefilter returns false > 'two-sentence-one-ask'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (D) Must-NOT-split messages — real prefilter returns false > 'single question with internal comma'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (D) Must-NOT-split messages — real prefilter returns false > 'short marker — also hi'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (D) Must-NOT-split messages — real prefilter returns false > 'bare "and" — menu and groceries'
+
+---
+
+### REQ-ROUTE-015: Per-segment error isolation — a failing segment apologizes; siblings still run
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+Each call to `routeOneTextRequest` inside the multi-intent loop is wrapped in `try/catch`. If a segment's dispatch throws, the router emits a per-segment apology and continues to the next segment — so a failure in one ask never blocks the others. Post-routing access checks (REQ-USER-004) re-run independently for each segment: a user without access to the segment-2 app receives a deny message for that segment while segment 1 (which they DO have access to) still dispatches normally.
+
+**Standard tests:**
+- `router-multi-intent.test.ts` > Router — multi-intent split (Task 4.3/4.4) > segment 2 denied: post-routing access check fires per segment
+- `router-multi-intent.test.ts` > Router — multi-intent split (Task 4.3/4.4) > per-segment error isolation: segment 1 throws, segment 2 still runs
+
+**Persona tests:**
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (F) Partial-failure cases — failing segment apologizes; siblings still run > 'segment 1 of 2 fails'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (F) Partial-failure cases — failing segment apologizes; siblings still run > 'segment 2 of 2 fails'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (F) Partial-failure cases — failing segment apologizes; siblings still run > 'segment 2 of 3 fails (middle); 1 and …'
+- `router-multi-intent.persona.test.ts` > Router multi-intent splitting — persona coverage (Task 4.5) > (F) Partial-failure cases — failing segment apologizes; siblings still run > 'segment 3 of 3 fails (last); 1 and 2 …'
+
+---
+
+### REQ-ROUTE-016: `routing.multi_intent_split` config (default ON, byte-identical single-message path when OFF)
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+New system config key `routing.multi_intent_split: boolean` controls multi-intent splitting. The code-level default — applied when the key is absent from `pas.yaml` — is `true`, so the production bug ("...also, can you see what meals were suggested...") is fixed on merge without any config edit. Operators may set the key to `false` as a kill-switch: when off, `tryMultiIntentSplit` returns `false` immediately without calling the segmenter, and the single-message path runs byte-identically to pre-change. Key is plumbed through the full config surface: `core/src/types/config.ts`, `core/src/services/config/{index.ts,defaults.ts,pas-yaml-schema.ts,settings-metadata.ts,system-config-writer.ts}`, `core/src/compose-runtime.ts`, and `config/pas.yaml.example`. Invalid input (string, number, null) coerces to the `true` default. The setting is GUI-visible (boolean widget) and **restart-required** (`restartRequired: true` in the SettingDef) — operator edits via GUI or `pas.yaml` take effect on next boot. The Router exposes a `setMultiIntentSplit` setter, but it is **test-only**: no SettingsWriter post-write hook wires it to a live config write today, and `settings-metadata.ts` is the source of truth for the restart contract.
+
+**Standard tests:**
+- `router-multi-intent.test.ts` > Router — multi-intent split (Task 4.3/4.4) > does NOT split when prefilter returns false: no segment call, no preamble, single dispatch
+- `router-multi-intent.test.ts` > Router — multi-intent split (Task 4.3/4.4) > flag OFF: no segmenter call, no preamble, single-message path runs
+- `router-multi-intent.test.ts` > Router — multi-intent split (Task 4.3/4.4) > setMultiIntentSplit hot-update flips the gate at runtime
+- `config.test.ts` > routing.multi_intent_split > defaults to true when key is absent (no yaml file at all)
+- `config.test.ts` > routing.multi_intent_split > defaults to true when routing section omits the key
+- `config.test.ts` > routing.multi_intent_split > accepts explicit false as the kill-switch
+- `config.test.ts` > routing.multi_intent_split > accepts explicit true
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > accepts true
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > accepts false (kill switch)
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > accepts the key being absent
+- `settings-metadata.test.ts` > SYSTEM_SETTING_DEFS default values match config loader defaults > routing.multi_intent_split default is true (Task 4.3/4.4)
+- `settings-metadata.test.ts` > SYSTEM_SETTING_DEFS default values match config loader defaults > routing.multi_intent_split is NOT hidden (boolean widget renders)
+- `system-config-writer.test.ts` > SystemConfigWriter.write() — happy path > writes routing.multi_intent_split via the YAML key (Task 4.3/4.4)
+
+**Edge case tests:**
+- `config.test.ts` > routing.multi_intent_split > coerces a string value to the true default (sanitizer fallback)
+- `config.test.ts` > routing.multi_intent_split > coerces a number value to the true default (sanitizer fallback)
+- `config.test.ts` > routing.multi_intent_split > coerces null to the true default (sanitizer fallback)
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > rejects a string value
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > rejects a number value
+- `pas-yaml-schema.test.ts` > routing.multi_intent_split — schema validation > rejects null
 
 ---
 
@@ -5305,6 +5538,125 @@ Both `buildSystemPrompt` and `buildAppAwareSystemPrompt` MUST include `PHOTO_SUM
 - **REQ-CONV-SESSION-SOURCE-002:** All production `appendExchange` writers set `source` explicitly: `dispatchMessage`/`dispatchConversation`/`handle-message`/`handle-ask` use `'user'`/`'assistant'`; `dispatchPhoto` uses `'photo'`; `AppOutboundBridge` uses `'app'`.
 - **REQ-CONV-SESSION-SOURCE-003:** `formatConversationHistory` cap-lifts a turn to `PHOTO_TURN_CAP` when its `source` (or, for assistant turns, the previous turn's `source`) is `'photo'` or `'app'`. Content-regex against `PHOTO_TURN_HEADERS` / `APP_HEADER_RE` is a back-compat fallback ONLY when `source === undefined`. A user-typed exact header on a new transcript (with `source: 'user'`) does NOT cap-lift.
 
+### REQ-FOOD-PROACTIVE-BRIDGE — Food proactive send + chatbot bridge
+
+The Food app's eight scheduled (cron-driven) jobs send proactive Telegram messages and must record each delivery into the chatbot transcript via `appOutboundBridge.recordOutboundMessage` so the chatbot can answer follow-ups. A single `sendProactiveMessage` helper (`apps/food/src/utils/proactive-message.ts`) is the only proactive send path; an entrypoint-scoped static guard prevents regressions; the helper is fail-open on bridge failure but never records if the Telegram send rejects.
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-001: Every Food proactive send routes through `sendProactiveMessage`
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+`sendProactiveMessage(services, { userId, kind: FoodProactiveKind, body, buttons? })` pairs Telegram delivery (`telegram.sendWithButtons` if buttons, else `telegram.send`) with `appOutboundBridge.recordOutboundMessage({ userId, appId: 'food', kind, body, buttons })`. The body sent to Telegram is byte-identical to the body recorded on the bridge — the helper does NOT sanitize (the bridge owns sanitization). `appId` is always the literal string `'food'`.
+
+**Standard tests:**
+- `proactive-message.test.ts` > sendProactiveMessage > (a) with buttons: sends, records the raw body, and returns the SentMessage
+- `proactive-message.test.ts` > sendProactiveMessage > (b) no buttons: sends plain text and returns undefined
+- `proactive-message.test.ts` > sendProactiveMessage > (c) RAW body passthrough: bytes sent to Telegram are byte-identical to bytes recorded on the bridge
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-002: Eight scheduled Food jobs bridge with their stable `kind`
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+The eight cron-driven proactive jobs route their send through `sendProactiveMessage` with stable `kind` values drawn from the `FoodProactiveKind` union: `nightly-rating-prompt`, `perishable-check`, `leftover-check`, `freezer-check`, `defrost-reminder` (job `defrost-check`), `cuisine-diversity-nudge` (job `cuisine-diversity-check`), `seasonal-nudge`, `cultural-calendar` (job `cultural-calendar-check`). Each job records one bridge entry per household member with the raw body and any buttons; jobs that have no items to send produce no Telegram send and no bridge call.
+
+**Standard tests:**
+- `rating-handler.test.ts` > handleNightlyRatingPromptJob > bridges to chatbot transcript > records one bridge entry per household member with the raw body and buttons
+- `perishable-handler.test.ts` > handlePerishableCheckJob > bridges to chatbot transcript > records one bridge entry per household member with the raw body and buttons
+- `leftover-handler.test.ts` > handleLeftoverCheckJob > bridges to chatbot transcript > records one bridge entry per household member with buttons for expiring-soon items
+- `leftover-handler.test.ts` > handleLeftoverCheckJob > bridges to chatbot transcript > records one bridge entry per household member with no buttons for expired-only items
+- `freezer-handler.test.ts` > freezer-handler > handleFreezerCheckJob > bridges to chatbot transcript > records one bridge entry per household member with the raw body and no buttons
+- `batch-cooking.test.ts` > checkDefrostNeeded > bridges to chatbot transcript > records one bridge entry per household member with the raw body and no buttons
+- `cuisine-tracker.test.ts` > checkCuisineDiversity > bridges to chatbot transcript > records one bridge entry per household member with the raw body and no buttons
+- `seasonal-nudge.test.ts` > seasonal-nudge handler > bridges to chatbot transcript > records one bridge entry per household member with the raw body and no buttons
+- `cultural-calendar-handler.test.ts` > handleCulturalCalendarJob > bridges to chatbot transcript > records one bridge entry per household member with the raw body and no buttons
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (real bridge end-to-end) > nightly-rating-prompt: real bridge records [App: food] nightly-rating-prompt
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (real bridge end-to-end) > perishable-check: real bridge records [App: food] perishable-check
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (real bridge end-to-end) > leftover-check: real bridge records [App: food] leftover-check
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (real bridge end-to-end) > freezer-check: real bridge records [App: food] freezer-check
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (real bridge end-to-end) > defrost-check: real bridge records [App: food] defrost-reminder
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (real bridge end-to-end) > cuisine-diversity-check: real bridge records [App: food] cuisine-diversity-nudge
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (real bridge end-to-end) > seasonal-nudge: real bridge records [App: food] seasonal-nudge
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (real bridge end-to-end) > cultural-calendar-check: real bridge records [App: food] cultural-calendar
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (real bridge end-to-end) > weekly-nutrition-summary: real bridge records [App: food] weekly-nutrition
+
+**Persona tests:**
+- `proactive-bridge.persona.test.ts` > Food proactive bridge — chatbot visibility (persona) > Gus can see bridged proactive Food messages in his system prompt > P1: nightly-rating-prompt — system prompt contains kind header + meal name
+- `proactive-bridge.persona.test.ts` > Food proactive bridge — chatbot visibility (persona) > Gus can see bridged proactive Food messages in his system prompt > P2: perishable-check — system prompt contains kind header + item name
+- `proactive-bridge.persona.test.ts` > Food proactive bridge — chatbot visibility (persona) > Gus can see bridged proactive Food messages in his system prompt > P3: leftover-check — system prompt contains kind header + leftover name
+- `proactive-bridge.persona.test.ts` > Food proactive bridge — chatbot visibility (persona) > Gus can see bridged proactive Food messages in his system prompt > P4: freezer-check — system prompt contains kind header + freezer item
+- `proactive-bridge.persona.test.ts` > Food proactive bridge — chatbot visibility (persona) > Gus can see bridged proactive Food messages in his system prompt > P5: seasonal-nudge — system prompt contains kind header + suggested produce
+- `proactive-bridge.persona.test.ts` > Food proactive bridge — chatbot visibility (persona) > Gus can see bridged proactive Food messages in his system prompt > P6: cultural-calendar-check — system prompt contains kind header + holiday name
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-003: Helper returns the `SentMessage` from `sendWithButtons` so callback wiring still works
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+`sendProactiveMessage` returns `Promise<SentMessage | undefined>`: the `SentMessage` from `telegram.sendWithButtons` for the buttons path; `undefined` for the no-buttons (`telegram.send`) path. The batch-prep job uses the returned `{chatId, messageId}` to call `setBatchFreezeRecipes`, preserving the freezer-friendly callback resolution that the prior hand-written send + bridge pair supported.
+
+**Standard tests:**
+- `proactive-message.test.ts` > sendProactiveMessage > (a) with buttons: sends, records the raw body, and returns the SentMessage
+- `proactive-message.test.ts` > sendProactiveMessage > (b) no buttons: sends plain text and returns undefined
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (food scheduled jobs) > generate-weekly-plan: batch-prep fan-out bridges one per member with kind batch-prep
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-004: Bridge is called only after `telegram.send*` resolves; never on a rejected send
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+`appOutboundBridge.recordOutboundMessage` is invoked AFTER the Telegram send resolves. If `telegram.send` or `telegram.sendWithButtons` rejects, the helper rejects to the caller AND does NOT call the bridge — preventing the transcript from claiming a delivery that never reached the user.
+
+**Error handling tests:**
+- `proactive-message.test.ts` > sendProactiveMessage > (d) telegram.send rejects: helper rejects and bridge is NOT called
+- `proactive-message.test.ts` > sendProactiveMessage > (d2) telegram.sendWithButtons rejects: helper rejects and bridge is NOT called
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-005: Helper is fail-open on a bridge rejection after a successful Telegram send
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+When `recordOutboundMessage` rejects but Telegram delivery succeeded, `sendProactiveMessage` swallows the bridge error, logs a warning via `services.logger.warn`, and resolves normally. A failing chatbot bridge must NEVER block or fail a user-visible app send. When `services.appOutboundBridge` is `undefined` (the manifest does not declare the service), the helper still sends to Telegram and resolves without throwing.
+
+**Error handling tests:**
+- `proactive-message.test.ts` > sendProactiveMessage > (e) bridge fail-open: bridge rejection after a successful send is swallowed and logged
+- `proactive-message.test.ts` > sendProactiveMessage > (f) appOutboundBridge undefined: Telegram still sends and helper resolves without throwing
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-006: Build-failing static guard against unbridged proactive sends
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+The `scanFoodProactiveSends` AST scanner (`apps/food/src/testing/proactive-send-scan.ts`) walks every `.ts` file under `apps/food/src/` (excluding `__tests__/`, `testing/`, and `utils/proactive-message.ts`); inside any function whose name is in the explicit `PROACTIVE_ENTRYPOINTS` set, it flags every `CallExpression` whose callee is a `PropertyAccessExpression` ending in `.telegram.send` or `.telegram.sendWithButtons`. The build-failing test asserts (a) the scanner self-test detects a fixture violation and (b) the real project tree has zero flagged sites. A new proactive job either routes through `sendProactiveMessage` or must be deliberately added to the entrypoint set (reviewed edit).
+
+**Standard tests:**
+- `proactive-send-guard.test.ts` > Food proactive-send guard > real: no unbridged proactive sends in apps/food/src
+
+**Security tests:**
+- `proactive-send-guard.test.ts` > Food proactive-send guard > self-test: scanner flags a raw telegram.send inside a proactive entrypoint name
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-007: `FoodProactiveKind` is the closed catalog; reactive Food paths MUST NOT bridge separately
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+`FoodProactiveKind` is a closed string-literal union: `weekly-menu | weekly-nutrition | weekly-health | batch-prep | nightly-rating-prompt | perishable-check | leftover-check | freezer-check | defrost-reminder | cuisine-diversity-nudge | seasonal-nudge | cultural-calendar`. Every value satisfies `KIND_RE = /^[a-z0-9_:-]{1,64}$/` (REQ-CONV-APP-BRIDGE-002). Reactive Food message paths — command/intent/callback replies, `editMessage` updates, `handleCulturalCalendarMessage` on-demand replies, and budget-alert text appended to a plan body — MUST NOT call the bridge separately (the host message's bridge call covers the appended text).
+
+**Standard tests:**
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (food scheduled jobs) > weekly-health-correlation: bridges with kind weekly-health
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (food scheduled jobs) > weekly-health-correlation: no bridge call when correlateHealth returns empty
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (food scheduled jobs) > generate-weekly-plan (singleton household): bridges with kind weekly-menu
+
+**Edge case tests (no-send / no-bridge):**
+- `rating-handler.test.ts` > handleNightlyRatingPromptJob > bridges to chatbot transcript > does not send or record when there are no uncooked meals
+- `perishable-handler.test.ts` > handlePerishableCheckJob > bridges to chatbot transcript > does not send or record when no items are expiring
+- `leftover-handler.test.ts` > handleLeftoverCheckJob > bridges to chatbot transcript > does not send or record when there are no active leftovers
+- `freezer-handler.test.ts` > freezer-handler > handleFreezerCheckJob > bridges to chatbot transcript > does not send or record when no aging items exist
+- `batch-cooking.test.ts` > checkDefrostNeeded > bridges to chatbot transcript > does not send or record when no frozen ingredients match
+- `cuisine-tracker.test.ts` > checkCuisineDiversity > bridges to chatbot transcript > does not send or record when no repetition is detected
+- `seasonal-nudge.test.ts` > seasonal-nudge handler > bridges to chatbot transcript > does not send or record when no household exists
+- `seasonal-nudge.test.ts` > seasonal-nudge handler > bridges to chatbot transcript > does not send or record when LLM fails
+- `cultural-calendar-handler.test.ts` > handleCulturalCalendarJob > bridges to chatbot transcript > does not send or record when no holidays are in the window
+- `cultural-calendar-handler.test.ts` > handleCulturalCalendarJob > bridges to chatbot transcript > does not send or record when LLM fails
+
+**Security tests:**
+- `app-outbound-bridge-wiring.test.ts` > App-Outbound-Bridge wiring (real bridge end-to-end) > seasonal-nudge sanitization: hostile LLM body is stripped + truncated by real bridge
+- `proactive-bridge.persona.test.ts` > Food proactive bridge — chatbot visibility (persona) > N1: with app_message_bridge_enabled=false, the system prompt contains no [App: food] turn
+
 ---
 
 ## Batch 3 — Conversation Router Built-ins + Recall Config
@@ -6159,6 +6511,74 @@ Each priced line item processed by `updatePricesFromReceipt` SHALL produce a `Re
 **Standard tests:**
 - `price-store.test.ts` > `updatePricesFromReceipt` > logs a warning and excludes items rejected by isValidPriceEntry (batch 6, RC-P0)
 - `photo-handler.test.ts` > `priceUpdates` persistence
+
+---
+
+### REQ-FOOD-HOST-DEGENERATE — Hosting planner declines degenerate event parses
+
+The Food hosting planner treats `parseEventDescription` LLM output as untrusted. A degenerate parse (no guest signal or a meta-phrase description) short-circuits before any downstream LLM call; the `/hosting plan` handler sends a fixed, actionable decline copy that never echoes the parsed description. Closes Error 4 of the 2026-05-22 Chatbot Context & Routing fix.
+
+#### REQ-FOOD-HOST-DEGENERATE-001: `isDegenerateEvent` predicate on untrusted LLM output
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+`isDegenerateEvent(parsed: ParsedEvent): boolean` returns `true` when **either**: (1) there is no *guest signal* — `guestCount` is not a finite number in `(0, 1000]` AND `guestNames` is not a non-empty array of strings; OR (2) `description` is a non-empty string that, trimmed and lowercased, contains a meta-phrase from a small allowlist (`inquiring about`, `asking about`, `wants to know`, `how to`, `how do`, `can you tell me`, `is asking`, `question about`). A meta-phrase declines even when a plausible `guestCount` is present. A missing/empty/non-string `description` alone does NOT make the parse degenerate when a guest signal exists.
+
+**Standard tests (table-driven):**
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'zero count rescued by non-empty guest…'
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'valid count, no description (missing …'
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'valid count, empty description (empty…'
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > PlanEventResult discriminated union compiles with both arms
+
+**Edge case tests:**
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'bug case: zero count, empty names'
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'negative count, empty names'
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'NaN count'
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'Infinity count'
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'absurd count over cap, no names'
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'wrong type for count'
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'count + names missing entirely'
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'zero count with meta description'
+- `hosting-planner.test.ts` > hosting-planner > isDegenerateEvent — untrusted LLM output > 'valid count BUT meta-phrase in descri…'
+
+---
+
+#### REQ-FOOD-HOST-DEGENERATE-002: `planEvent` returns `PlanEventResult` and short-circuits before downstream LLM calls
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+`planEvent` returns `Promise<PlanEventResult>` where `PlanEventResult = { kind: 'plan'; plan: EventPlan } | { kind: 'declined'; reason: 'not-an-event' }`. When `isDegenerateEvent(parsed)` returns `true` immediately after `parseEventDescription`, `planEvent` returns `{ kind: 'declined', reason: 'not-an-event' }` without calling `suggestEventMenu` or `generatePrepTimeline` — saving the two expensive downstream LLM calls and preventing a hollow plan from being rendered. Valid parses continue through the full pipeline and return `{ kind: 'plan', plan }`. `formatEventPlan` remains a pure unconditional renderer (not gated on the discriminator).
+
+**Standard tests:**
+- `hosting-planner.test.ts` > hosting-planner > planEvent — declines degenerate parses > short-circuits a degenerate parse and skips downstream LLM calls
+- `hosting-planner.test.ts` > hosting-planner > planEvent — declines degenerate parses > passes a valid parse through to the full planning pipeline
+
+---
+
+#### REQ-FOOD-HOST-DEGENERATE-003: `/hosting plan` sends a fixed decline copy that never echoes the untrusted description
+
+**Phase:** 2026-05-22 (Chatbot Context & Routing) | **Status:** Implemented
+
+When `planEvent` returns `{ kind: 'declined' }`, the `/hosting plan` handler sends a fixed, actionable decline copy: *"That doesn't look like an event to plan. Try `/hosting plan dinner for 6 Saturday at 7pm`. If you wanted to invite someone to PAS, ask the assistant about invite codes."* The decline message MUST NOT contain `Event Plan`, `0 guests`, or `Menu:` strings (exact-sink assertion) and MUST NOT echo the untrusted parsed description — even when the description contains markup like `` `</script>` `` or other hostile content.
+
+**Standard tests:**
+- `hosting-handler.test.ts` > hosting handler > /hosting plan — degenerate input decline > degenerate parse → exact decline message, no hollow-plan strings, no downstream LLM calls
+- `hosting-handler.test.ts` > hosting handler > /hosting plan — degenerate input decline > valid parse → real formatEventPlan body is sent
+
+**Persona tests:**
+- `natural-language.test.ts` > Natural Language — Real User Messages > /hosting plan — persona coverage for degenerate-event decline > "inviting people" → exact decline message, no hollow Event Plan / 0 guests / Menu: leak
+- `natural-language.test.ts` > Natural Language — Real User Messages > /hosting plan — persona coverage for degenerate-event decline > "how do invite codes work" → exact decline message, no hollow Event Plan / 0 guests / Menu: leak
+- `natural-language.test.ts` > Natural Language — Real User Messages > /hosting plan — persona coverage for degenerate-event decline > "add my wife to the platform" → exact decline message, no hollow Event Plan / 0 guests / Menu: leak
+- `natural-language.test.ts` > Natural Language — Real User Messages > /hosting plan — persona coverage for degenerate-event decline > "can you tell me about hosting" → exact decline message, no hollow Event Plan / 0 guests / Menu: leak
+- `natural-language.test.ts` > Natural Language — Real User Messages > /hosting plan — persona coverage for degenerate-event decline > "whats hosting" → exact decline message, no hollow Event Plan / 0 guests / Menu: leak
+- `natural-language.test.ts` > Natural Language — Real User Messages > /hosting plan — persona coverage for degenerate-event decline > "tell me about dinner parties" → exact decline message, no hollow Event Plan / 0 guests / Menu: leak
+- `natural-language.test.ts` > Natural Language — Real User Messages > /hosting plan — persona coverage for degenerate-event decline > "I'm hosting a dinner party for 6 Saturday" → real plan rendered (Event Plan + 6 guests)
+- `natural-language.test.ts` > Natural Language — Real User Messages > /hosting plan — persona coverage for degenerate-event decline > "having 8 people over for dinner saturday at 7" → real plan rendered (Event Plan + 8 guests)
+- `natural-language.test.ts` > Natural Language — Real User Messages > /hosting plan — persona coverage for degenerate-event decline > "plan a meal for 4 friends coming over tonight" → real plan rendered (Event Plan + 4 guests)
+- `natural-language.test.ts` > Natural Language — Real User Messages > /hosting plan — persona coverage for degenerate-event decline > "dinner party for 10 guests next friday — vegetarian" → real plan rendered (Event Plan + 10 guests)
+
+**Security tests:**
+- `hosting-handler.test.ts` > hosting handler > /hosting plan — degenerate input decline > hostile description in degenerate parse never leaks into decline message
 
 ---
 
@@ -11856,5 +12276,24 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-LLAMA-CPP-007 | pas-yaml-schema.test.ts, config.test.ts, llama-cpp-compose-runtime.integration.test.ts | 6 | 3 | Implemented |
 | REQ-LLM-LLAMA-CPP-008 | llama-cpp-provider.test.ts | 1 | 0 | Implemented |
 | REQ-LLM-LLAMA-CPP-009 | llama-cpp-provider.test.ts | 1 | 0 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-001 | proactive-message.test.ts | 3 | 0 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-002 | rating-handler.test.ts, perishable-handler.test.ts, leftover-handler.test.ts, freezer-handler.test.ts, batch-cooking.test.ts, cuisine-tracker.test.ts, seasonal-nudge.test.ts, cultural-calendar-handler.test.ts, app-outbound-bridge-wiring.test.ts, proactive-bridge.persona.test.ts | 25 | 0 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-003 | proactive-message.test.ts, app-outbound-bridge-wiring.test.ts | 3 | 0 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-004 | proactive-message.test.ts | 0 | 2 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-005 | proactive-message.test.ts | 0 | 2 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-006 | proactive-send-guard.test.ts | 1 | 1 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-007 | app-outbound-bridge-wiring.test.ts, rating-handler.test.ts, perishable-handler.test.ts, leftover-handler.test.ts, freezer-handler.test.ts, batch-cooking.test.ts, cuisine-tracker.test.ts, seasonal-nudge.test.ts, cultural-calendar-handler.test.ts, proactive-bridge.persona.test.ts | 3 | 12 | Implemented |
+| REQ-FOOD-HOST-DEGENERATE-001 | hosting-planner.test.ts | 4 | 9 | Implemented |
+| REQ-FOOD-HOST-DEGENERATE-002 | hosting-planner.test.ts | 2 | 0 | Implemented |
+| REQ-FOOD-HOST-DEGENERATE-003 | hosting-handler.test.ts, natural-language.test.ts | 12 | 1 | Implemented |
+| REQ-ROUTE-008 | shadow-taxonomy.contract.test.ts | 5 | 0 | Implemented |
+| REQ-ROUTE-009 | config.test.ts, pas-yaml-schema.test.ts, settings-metadata.test.ts, system-config-writer.test.ts | 11 | 5 | Implemented |
+| REQ-ROUTE-010 | router-verification.test.ts | 5 | 0 | Implemented |
+| REQ-ROUTE-011 | router-multi-intent.test.ts, router-multi-intent.persona.test.ts | 6 | 0 | Implemented |
+| REQ-ROUTE-012 | message-segmenter.test.ts | 8 | 7 | Implemented |
+| REQ-ROUTE-013 | message-segmenter.test.ts, router-multi-intent.test.ts, router-multi-intent.persona.test.ts | 12 | 12 | Implemented |
+| REQ-ROUTE-014 | message-segmenter.test.ts, router-multi-intent.persona.test.ts | 8 | 7 | Implemented |
+| REQ-ROUTE-015 | router-multi-intent.test.ts, router-multi-intent.persona.test.ts | 0 | 6 | Implemented |
+| REQ-ROUTE-016 | router-multi-intent.test.ts, config.test.ts, pas-yaml-schema.test.ts, settings-metadata.test.ts, system-config-writer.test.ts | 13 | 6 | Implemented |
 
-| **Totals** | **375 test files** | **2615** | **2663** | **5278 tests** |
+| **Totals** | **394 test files** | **2736** | **2733** | **5469 tests** |

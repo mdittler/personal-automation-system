@@ -157,6 +157,15 @@ export interface SystemConfig {
 	/** Routing configuration (optional in type for test compat — loader always populates with defaults). */
 	routing?: {
 		verification?: RoutingVerificationConfig;
+		/**
+		 * When true, inbound free-text messages that the synchronous prefilter flags
+		 * as potentially multi-intent are sent through the LLM segmenter and each
+		 * resulting segment is routed independently. Defaults IN CODE to `true`
+		 * (see `DEFAULT_MULTI_INTENT_SPLIT`) so the multi-question dropped-segment
+		 * bug is fixed on merge without an operator edit. Set to `false` in
+		 * pas.yaml to kill-switch the feature.
+		 */
+		multiIntentSplit?: boolean;
 	};
 
 	/** Registered users. */
@@ -236,6 +245,16 @@ export interface RoutingVerificationConfig {
 	enabled: boolean;
 	/** Confidence upper bound — above this, skip verification. */
 	upperBound: number;
+	/**
+	 * Intent description strings that MUST go through route verification even
+	 * when the classifier's confidence is above `upperBound`. Defaults in the
+	 * loader to the Food hosting intent so fresh deployments are protected
+	 * from the "inviting people" mis-route bug without operator action.
+	 *
+	 * See `DEFAULT_ALWAYS_VERIFY_INTENTS` in `services/config/defaults.ts`
+	 * and the matching `apps/food/src/routing/food-intents.ts` constant.
+	 */
+	alwaysVerifyIntents: string[];
 }
 
 /** App configuration service provided to apps via CoreServices. */

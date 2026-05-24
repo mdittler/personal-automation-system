@@ -28,6 +28,7 @@ import {
 import type { Household } from '../types.js';
 import { isoNow } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { sendProactiveMessage } from '../utils/proactive-message.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -111,10 +112,8 @@ async function finalizePlan(
 
 	// Send finalized plan to all household members
 	for (const memberId of memberIds) {
-		await services.telegram.sendWithButtons(memberId, message, buttons);
-		await services.appOutboundBridge?.recordOutboundMessage({
+		await sendProactiveMessage(services, {
 			userId: memberId,
-			appId: 'food',
 			kind: 'weekly-menu',
 			body: message,
 			buttons,
@@ -146,10 +145,8 @@ export async function sendVotingMessages(
 		const message = formatVotingMealMessage(meal);
 		const buttons = buildVoteButtons(meal.date);
 		for (const memberId of household.members) {
-			await services.telegram.sendWithButtons(memberId, message, buttons);
-			await services.appOutboundBridge?.recordOutboundMessage({
+			await sendProactiveMessage(services, {
 				userId: memberId,
-				appId: 'food',
 				kind: 'weekly-menu',
 				body: message,
 				buttons,

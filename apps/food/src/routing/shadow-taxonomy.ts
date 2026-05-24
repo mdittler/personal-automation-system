@@ -6,6 +6,8 @@
  * shadow-taxonomy.test.ts enforces parity at test time.
  */
 
+import { HOSTING_MEAL_PLANNING_INTENT } from './food-intents.js';
+
 export const FOOD_SHADOW_LABELS = [
 	'user wants to save a recipe',
 	'user wants to search for a recipe',
@@ -17,7 +19,7 @@ export const FOOD_SHADOW_LABELS = [
 	'user wants to start cooking a recipe',
 	'user wants to check or update the pantry',
 	'user wants to log leftovers',
-	'user wants to plan for hosting guests',
+	HOSTING_MEAL_PLANNING_INTENT,
 	'user wants to see food spending',
 	'user wants to see receipt details or look up items from a receipt',
 	'user asks about prices at a specific store',
@@ -121,7 +123,7 @@ export const REGEX_TO_MANIFEST_MAP: Record<string, FoodShadowLabel> = {
 	nutrition_view: 'user wants to see nutrition information',
 	health_correlation: 'user wants to understand how their diet is affecting their health or energy',
 	cultural_calendar: 'user wants holiday or cultural recipe suggestions',
-	hosting: 'user wants to plan for hosting guests',
+	hosting: HOSTING_MEAL_PLANNING_INTENT,
 	budget_view: 'user wants to see food spending',
 	store_spending: 'user wants to see food spending',
 	receipt_query: 'user wants to see receipt details or look up items from a receipt',

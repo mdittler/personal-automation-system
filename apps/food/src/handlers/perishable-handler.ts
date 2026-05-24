@@ -14,6 +14,7 @@ import { appendWaste } from '../services/waste-store.js';
 import type { FreezerItem, WasteLogEntry } from '../types.js';
 import { todayDate } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { sendProactiveMessage } from '../utils/proactive-message.js';
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -216,6 +217,11 @@ export async function handlePerishableCheckJob(
 
 	// Send to all household members
 	for (const memberId of household.members) {
-		await services.telegram.sendWithButtons(memberId, message, buttons);
+		await sendProactiveMessage(services, {
+			userId: memberId,
+			kind: 'perishable-check',
+			body: message,
+			buttons,
+		});
 	}
 }

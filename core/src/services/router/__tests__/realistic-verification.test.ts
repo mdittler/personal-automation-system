@@ -49,7 +49,8 @@ const FOOD_APP = {
 					'user wants to start cooking a recipe',
 					'user wants to check or update the pantry',
 					'user wants to log leftovers',
-					'user wants to plan for hosting guests',
+					// keep in sync with apps/food/src/routing/food-intents.ts:HOSTING_MEAL_PLANNING_INTENT
+					'user wants to plan a meal or menu for a dinner party or guests they are hosting',
 					'user wants to see food spending',
 					'user wants to see nutrition information',
 					'user wants to know what they can make with what they have',
@@ -712,7 +713,12 @@ describe('Realistic route verification scenarios', () => {
 
 			const result = await verifier.verify(
 				createCtx("My mom is coming for dinner Saturday. She can't eat gluten. Can you help plan?"),
-				{ appId: 'food', intent: 'user wants to plan for hosting guests', confidence: 0.52 },
+				// keep in sync with apps/food/src/routing/food-intents.ts:HOSTING_MEAL_PLANNING_INTENT
+				{
+					appId: 'food',
+					intent: 'user wants to plan a meal or menu for a dinner party or guests they are hosting',
+					confidence: 0.52,
+				},
 			);
 
 			expect(result).toMatchObject({ action: 'route', appId: 'food' });

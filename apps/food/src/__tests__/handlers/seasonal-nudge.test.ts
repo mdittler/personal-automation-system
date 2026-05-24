@@ -32,6 +32,9 @@ function createMockServices(
 				exists: vi.fn().mockResolvedValue(false),
 			}),
 		},
+		appOutboundBridge: {
+			recordOutboundMessage: vi.fn().mockResolvedValue(undefined),
+		},
 		timezone: 'America/New_York',
 	};
 }
@@ -111,5 +114,66 @@ describe('seasonal-nudge handler', () => {
 
 		await handleSeasonalNudgeJob(services as never);
 		expect(services.telegram.send).not.toHaveBeenCalled();
+	});
+
+	describe('bridges to chatbot transcript', () => {
+		it('records one bridge entry per household member with the raw body and no buttons', async () => {
+			const services = createMockServices();
+			const householdYaml = createHouseholdYaml();
+			const sharedStore = services.data.forShared('shared');
+			sharedStore.read.mockImplementation((path: string) => {
+				if (path === 'household.yaml') return Promise.resolve(householdYaml);
+				return Promise.resolve(null);
+			});
+
+			await handleSeasonalNudgeJob(services as never);
+
+			const telegramCalls = services.telegram.send.mock.calls;
+			expect(telegramCalls).toHaveLength(2);
+			const [, telegramBody] = telegramCalls[0]!;
+
+			expect(services.appOutboundBridge.recordOutboundMessage).toHaveBeenCalledTimes(2);
+			expect(services.appOutboundBridge.recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user1',
+				appId: 'food',
+				kind: 'seasonal-nudge',
+				body: telegramBody,
+				buttons: undefined,
+			});
+			expect(services.appOutboundBridge.recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user2',
+				appId: 'food',
+				kind: 'seasonal-nudge',
+				body: telegramBody,
+				buttons: undefined,
+			});
+		});
+
+		it('does not send or record when no household exists', async () => {
+			const services = createMockServices();
+			const sharedStore = services.data.forShared('shared');
+			sharedStore.read.mockResolvedValue(null);
+
+			await handleSeasonalNudgeJob(services as never);
+
+			expect(services.telegram.send).not.toHaveBeenCalled();
+			expect(services.appOutboundBridge.recordOutboundMessage).not.toHaveBeenCalled();
+		});
+
+		it('does not send or record when LLM fails', async () => {
+			const services = createMockServices();
+			services.llm.complete.mockRejectedValue(new Error('LLM down'));
+			const householdYaml = createHouseholdYaml();
+			const sharedStore = services.data.forShared('shared');
+			sharedStore.read.mockImplementation((path: string) => {
+				if (path === 'household.yaml') return Promise.resolve(householdYaml);
+				return Promise.resolve(null);
+			});
+
+			await handleSeasonalNudgeJob(services as never);
+
+			expect(services.telegram.send).not.toHaveBeenCalled();
+			expect(services.appOutboundBridge.recordOutboundMessage).not.toHaveBeenCalled();
+		});
 	});
 });

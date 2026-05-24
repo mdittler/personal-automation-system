@@ -190,6 +190,31 @@ describe('SystemConfigWriter.write() — happy path', () => {
 		expect(sessions.auto_reset_idle_minutes).toBeNull();
 	});
 
+	it('writes routing.verification.always_verify_intents via the YAML key', async () => {
+		const p = makePath();
+		await writeSeedConfig(p);
+		const config = makeConfig();
+		const writer = makeWriter(p);
+
+		await writer.write(
+			'routing.verification.always_verify_intents',
+			['custom intent a', 'custom intent b'],
+			config,
+		);
+
+		// In-memory mutation visible at the camelCase runtime path
+		expect(
+			(config.routing?.verification as unknown as { alwaysVerifyIntents: string[] })
+				.alwaysVerifyIntents,
+		).toEqual(['custom intent a', 'custom intent b']);
+		// YAML serialized at the snake_case path
+		const parsed = parse(await readFile(p, 'utf-8')) as Record<string, unknown>;
+		expect(
+			((parsed.routing as Record<string, unknown>).verification as Record<string, unknown>)
+				.always_verify_intents,
+		).toEqual(['custom intent a', 'custom intent b']);
+	});
+
 	it('writes routing.verification.upperBound via upper_bound key', async () => {
 		const p = makePath();
 		await writeSeedConfig(p);
@@ -204,6 +229,23 @@ describe('SystemConfigWriter.write() — happy path', () => {
 			((parsed.routing as Record<string, unknown>).verification as Record<string, unknown>)
 				.upper_bound,
 		).toBe(0.5);
+	});
+
+	it('writes routing.multi_intent_split via the YAML key (Task 4.3/4.4)', async () => {
+		const p = makePath();
+		await writeSeedConfig(p);
+		const config = makeConfig();
+		const writer = makeWriter(p);
+
+		await writer.write('routing.multi_intent_split', false, config);
+
+		// In-memory mutation visible at the camelCase runtime path.
+		expect((config.routing as unknown as { multiIntentSplit: boolean }).multiIntentSplit).toBe(
+			false,
+		);
+		// YAML serialized at the snake_case path.
+		const parsed = parse(await readFile(p, 'utf-8')) as Record<string, unknown>;
+		expect((parsed.routing as Record<string, unknown>).multi_intent_split).toBe(false);
 	});
 });
 
@@ -333,6 +375,38 @@ describe('SystemConfigWriter.resetToSchemaDefault()', () => {
 		const result = await writer.resetToSchemaDefault('routing.verification.upper_bound', config);
 		expect(result).toBe(0.7);
 		expect(config.routing?.verification?.upperBound).toBe(0.7);
+	});
+
+	it('resets routing.verification.always_verify_intents to the hosting default', async () => {
+		const HOSTING_DEFAULT =
+			'user wants to plan a meal or menu for a dinner party or guests they are hosting';
+		const p = makePath();
+		await writeSeedConfig(p, {
+			routing: { verification: { always_verify_intents: ['custom intent'] } },
+		});
+		const config = makeConfig();
+		if (config.routing?.verification) {
+			(
+				config.routing.verification as unknown as { alwaysVerifyIntents: string[] }
+			).alwaysVerifyIntents = ['custom intent'];
+		}
+		const writer = makeWriter(p);
+
+		const result = await writer.resetToSchemaDefault(
+			'routing.verification.always_verify_intents',
+			config,
+		);
+		expect(result).toEqual([HOSTING_DEFAULT]);
+		expect(
+			(config.routing?.verification as unknown as { alwaysVerifyIntents: string[] })
+				.alwaysVerifyIntents,
+		).toEqual([HOSTING_DEFAULT]);
+		// YAML key removed
+		const parsed = parse(await readFile(p, 'utf-8')) as Record<string, unknown>;
+		const verification = (parsed.routing as Record<string, unknown> | undefined)?.verification as
+			| Record<string, unknown>
+			| undefined;
+		expect(verification?.always_verify_intents).toBeUndefined();
 	});
 
 	it('throws for a key not in the allowlist', async () => {

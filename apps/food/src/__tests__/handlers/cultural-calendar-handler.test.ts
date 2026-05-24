@@ -64,6 +64,9 @@ function createMockServices(
 				archive: vi.fn().mockResolvedValue(undefined),
 			}),
 		},
+		appOutboundBridge: {
+			recordOutboundMessage: vi.fn().mockResolvedValue(undefined),
+		},
 	};
 }
 
@@ -251,6 +254,75 @@ describe('handleCulturalCalendarJob', () => {
 		const prompt = services.llm.complete.mock.calls[0]![0] as string;
 		expect(prompt).toContain('Christmas Eve');
 		expect(prompt).toContain('Christmas');
+	});
+
+	describe('bridges to chatbot transcript', () => {
+		it('records one bridge entry per household member with the raw body and no buttons', async () => {
+			const services = createMockServices();
+			const sharedStore = services.data.forShared('shared');
+			sharedStore.read.mockImplementation((path: string) => {
+				if (path === 'household.yaml') return Promise.resolve(makeHouseholdYaml());
+				if (path === 'cultural-calendar.yaml')
+					return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
+				return Promise.resolve(null);
+			});
+
+			await handleCulturalCalendarJob(services as unknown as CoreServices);
+
+			const telegramCalls = services.telegram.send.mock.calls;
+			expect(telegramCalls).toHaveLength(2);
+			const [, telegramBody] = telegramCalls[0]!;
+
+			expect(services.appOutboundBridge.recordOutboundMessage).toHaveBeenCalledTimes(2);
+			expect(services.appOutboundBridge.recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user1',
+				appId: 'food',
+				kind: 'cultural-calendar',
+				body: telegramBody,
+				buttons: undefined,
+			});
+			expect(services.appOutboundBridge.recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user2',
+				appId: 'food',
+				kind: 'cultural-calendar',
+				body: telegramBody,
+				buttons: undefined,
+			});
+		});
+
+		it('does not send or record when no holidays are in the window', async () => {
+			const services = createMockServices();
+			const emptyCalendar: CulturalCalendar = { holidays: [] };
+			const sharedStore = services.data.forShared('shared');
+			sharedStore.read.mockImplementation((path: string) => {
+				if (path === 'household.yaml') return Promise.resolve(makeHouseholdYaml());
+				if (path === 'cultural-calendar.yaml')
+					return Promise.resolve(makeCalendarYaml(emptyCalendar));
+				return Promise.resolve(null);
+			});
+
+			await handleCulturalCalendarJob(services as unknown as CoreServices);
+
+			expect(services.telegram.send).not.toHaveBeenCalled();
+			expect(services.appOutboundBridge.recordOutboundMessage).not.toHaveBeenCalled();
+		});
+
+		it('does not send or record when LLM fails', async () => {
+			const services = createMockServices();
+			services.llm.complete.mockRejectedValue(new Error('LLM down'));
+			const sharedStore = services.data.forShared('shared');
+			sharedStore.read.mockImplementation((path: string) => {
+				if (path === 'household.yaml') return Promise.resolve(makeHouseholdYaml());
+				if (path === 'cultural-calendar.yaml')
+					return Promise.resolve(makeCalendarYaml(makeChristmasCalendar()));
+				return Promise.resolve(null);
+			});
+
+			await handleCulturalCalendarJob(services as unknown as CoreServices);
+
+			expect(services.telegram.send).not.toHaveBeenCalled();
+			expect(services.appOutboundBridge.recordOutboundMessage).not.toHaveBeenCalled();
+		});
 	});
 });
 

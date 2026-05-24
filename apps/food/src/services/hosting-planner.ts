@@ -28,6 +28,57 @@ export interface ParsedEvent {
 	description: string;
 }
 
+/** Result of attempting to plan an event from a user description. */
+export type PlanEventResult =
+	| { kind: 'plan'; plan: EventPlan }
+	| { kind: 'declined'; reason: 'not-an-event' };
+
+const META_PHRASES = [
+	'inquiring about',
+	'asking about',
+	'wants to know',
+	'how to',
+	'how do',
+	'can you tell me',
+	'is asking',
+	'question about',
+] as const;
+
+const MAX_GUEST_COUNT = 1000;
+
+/**
+ * Treat ParsedEvent as untrusted LLM output. Returns true if the parse is
+ * degenerate — i.e. NOT an event-planning request — and should be declined
+ * instead of fed to downstream menu-suggestion and prep-timeline LLM calls.
+ *
+ * Degenerate iff (no guest signal) OR (description is a non-empty string
+ * containing a meta-phrase). A missing/empty description alone is NOT
+ * disqualifying — a valid guest signal is sufficient.
+ *
+ * Guest signal: finite guestCount in (0, MAX_GUEST_COUNT], OR a non-empty
+ * guestNames array of strings.
+ */
+export function isDegenerateEvent(parsed: ParsedEvent): boolean {
+	const count = (parsed as { guestCount?: unknown }).guestCount;
+	const names = (parsed as { guestNames?: unknown }).guestNames;
+	const description = (parsed as { description?: unknown }).description;
+
+	const hasValidCount =
+		typeof count === 'number' && Number.isFinite(count) && count > 0 && count <= MAX_GUEST_COUNT;
+	const hasNamedGuests =
+		Array.isArray(names) && names.length > 0 && names.every((n) => typeof n === 'string');
+	const hasGuestSignal = hasValidCount || hasNamedGuests;
+
+	if (!hasGuestSignal) return true;
+
+	if (typeof description === 'string' && description.length > 0) {
+		const normalized = description.trim().toLowerCase();
+		if (META_PHRASES.some((p) => normalized.includes(p))) return true;
+	}
+
+	return false;
+}
+
 export async function parseEventDescription(
 	services: CoreServices,
 	text: string,
@@ -204,9 +255,35 @@ export async function planEvent(
 	guests: GuestProfile[],
 	recipes: Recipe[],
 	pantry: PantryItem[],
-): Promise<EventPlan> {
+): Promise<PlanEventResult> {
 	// Step 1: Parse the event description
 	const parsed = await parseEventDescription(services, text);
+
+	// Step 1a: Trust boundary — treat ParsedEvent as untrusted LLM output.
+	// Degenerate parses (e.g. guestCount 0 + meta-phrase description, the
+	// "inviting people" bug case) short-circuit BEFORE the two downstream
+	// LLM calls (suggestEventMenu, generatePrepTimeline) — saves cost and
+	// avoids rendering a hollow "Event Plan / 0 guests / Menu:" message.
+	if (isDegenerateEvent(parsed)) {
+		return { kind: 'declined', reason: 'not-an-event' };
+	}
+
+	// Derive the effective guest count once. When ParsedEvent has a valid
+	// guestCount in (0, MAX_GUEST_COUNT], use it; otherwise fall back to the
+	// named-guests rescue (isDegenerateEvent guarantees guestNames is non-empty
+	// in that branch). Without this, a rescue parse like {guestCount: 0,
+	// guestNames: ['Sarah','Tom']} would pass 0 to suggestEventMenu and render
+	// "0 guests" in the final plan. Do not mutate `parsed` — it stays as the
+	// raw untrusted LLM output.
+	const effectiveGuestCount =
+		typeof parsed.guestCount === 'number' &&
+		Number.isFinite(parsed.guestCount) &&
+		parsed.guestCount > 0 &&
+		parsed.guestCount <= MAX_GUEST_COUNT
+			? parsed.guestCount
+			: Array.isArray(parsed.guestNames)
+				? parsed.guestNames.length
+				: 0;
 
 	// Step 2: Match named guests to profiles
 	const matchedGuests: GuestProfile[] = [];
@@ -216,7 +293,7 @@ export async function planEvent(
 	}
 
 	// Step 3: Suggest menu considering guest restrictions
-	const menu = await suggestEventMenu(services, parsed.guestCount, matchedGuests, recipes);
+	const menu = await suggestEventMenu(services, effectiveGuestCount, matchedGuests, recipes);
 
 	// Step 4: Generate prep timeline — graceful degradation on LLM failure
 	let prepTimeline: PrepTimelineStep[] = [];
@@ -231,16 +308,18 @@ export async function planEvent(
 	// Step 5: Calculate delta grocery list
 	const deltaGroceryItems = generateDeltaGroceryList(menu, recipes, pantry);
 
-	return {
+	const plan: EventPlan = {
 		description: parsed.description,
 		eventTime: parsed.eventTime,
-		guestCount: parsed.guestCount,
+		guestCount: effectiveGuestCount,
 		guests: matchedGuests,
 		menu,
 		prepTimeline,
 		deltaGroceryItems,
 		...(timelineError ? { timelineError } : {}),
 	};
+
+	return { kind: 'plan', plan };
 }
 
 export function formatEventPlan(plan: EventPlan): string {

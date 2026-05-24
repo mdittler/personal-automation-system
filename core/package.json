@@ -66,6 +66,14 @@
 		"./services/context/request-context": {
 			"import": "./dist/services/context/request-context.js",
 			"types": "./dist/services/context/request-context.d.ts"
+		},
+		"./services/config/defaults": {
+			"import": "./dist/services/config/defaults.js",
+			"types": "./dist/services/config/defaults.d.ts"
+		},
+		"./services/app-outbound-bridge": {
+			"import": "./dist/services/app-outbound-bridge/index.js",
+			"types": "./dist/services/app-outbound-bridge/index.d.ts"
 		}
 	},
 	"scripts": {

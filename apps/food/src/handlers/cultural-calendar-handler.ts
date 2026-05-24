@@ -20,6 +20,7 @@ import {
 import { loadAllRecipes } from '../services/recipe-store.js';
 import { todayDate } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { sendProactiveMessage } from '../utils/proactive-message.js';
 
 const WINDOW_DAYS = 14;
 
@@ -83,7 +84,11 @@ export async function handleCulturalCalendarJob(services: CoreServices): Promise
 		const message = await services.llm.complete(prompt, { tier: 'fast' });
 
 		for (const memberId of household.members) {
-			await services.telegram.send(memberId, message);
+			await sendProactiveMessage(services, {
+				userId: memberId,
+				kind: 'cultural-calendar',
+				body: message,
+			});
 		}
 	} catch (err) {
 		services.logger.error('Cultural calendar job failed', err);

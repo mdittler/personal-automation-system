@@ -412,6 +412,43 @@ the user did not see the message and it should not be recorded.
 The user controls visibility via the `chat.app_message_bridge_enabled` setting
 (default ON). Do not gate your own delivery on the bridge; just call it.
 
+**Pair the send and the bridge call.**
+Two separate calls (`telegram.send` then `appOutboundBridge.recordOutboundMessage`) is fragile — the next person adding a proactive message forgets the second one. Wrap the pair in one helper per app and route every proactive send through it. The static guard below catches a forgotten helper in the **listed entrypoints**, not across arbitrary indirection — so the convention is "every proactive entrypoint goes through the helper", and you register the entrypoint name in the guard's `PROACTIVE_ENTRYPOINTS` set so the scanner can enforce it.
+
+The Food app's `sendProactiveMessage` is the reference implementation:
+```typescript
+// apps/food/src/utils/proactive-message.ts
+export type FoodProactiveKind = 'weekly-menu' | 'nightly-rating-prompt' | /* ... */;
+
+export async function sendProactiveMessage(
+  services: CoreServices,
+  opts: { userId: string; kind: FoodProactiveKind; body: string; buttons?: InlineButton[][] },
+): Promise<SentMessage | undefined> {
+  // 1. await telegram.send / sendWithButtons (the latter returns SentMessage)
+  // 2. try { await services.appOutboundBridge?.recordOutboundMessage({...}) }
+  //    catch (err) { logger.warn(...) }  -- fail-open
+  // 3. return the SentMessage (callers needing messageId for callback resolution use it)
+}
+```
+
+Properties enforced by the helper:
+- **Typed `kind` union** — invalid `kind` literals fail compilation; all values must satisfy `KIND_RE: /^[a-z0-9_:-]{1,64}$/`.
+- **Send-then-bridge ordering** — a rejected `telegram.send` skips the bridge (the user never saw the message; the transcript correctly has nothing to record).
+- **Fail-open** — a bridge failure after a successful send logs and continues; an app delivery never depends on the chatbot transcript being writeable.
+- **Raw body passthrough** — the body sent to Telegram is byte-identical to the body sent to the bridge. The bridge owns sanitization.
+- **Return value preserved** — `SentMessage` is returned for the buttons path so callers needing `messageId` (callback resolution, message editing) keep working.
+
+Apps with proactive sends SHOULD provide an equivalent `proactive-message.ts` wrapper and a static guard test (next subsection) so a future un-bridged proactive send in a **registered entrypoint** fails CI.
+
+**Automated guard (with known scope limits).**
+Pair the helper with a build-failing static guard so a developer who forgets to use the helper in a registered proactive entrypoint fails CI immediately. The Food app's guard is `apps/food/src/__tests__/proactive-send-guard.test.ts`, backed by the AST scanner `apps/food/src/testing/proactive-send-scan.ts`:
+
+- Maintain a `PROACTIVE_ENTRYPOINTS` set of function names that are allowed to perform proactive Telegram sends.
+- The scanner walks each `.ts` file (excluding `__tests__/`, `testing/`, and the helper itself), parses with the TypeScript compiler API, and flags any `*.telegram.send` / `*.telegram.sendWithButtons` call whose **immediate enclosing function name** is in `PROACTIVE_ENTRYPOINTS`.
+- **Scope limit (be honest about it):** the scanner only inspects the immediate enclosing function — it does not build a transitive call graph. A raw `telegram.send` inside a brand-new helper called *from* a proactive entrypoint will slip past the guard unless you also add that helper's name to `PROACTIVE_ENTRYPOINTS`. The follow-up call-graph upgrade (Strategy B) is tracked in `docs/open-items.md` under "Stricter call-graph-based proactive-send guard (2026-05-22)".
+- On failure the test emits a message naming the offending file/function/line and pointing the developer at the helper and this document.
+- Adding a new proactive job means: (a) routing the send through the helper, and (b) **adding every entrypoint and intermediate helper name to `PROACTIVE_ENTRYPOINTS`** so the scanner can see the send site. The set is the deliberate audit point — keep it complete or the guard silently weakens.
+
 **When NOT to call it:**
 
 - Direct replies to user input (handler return values) — those are already in
@@ -421,6 +458,7 @@ The user controls visibility via the `chat.app_message_bridge_enabled` setting
   through another app's handler whose visible output, if any, is captured by
   that app's own bridge calls.
 - Admin-only / operator notifications that aren't user-visible.
+- Alert / warning text **appended to another message's body** is covered by that host message's bridge call. Don't bridge it separately — you'll double-record the same content in the transcript. Verified-reactive examples in the Food app today: budget alerts (text appended to the weekly-menu plan message in `index.ts` ~line 3148), the hosting planner (sends only in response to `/hosting plan` and NL hosting intents), child-tracker output (sends only via `/family` subcommand replies in `handlers/family.ts`), and grocery generation (sends only from message handlers and the post-vote `'generate-grocery'` callback in `index.ts` ~lines 1553 / 2897). None of these have `schedules:` entries in the manifest and none are reached from `handleScheduledJob` — they are user-initiated replies, already in the transcript via the normal user-turn path.
 
 **Naming `kind`:**
 

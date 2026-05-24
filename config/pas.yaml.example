@@ -96,6 +96,18 @@ defaults:
 #   verification:
 #     enabled: false      # set to false to disable verification
 #     upper_bound: 0.7    # confidence above this skips verification (0.0–1.0)
+#     # Intents whose route MUST be verified by the secondary verifier even when
+#     # the primary classifier's confidence is above upper_bound. Defaults IN CODE
+#     # to the Food hosting intent (a known-ambiguous one that previously
+#     # mis-routed "inviting people" platform questions). Override or extend here
+#     # to add more known-ambiguous intents.
+#     always_verify_intents:
+#       - "user wants to plan a meal or menu for a dinner party or guests they are hosting"
+#   # Multi-intent message splitting (Task 4.3/4.4). Defaults IN CODE to true so
+#   # multi-question messages (e.g. "What's for dinner? Also, what's on my schedule?")
+#   # are split into independent segments and routed separately, instead of
+#   # silently dropping a question. Set to false to kill-switch the feature.
+#   multi_intent_split: true
 
 # n8n integration (optional — dispatch execution to n8n instead of running internally)
 # When set, PAS cron triggers fire a webhook to n8n, which calls PAS API endpoints.

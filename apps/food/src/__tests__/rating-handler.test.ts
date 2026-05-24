@@ -537,4 +537,68 @@ describe('handleNightlyRatingPromptJob', () => {
 
 		expect(services.telegram.sendWithButtons).toHaveBeenCalledTimes(1);
 	});
+
+	describe('bridges to chatbot transcript', () => {
+		let recordOutboundMessage: ReturnType<typeof vi.fn>;
+
+		beforeEach(() => {
+			recordOutboundMessage = vi.fn().mockResolvedValue(undefined);
+			(services as unknown as { appOutboundBridge: unknown }).appOutboundBridge = {
+				recordOutboundMessage,
+			};
+		});
+
+		it('records one bridge entry per household member with the raw body and buttons', async () => {
+			const household = makeHousehold({ members: ['user1', 'user2'] });
+			const plan = makePlan({
+				status: 'active',
+				meals: [makeMeal({ date: '2026-03-31', cooked: false })],
+			});
+
+			sharedStore.read
+				.mockResolvedValueOnce(stringify(household))
+				.mockResolvedValueOnce(stringify(plan));
+
+			await handleNightlyRatingPromptJob(services, '2026-03-31');
+
+			// Telegram body sent (any of the per-member calls — they're all identical)
+			const telegramCalls = vi.mocked(services.telegram.sendWithButtons).mock.calls;
+			expect(telegramCalls).toHaveLength(2);
+			const [, telegramBody, telegramButtons] = telegramCalls[0];
+
+			expect(recordOutboundMessage).toHaveBeenCalledTimes(2);
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user1',
+				appId: 'food',
+				kind: 'nightly-rating-prompt',
+				body: telegramBody,
+				buttons: telegramButtons,
+			});
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user2',
+				appId: 'food',
+				kind: 'nightly-rating-prompt',
+				body: telegramBody,
+				buttons: telegramButtons,
+			});
+		});
+
+		it('does not send or record when there are no uncooked meals', async () => {
+			const household = makeHousehold({ members: ['user1', 'user2'] });
+			const plan = makePlan({
+				status: 'active',
+				meals: [makeMeal({ date: '2026-03-31', cooked: true })],
+			});
+
+			sharedStore.read
+				.mockResolvedValueOnce(stringify(household))
+				.mockResolvedValueOnce(stringify(plan));
+
+			await handleNightlyRatingPromptJob(services, '2026-03-31');
+
+			expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+			expect(services.telegram.send).not.toHaveBeenCalled();
+			expect(recordOutboundMessage).not.toHaveBeenCalled();
+		});
+	});
 });

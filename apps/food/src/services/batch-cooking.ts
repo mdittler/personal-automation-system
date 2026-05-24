@@ -13,6 +13,7 @@ import type { BatchAnalysis, FreezerItem, MealPlan, PlannedMeal, Recipe } from '
 import { addDays } from '../utils/date.js';
 import { escapeMarkdown } from '../utils/escape-markdown.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { sendProactiveMessage } from '../utils/proactive-message.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 import { loadFreezer } from './freezer-store.js';
 import { parseJsonResponse } from './recipe-parser.js';
@@ -234,6 +235,10 @@ export async function checkDefrostNeeded(
 
 	const message = formatDefrostMessage(matches);
 	for (const memberId of hh.members) {
-		await services.telegram.send(memberId, message);
+		await sendProactiveMessage(services, {
+			userId: memberId,
+			kind: 'defrost-reminder',
+			body: message,
+		});
 	}
 }

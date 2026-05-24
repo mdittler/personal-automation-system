@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, test, vi } from 'vitest';
 import {
+	type PlanEventResult,
 	formatEventPlan,
 	formatIngredient,
 	formatPrepTimeline,
 	generateDeltaGroceryList,
 	generatePrepTimeline,
+	isDegenerateEvent,
 	parseEventDescription,
 	planEvent,
 	suggestEventMenu,
@@ -434,6 +436,86 @@ describe('hosting-planner', () => {
 		});
 	});
 
+	// ─── isDegenerateEvent ────────────────────────────────────
+	describe('isDegenerateEvent — untrusted LLM output', () => {
+		type Row = { name: string; input: Record<string, unknown>; expected: boolean };
+		const rows: Row[] = [
+			{
+				name: 'bug case: zero count, empty names',
+				input: { guestCount: 0, guestNames: [] },
+				expected: true,
+			},
+			{
+				name: 'negative count, empty names',
+				input: { guestCount: -3, guestNames: [] },
+				expected: true,
+			},
+			{ name: 'NaN count', input: { guestCount: Number.NaN, guestNames: [] }, expected: true },
+			{
+				name: 'Infinity count',
+				input: { guestCount: Number.POSITIVE_INFINITY, guestNames: [] },
+				expected: true,
+			},
+			{
+				name: 'absurd count over cap, no names',
+				input: { guestCount: 1e6, guestNames: [] },
+				expected: true,
+			},
+			{ name: 'wrong type for count', input: { guestCount: '6', guestNames: [] }, expected: true },
+			{ name: 'count + names missing entirely', input: {}, expected: true },
+			{
+				name: 'zero count with meta description',
+				input: {
+					guestCount: 0,
+					guestNames: [],
+					description: 'The user is inquiring about the process of inviting people.',
+				},
+				expected: true,
+			},
+			{
+				name: 'valid count BUT meta-phrase in description',
+				input: { guestCount: 4, guestNames: [], description: 'asking about how to invite people' },
+				expected: true,
+			},
+			{
+				name: 'valid count, no description (missing description alone is NOT disqualifying)',
+				input: { guestCount: 6, guestNames: [], description: 'dinner party Saturday' },
+				expected: false,
+			},
+			{
+				name: 'zero count rescued by non-empty guestNames',
+				input: { guestCount: 0, guestNames: ['Sarah', 'Tom'] },
+				expected: false,
+			},
+			{
+				name: 'valid count, empty description (empty description alone is not disqualifying)',
+				input: { guestCount: 8, guestNames: [], description: '' },
+				expected: false,
+			},
+		];
+		test.each(rows)('$name', ({ input, expected }) => {
+			expect(isDegenerateEvent(input as never)).toBe(expected);
+		});
+
+		it('PlanEventResult discriminated union compiles with both arms', () => {
+			const planArm: PlanEventResult = {
+				kind: 'plan',
+				plan: {
+					description: 'x',
+					eventTime: '',
+					guestCount: 2,
+					guests: [],
+					menu: [],
+					prepTimeline: [],
+					deltaGroceryItems: [],
+				},
+			};
+			const declinedArm: PlanEventResult = { kind: 'declined', reason: 'not-an-event' };
+			expect(planArm.kind).toBe('plan');
+			expect(declinedArm.kind).toBe('declined');
+		});
+	});
+
 	// ─── planEvent ────────────────────────────────────────────
 	describe('planEvent', () => {
 		it('orchestrates full event planning pipeline', async () => {
@@ -471,10 +553,12 @@ describe('hosting-planner', () => {
 				pantry,
 			);
 
-			expect(result.guestCount).toBe(6);
-			expect(result.menu).toHaveLength(1);
-			expect(result.prepTimeline).toHaveLength(1);
-			expect(result.guests).toHaveLength(1);
+			expect(result.kind).toBe('plan');
+			if (result.kind !== 'plan') throw new Error('expected plan');
+			expect(result.plan.guestCount).toBe(6);
+			expect(result.plan.menu).toHaveLength(1);
+			expect(result.plan.prepTimeline).toHaveLength(1);
+			expect(result.plan.guests).toHaveLength(1);
 			expect(services.llm.complete).toHaveBeenCalledTimes(3);
 		});
 
@@ -516,10 +600,117 @@ describe('hosting-planner', () => {
 				[],
 			);
 
-			expect(result.prepTimeline).toEqual([]);
-			expect(result.timelineError).toBeDefined();
-			expect(result.menu).toHaveLength(1);
+			expect(result.kind).toBe('plan');
+			if (result.kind !== 'plan') throw new Error('expected plan');
+			expect(result.plan.prepTimeline).toEqual([]);
+			expect(result.plan.timelineError).toBeDefined();
+			expect(result.plan.menu).toHaveLength(1);
 			expect(services.logger.warn).toHaveBeenCalled();
+		});
+	});
+
+	// ─── planEvent — declines degenerate parses ──────────────
+	describe('planEvent — declines degenerate parses', () => {
+		it('short-circuits a degenerate parse and skips downstream LLM calls', async () => {
+			// The bug case: parse returns guestCount 0 + a meta-phrase description.
+			// planEvent should decline immediately — no menu suggestion, no prep
+			// timeline LLM calls — and return the discriminated 'declined' arm.
+			const services = createMockServices([
+				JSON.stringify({
+					guestCount: 0,
+					eventTime: '',
+					guestNames: [],
+					dietaryNotes: '',
+					description: 'The user is inquiring about the process of inviting people.',
+				}),
+			]);
+
+			const result = await planEvent(services as never, 'inviting people', [], [], []);
+
+			expect(result).toEqual({ kind: 'declined', reason: 'not-an-event' });
+			// Only the parseEventDescription call — suggestEventMenu and
+			// generatePrepTimeline must NOT have run.
+			expect(services.llm.complete).toHaveBeenCalledTimes(1);
+		});
+
+		it('named-guests rescue: count 0 + 2 names renders "2 guests", not "0 guests"', async () => {
+			// ParsedEvent has guestCount:0 but 2 named guests — predicate accepts
+			// (rescue), and the rendered plan must use the names count, not the
+			// raw 0. Regression for Codex Round 2 finding 1.
+			const services = createMockServices([
+				// parseEventDescription — degenerate count 0 rescued by named guests
+				JSON.stringify({
+					guestCount: 0,
+					eventTime: 'Saturday 7pm',
+					guestNames: ['Sarah', 'Tom'],
+					dietaryNotes: '',
+					description: 'dinner with Sarah and Tom Saturday at 7pm',
+				}),
+				// suggestEventMenu
+				JSON.stringify([
+					{ recipeTitle: 'Pasta', recipeId: 'recipe-1', scaledServings: 2, dietaryNotes: [] },
+				]),
+				// generatePrepTimeline
+				JSON.stringify([{ time: 'T-2h', task: 'Start cooking' }]),
+			]);
+
+			const result = await planEvent(
+				services as never,
+				'dinner with Sarah and Tom Saturday',
+				[],
+				[makeRecipe()],
+				[],
+			);
+
+			expect(result.kind).toBe('plan');
+			if (result.kind !== 'plan') throw new Error('expected plan');
+			expect(result.plan.guestCount).toBe(2);
+
+			// suggestEventMenu was called with effectiveGuestCount === 2
+			// (second LLM call's prompt mentions "2 guests")
+			const menuPrompt = services.llm.complete.mock.calls[1]![0] as string;
+			expect(menuPrompt).toContain('menu for 2 guests');
+			expect(menuPrompt).not.toContain('menu for 0 guests');
+
+			// And the formatted output renders "2 guests", not "0 guests"
+			const formatted = formatEventPlan(result.plan);
+			expect(formatted).toContain('2 guests');
+			expect(formatted).not.toContain('0 guests');
+		});
+
+		it('passes a valid parse through to the full planning pipeline', async () => {
+			const services = createMockServices([
+				// parseEventDescription — valid
+				JSON.stringify({
+					guestCount: 6,
+					eventTime: 'Saturday 7pm',
+					guestNames: [],
+					dietaryNotes: '',
+					description: 'Dinner party for 6 on Saturday at 7pm',
+				}),
+				// suggestEventMenu
+				JSON.stringify([
+					{ recipeTitle: 'Pasta', recipeId: 'recipe-1', scaledServings: 6, dietaryNotes: [] },
+				]),
+				// generatePrepTimeline
+				JSON.stringify([{ time: 'T-2h', task: 'Start cooking' }]),
+			]);
+
+			const result = await planEvent(
+				services as never,
+				'dinner for 6 Saturday at 7pm',
+				[],
+				[makeRecipe()],
+				[],
+			);
+
+			expect(result.kind).toBe('plan');
+			if (result.kind !== 'plan') throw new Error('expected plan');
+			expect(result.plan.guestCount).toBe(6);
+			expect(result.plan.eventTime).toBe('Saturday 7pm');
+			expect(result.plan.menu).toHaveLength(1);
+			// All three LLM calls happened: parse + menu + timeline.
+			expect(services.llm.complete).toHaveBeenCalledTimes(3);
 		});
 	});
 });

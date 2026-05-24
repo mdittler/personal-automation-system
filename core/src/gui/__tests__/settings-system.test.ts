@@ -328,8 +328,12 @@ describe('Restart-required badge (REQ-SETTINGS-031)', () => {
 		// (restartRequired: false). We check that the badge text appears
 		// fewer times than the number of restartRequired=true keys.
 		const badgeCount = (res.body.match(/Restart required/g) ?? []).length;
-		// Only restartRequired:true keys should have badges
-		const requiredCount = SYSTEM_SETTING_DEFS.filter((d) => d.restartRequired).length;
+		// Only non-hidden restartRequired:true keys render in the GUI and
+		// therefore contribute a badge. Hidden defs (e.g. routing.verification
+		// .always_verify_intents, which is YAML-only because the GUI widget
+		// set does not render arrays) exist in the registry for the writer's
+		// allowlist but are filtered out by getForUser before rendering.
+		const requiredCount = SYSTEM_SETTING_DEFS.filter((d) => d.restartRequired && !d.hidden).length;
 		expect(badgeCount).toBe(requiredCount);
 	});
 });

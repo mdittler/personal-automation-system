@@ -588,6 +588,65 @@ describe('handlePerishableCheckJob', () => {
 		expect(message).toContain('Spinach');
 		expect(message).toContain('Berries');
 	});
+
+	describe('bridges to chatbot transcript', () => {
+		let recordOutboundMessage: ReturnType<typeof vi.fn>;
+
+		beforeEach(() => {
+			recordOutboundMessage = vi.fn().mockResolvedValue(undefined);
+			(services as unknown as { appOutboundBridge: unknown }).appOutboundBridge = {
+				recordOutboundMessage,
+			};
+		});
+
+		it('records one bridge entry per household member with the raw body and buttons', async () => {
+			const pantryItems = [
+				makePantryItem({ name: 'Spinach', quantity: '1 bag', expiryEstimate: '2026-04-02' }),
+			];
+			setupServices({
+				'household.yaml': householdYaml(makeHousehold({ members: ['user1', 'user2'] })),
+				'pantry.yaml': pantryYaml(pantryItems),
+			});
+
+			await handlePerishableCheckJob(services, '2026-04-02');
+
+			const telegramCalls = vi.mocked(services.telegram.sendWithButtons).mock.calls;
+			expect(telegramCalls).toHaveLength(2);
+			const [, telegramBody, telegramButtons] = telegramCalls[0]!;
+
+			expect(recordOutboundMessage).toHaveBeenCalledTimes(2);
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user1',
+				appId: 'food',
+				kind: 'perishable-check',
+				body: telegramBody,
+				buttons: telegramButtons,
+			});
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user2',
+				appId: 'food',
+				kind: 'perishable-check',
+				body: telegramBody,
+				buttons: telegramButtons,
+			});
+		});
+
+		it('does not send or record when no items are expiring', async () => {
+			const pantryItems = [
+				makePantryItem({ name: 'Cheese', quantity: '1 block', expiryEstimate: '2026-04-10' }),
+			];
+			setupServices({
+				'household.yaml': householdYaml(makeHousehold({ members: ['user1', 'user2'] })),
+				'pantry.yaml': pantryYaml(pantryItems),
+			});
+
+			await handlePerishableCheckJob(services, '2026-04-02');
+
+			expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+			expect(services.telegram.send).not.toHaveBeenCalled();
+			expect(recordOutboundMessage).not.toHaveBeenCalled();
+		});
+	});
 });
 
 // ─── Security Tests ──────────────────────────────────────────────

@@ -681,6 +681,107 @@ describe('handleLeftoverCheckJob', () => {
 		const [, message] = vi.mocked(services.telegram.sendWithButtons).mock.calls[0]!;
 		expect(String(message)).not.toContain('💡 *Ideas for these leftovers:*');
 	});
+
+	describe('bridges to chatbot transcript', () => {
+		let recordOutboundMessage: ReturnType<typeof vi.fn>;
+
+		beforeEach(() => {
+			recordOutboundMessage = vi.fn().mockResolvedValue(undefined);
+			(services as unknown as { appOutboundBridge: unknown }).appOutboundBridge = {
+				recordOutboundMessage,
+			};
+		});
+
+		it('records one bridge entry per household member with buttons for expiring-soon items', async () => {
+			const household = makeHousehold({ members: ['user1', 'user2'] });
+			const expiringToday = makeLeftover({
+				name: 'Chicken',
+				expiryEstimate: '2026-04-02',
+				status: 'active',
+			});
+			sharedStore = mockStore({
+				'household.yaml': stringify(household),
+				'leftovers.yaml': stringify({ items: [expiringToday] }),
+			});
+			vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+
+			await handleLeftoverCheckJob(services, '2026-04-02');
+
+			const telegramCalls = vi.mocked(services.telegram.sendWithButtons).mock.calls;
+			expect(telegramCalls).toHaveLength(2);
+			const [, telegramBody, telegramButtons] = telegramCalls[0]!;
+
+			expect(recordOutboundMessage).toHaveBeenCalledTimes(2);
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user1',
+				appId: 'food',
+				kind: 'leftover-check',
+				body: telegramBody,
+				buttons: telegramButtons,
+			});
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user2',
+				appId: 'food',
+				kind: 'leftover-check',
+				body: telegramBody,
+				buttons: telegramButtons,
+			});
+		});
+
+		it('records one bridge entry per household member with no buttons for expired-only items', async () => {
+			const household = makeHousehold({ members: ['user1', 'user2'] });
+			const expired = makeLeftover({
+				name: 'Old Soup',
+				expiryEstimate: '2026-04-01',
+				status: 'active',
+			});
+			sharedStore = mockStore({
+				'household.yaml': stringify(household),
+				'leftovers.yaml': stringify({ items: [expired] }),
+				'waste-log.yaml': stringify({ entries: [] }),
+			});
+			vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+
+			await handleLeftoverCheckJob(services, '2026-04-02');
+
+			const sendCalls = vi.mocked(services.telegram.send).mock.calls;
+			expect(sendCalls).toHaveLength(2);
+			expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+			const [, telegramBody] = sendCalls[0]!;
+
+			expect(recordOutboundMessage).toHaveBeenCalledTimes(2);
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user1',
+				appId: 'food',
+				kind: 'leftover-check',
+				body: telegramBody,
+				buttons: undefined,
+			});
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'user2',
+				appId: 'food',
+				kind: 'leftover-check',
+				body: telegramBody,
+				buttons: undefined,
+			});
+		});
+
+		it('does not send or record when there are no active leftovers', async () => {
+			const household = makeHousehold({ members: ['user1', 'user2'] });
+			const used = makeLeftover({ status: 'used' });
+			sharedStore = mockStore({
+				'household.yaml': stringify(household),
+				'leftovers.yaml': stringify({ items: [used] }),
+			});
+			vi.mocked(services.data.forShared).mockReturnValue(sharedStore as any);
+
+			await handleLeftoverCheckJob(services, '2026-04-02');
+
+			expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+			expect(services.telegram.send).not.toHaveBeenCalled();
+			expect(recordOutboundMessage).not.toHaveBeenCalled();
+		});
+	});
 });
 
 // ─── Security Tests ──────────────────────────────────────────────

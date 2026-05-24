@@ -364,5 +364,62 @@ describe('freezer-handler', () => {
 			// Should mention months
 			expect(msg).toMatch(/month/i);
 		});
+
+		describe('bridges to chatbot transcript', () => {
+			let recordOutboundMessage: ReturnType<typeof vi.fn>;
+
+			beforeEach(() => {
+				recordOutboundMessage = vi.fn().mockResolvedValue(undefined);
+				(services as unknown as { appOutboundBridge: unknown }).appOutboundBridge = {
+					recordOutboundMessage,
+				};
+			});
+
+			it('records one bridge entry per household member with the raw body and no buttons', async () => {
+				const items = [makeFreezerItem({ name: 'Old Chicken', frozenDate: '2025-12-01' })];
+				sharedStore.read = vi.fn(async (path: string) => {
+					if (path === 'household.yaml') return makeHouseholdYaml(['user1', 'user2']);
+					if (path === 'freezer.yaml') return makeFreezerYaml(items);
+					return null;
+				}) as ScopedDataStore['read'];
+
+				await handleFreezerCheckJob(services, '2026-04-02');
+
+				const telegramCalls = vi.mocked(services.telegram.send).mock.calls;
+				expect(telegramCalls).toHaveLength(2);
+				const [, telegramBody] = telegramCalls[0]!;
+
+				expect(recordOutboundMessage).toHaveBeenCalledTimes(2);
+				expect(recordOutboundMessage).toHaveBeenCalledWith({
+					userId: 'user1',
+					appId: 'food',
+					kind: 'freezer-check',
+					body: telegramBody,
+					buttons: undefined,
+				});
+				expect(recordOutboundMessage).toHaveBeenCalledWith({
+					userId: 'user2',
+					appId: 'food',
+					kind: 'freezer-check',
+					body: telegramBody,
+					buttons: undefined,
+				});
+			});
+
+			it('does not send or record when no aging items exist', async () => {
+				const items = [makeFreezerItem({ name: 'Fresh Chicken', frozenDate: '2026-03-01' })];
+				sharedStore.read = vi.fn(async (path: string) => {
+					if (path === 'household.yaml') return makeHouseholdYaml(['user1', 'user2']);
+					if (path === 'freezer.yaml') return makeFreezerYaml(items);
+					return null;
+				}) as ScopedDataStore['read'];
+
+				await handleFreezerCheckJob(services, '2026-04-02');
+
+				expect(services.telegram.send).not.toHaveBeenCalled();
+				expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+				expect(recordOutboundMessage).not.toHaveBeenCalled();
+			});
+		});
 	});
 });

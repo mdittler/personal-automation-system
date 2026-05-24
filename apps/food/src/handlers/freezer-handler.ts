@@ -16,6 +16,7 @@ import {
 import { appendWaste } from '../services/waste-store.js';
 import { todayDate } from '../utils/date.js';
 import { loadHousehold } from '../utils/household-guard.js';
+import { sendProactiveMessage } from '../utils/proactive-message.js';
 
 /** Months threshold for the Monday aging reminder. */
 const AGING_MONTHS = 3;
@@ -119,6 +120,10 @@ export async function handleFreezerCheckJob(
 	const message = lines.join('\n');
 
 	for (const memberId of household.members) {
-		await services.telegram.send(memberId, message);
+		await sendProactiveMessage(services, {
+			userId: memberId,
+			kind: 'freezer-check',
+			body: message,
+		});
 	}
 }

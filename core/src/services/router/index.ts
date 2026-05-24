@@ -23,6 +23,7 @@ import type {
 	RouteVerifierStatus,
 	TelegramService,
 } from '../../types/telegram.js';
+import type { RegisteredUser } from '../../types/users.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
 import type { AppRegistry, RegisteredApp } from '../app-registry/index.js';
 import type { CommandMapEntry, IntentTableEntry } from '../app-registry/manifest-cache.js';
@@ -63,6 +64,7 @@ import type { UserMutationService } from '../user-manager/user-mutation-service.
 import { lookupCommand, parseCommand } from './command-parser.js';
 import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
+import type { preFilterMultiIntent, segmentMessage } from './message-segmenter.js';
 import { PhotoClassifier } from './photo-classifier.js';
 import type { RouteVerifier, VerifyAction } from './route-verifier.js';
 
@@ -287,6 +289,34 @@ export interface RouterOptions {
 	routeVerifier?: RouteVerifier;
 	/** Confidence upper bound for verification (default: 0.7). */
 	verificationUpperBound?: number;
+	/**
+	 * Intents that MUST go through route verification even when classifier
+	 * confidence is above `verificationUpperBound`. Plumbed in Task 3.2 as
+	 * defense-in-depth; the router gate is wired in Task 3.3.
+	 */
+	alwaysVerifyIntents?: readonly string[];
+	/**
+	 * Master switch for multi-intent message splitting (Task 4.3/4.4). When
+	 * `true` AND `messageSegmenter` is wired AND the prefilter fires AND the
+	 * segmenter returns ≥2 segments, the router dispatches each segment as an
+	 * independent text request via `routeOneTextRequest`. When `false`, the
+	 * router takes the single-message path (byte-equivalent to the
+	 * pre-feature behavior). Defaults to `true` in compose-runtime per the
+	 * operator's explicit decision so the dropped-segment bug is fixed on
+	 * merge without an operator edit.
+	 */
+	multiIntentSplit?: boolean;
+	/**
+	 * Optional message segmenter dependency for Task 4.3/4.4. Built in
+	 * `compose-runtime.ts` from the `message-segmenter` module exports so the
+	 * router can call them through a single injected seam (mirrors the
+	 * `routeVerifier` and `intentClassifier` patterns). When omitted, the
+	 * multi-intent split path is disabled regardless of `multiIntentSplit`.
+	 */
+	messageSegmenter?: {
+		preFilter: typeof preFilterMultiIntent;
+		segment: typeof segmentMessage;
+	};
 	/** Invite service for /invite command and /start code redemption. */
 	inviteService?: InviteService;
 	/** User mutation service for registering users via invite codes. */
@@ -338,6 +368,12 @@ export class Router {
 	private readonly userManager?: UserManager;
 	private readonly routeVerifier?: RouteVerifier;
 	private readonly verificationUpperBound: number;
+	private readonly alwaysVerifyIntents: readonly string[];
+	private multiIntentSplit: boolean;
+	private readonly messageSegmenter?: {
+		preFilter: typeof preFilterMultiIntent;
+		segment: typeof segmentMessage;
+	};
 	private readonly inviteService?: InviteService;
 	private readonly userMutationService?: UserMutationService;
 	private readonly interactionContext?: InteractionContextService;
@@ -369,6 +405,9 @@ export class Router {
 		this.userManager = options.userManager;
 		this.routeVerifier = options.routeVerifier;
 		this.verificationUpperBound = options.verificationUpperBound ?? 0.7;
+		this.alwaysVerifyIntents = options.alwaysVerifyIntents ?? [];
+		this.multiIntentSplit = options.multiIntentSplit ?? false;
+		this.messageSegmenter = options.messageSegmenter;
 		this.inviteService = options.inviteService;
 		this.userMutationService = options.userMutationService;
 		this.interactionContext = options.interactionContext;
@@ -398,6 +437,20 @@ export class Router {
 		}
 	}
 
+	/**
+	 * Test-only setter for the multi-intent-split kill switch. Production toggles
+	 * happen via the `routing.multi_intent_split` config key (see
+	 * `settings-metadata.ts`, which marks the def `restartRequired: true`); there
+	 * is no SettingsWriter post-write hook wiring this setter to a live config
+	 * write today. This entry point exists so router-multi-intent tests can flip
+	 * the gate without rebuilding the Router. Do not call from production code —
+	 * if/when operators need a live toggle, add a post-write hook in
+	 * compose-runtime and flip `restartRequired` to `false`.
+	 */
+	setMultiIntentSplit(value: boolean): void {
+		this.multiIntentSplit = value;
+	}
+
 	/** Build routing tables from the registry's manifest cache. */
 	buildRoutingTables(): void {
 		const cache = this.registry.getManifestCache();
@@ -413,6 +466,26 @@ export class Router {
 			},
 			'Routing tables built',
 		);
+	}
+
+	/**
+	 * Grey-zone verification gate predicate.
+	 *
+	 * Returns true when the classifier match should be sent through the
+	 * RouteVerifier. The normal grey-zone band is
+	 * `[confidenceThreshold, verificationUpperBound)`; the second clause
+	 * extends that band upward for specifically-configured ambiguous intents
+	 * (e.g. the Food hosting intent — Task 3.3) so a high-confidence misroute
+	 * still gets a second opinion.
+	 *
+	 * Shared by the text gate (which passes `match.intent`) and the photo
+	 * gate (which passes `match.photoType` — distinct field, same role) so
+	 * both gates read identically.
+	 */
+	private shouldVerifyIntent(name: string, confidence: number): boolean {
+		if (confidence < this.confidenceThreshold) return false;
+		if (confidence < this.verificationUpperBound) return true;
+		return this.alwaysVerifyIntents.includes(name);
 	}
 
 	/**
@@ -511,6 +584,91 @@ export class Router {
 			}
 		}
 
+		// 3b. Multi-intent split (Task 4.3/4.4). When the message looks like it
+		// contains multiple independent requests, dispatch each segment as its
+		// own text request via routeOneTextRequest. When the gate declines
+		// (feature off, prefilter false, segmenter degraded, or <2 segments),
+		// we fall through to the single-message path — byte-equivalent to the
+		// pre-feature behavior.
+		if (await this.tryMultiIntentSplit(enrichedCtx, user)) return;
+
+		await this.routeOneTextRequest(enrichedCtx, user);
+	}
+
+	/**
+	 * Multi-intent split gate (Task 4.3/4.4).
+	 *
+	 * Returns `true` when the message was handled by the split path (caller
+	 * should return without doing single-message dispatch). Returns `false`
+	 * when the caller should continue with the single-message path.
+	 *
+	 * Gate order (each short-circuits to `false`):
+	 *   1. Feature flag disabled.
+	 *   2. No segmenter dep wired.
+	 *   3. Synchronous prefilter rejects the message (cheap path — no LLM call).
+	 *   4. Segmenter throws OR returns <2 segments → degrade to single dispatch.
+	 *
+	 * On a successful split (≥2 segments):
+	 *   - Send ONE preamble telegram message.
+	 *   - Dispatch each segment via `routeOneTextRequest` in input order.
+	 *   - Each segment is wrapped in try/catch — a thrown handler does NOT
+	 *     abort later segments; we send a per-segment apology and continue.
+	 *
+	 * Strict sequential dispatch (Option A from the plan): replies arrive in
+	 * input order. A reply-collector (collect all replies, send one batched
+	 * message) is out of scope and tracked in `docs/open-items.md`.
+	 */
+	private async tryMultiIntentSplit(
+		enrichedCtx: MessageContext,
+		user: RegisteredUser,
+	): Promise<boolean> {
+		if (!this.multiIntentSplit) return false;
+		if (!this.messageSegmenter) return false;
+		if (!this.messageSegmenter.preFilter(enrichedCtx.text)) return false;
+
+		let segments: string[];
+		try {
+			segments = await this.messageSegmenter.segment(enrichedCtx.text, {
+				llm: this.llm,
+				logger: this.logger,
+			});
+		} catch (err) {
+			this.logger.warn(
+				{ err },
+				'tryMultiIntentSplit: segmenter threw; falling back to single dispatch',
+			);
+			return false;
+		}
+		if (segments.length < 2) return false;
+
+		await this.trySend(enrichedCtx.userId, "Got it — I'll cover all of those:");
+
+		for (const segment of segments) {
+			try {
+				await this.routeOneTextRequest({ ...enrichedCtx, text: segment }, user);
+			} catch (err) {
+				this.logger.warn(
+					{ err, segment },
+					'tryMultiIntentSplit: segment handler threw; continuing',
+				);
+				await this.trySend(enrichedCtx.userId, "(I couldn't handle that part — sorry.)");
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Dispatch a single text segment: classify → access-check → grey-zone verify →
+	 * dispatchMessage/dispatchConversation → tryContextPromotion → sendToFallback.
+	 *
+	 * Extracted verbatim from routeMessage so future multi-intent splitting (Task 4.2/4.3)
+	 * can call this once per segment without duplicating the dispatch tail. Behavior is
+	 * unchanged: the single-message path still calls this exactly once.
+	 */
+	private async routeOneTextRequest(
+		enrichedCtx: MessageContext,
+		user: RegisteredUser,
+	): Promise<void> {
 		// 3. Free text → intent classification
 		const match = await this.intentClassifier.classify(
 			enrichedCtx.text,
@@ -524,12 +682,10 @@ export class Router {
 				return;
 			}
 
-			// Grey-zone verification: if confidence is moderate and verifier is configured
-			if (
-				this.routeVerifier &&
-				match.confidence >= this.confidenceThreshold &&
-				match.confidence < this.verificationUpperBound
-			) {
+			// Grey-zone verification: if confidence is moderate and verifier is configured.
+			// shouldVerifyIntent also force-verifies when match.intent is listed in
+			// alwaysVerifyIntents, even above the upper bound (Task 3.3).
+			if (this.routeVerifier && this.shouldVerifyIntent(match.intent, match.confidence)) {
 				// Resolve effective app list (raw enabledApps + appToggle overrides)
 				const resolvedApps = await this.resolveEnabledApps(enrichedCtx.userId, user.enabledApps);
 				const result = await this.routeVerifier.verify(enrichedCtx, match, undefined, resolvedApps);
@@ -636,12 +792,11 @@ export class Router {
 				return;
 			}
 
-			// Grey-zone verification for photo messages
-			if (
-				this.routeVerifier &&
-				match.confidence >= this.confidenceThreshold &&
-				match.confidence < this.verificationUpperBound
-			) {
+			// Grey-zone verification for photo messages. Note the asymmetry: the
+			// photo match exposes `photoType` (not `intent`), so the alwaysVerify
+			// list is consulted against that field. Same predicate, different
+			// shape — see shouldVerifyIntent.
+			if (this.routeVerifier && this.shouldVerifyIntent(match.photoType, match.confidence)) {
 				// Resolve effective app list (raw enabledApps + appToggle overrides)
 				const resolvedApps = await this.resolveEnabledApps(enrichedCtx.userId, user.enabledApps);
 				const result = await this.routeVerifier.verify(

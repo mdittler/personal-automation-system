@@ -589,6 +589,75 @@ describe('checkDefrostNeeded', () => {
 
 		expect(services.telegram.send).not.toHaveBeenCalled();
 	});
+
+	describe('bridges to chatbot transcript', () => {
+		let recordOutboundMessage: ReturnType<typeof vi.fn>;
+
+		beforeEach(() => {
+			recordOutboundMessage = vi.fn().mockResolvedValue(undefined);
+			(services as unknown as { appOutboundBridge: unknown }).appOutboundBridge = {
+				recordOutboundMessage,
+			};
+		});
+
+		it('records one bridge entry per household member with the raw body and no buttons', async () => {
+			setupHouseholdAndFreezer(household, [
+				{ name: 'ground beef', quantity: '1 lb', frozenDate: '2026-03-20' },
+			]);
+			const plan = makePlan([
+				makeMeal({ recipeId: 'r1', recipeTitle: 'Pasta Bolognese', date: '2026-04-04' }),
+			]);
+
+			await checkDefrostNeeded(
+				services,
+				store as unknown as ScopedDataStore,
+				plan,
+				[makeRecipe()],
+				'2026-04-03',
+			);
+
+			const telegramCalls = vi.mocked(services.telegram.send).mock.calls;
+			expect(telegramCalls).toHaveLength(2);
+			const [, telegramBody] = telegramCalls[0]!;
+
+			expect(recordOutboundMessage).toHaveBeenCalledTimes(2);
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'matt',
+				appId: 'food',
+				kind: 'defrost-reminder',
+				body: telegramBody,
+				buttons: undefined,
+			});
+			expect(recordOutboundMessage).toHaveBeenCalledWith({
+				userId: 'sarah',
+				appId: 'food',
+				kind: 'defrost-reminder',
+				body: telegramBody,
+				buttons: undefined,
+			});
+		});
+
+		it('does not send or record when no frozen ingredients match', async () => {
+			setupHouseholdAndFreezer(household, [
+				{ name: 'chicken', quantity: '2 lbs', frozenDate: '2026-03-20' },
+			]);
+			const plan = makePlan([
+				makeMeal({ recipeId: 'r1', recipeTitle: 'Pasta Bolognese', date: '2026-04-04' }),
+			]);
+
+			await checkDefrostNeeded(
+				services,
+				store as unknown as ScopedDataStore,
+				plan,
+				[makeRecipe()],
+				'2026-04-03',
+			);
+
+			expect(services.telegram.send).not.toHaveBeenCalled();
+			expect(services.telegram.sendWithButtons).not.toHaveBeenCalled();
+			expect(recordOutboundMessage).not.toHaveBeenCalled();
+		});
+	});
 });
 
 // ─── buildBatchFreezeButtons ─────────────────────────────────────────────────
