@@ -5594,6 +5594,125 @@ The three new regression-case phrasings the PAS classifier now accepts ("can I g
 - `Food shadow-classifier — platform-invite phrasings stay rejected > deterministicRejectFor includes "how do I add my partner" with correctLabel="none"`
 - `Food shadow-classifier — platform-invite phrasings stay rejected > deterministicRejectFor includes "invite my wife to use this" with correctLabel="none"`
 
+### REQ-ROUTE — Multi-intent reply collector (Option B)
+
+Deliverable 2 of the Classifier + Reply-Collector + Call-Graph Guard phase. Replaces the per-segment Telegram message storm with one combined message (or as few as possible under the 4000-char cap). The implementation has three load-bearing pieces:
+
+1. `BufferingTelegramProxy` (`core/src/services/router/reply-buffer.ts`) — `TelegramService`-compatible wrapper around the REAL transport; buffers plain `send` calls per `userId`; rich sends (`sendPhoto`/`sendWithButtons`/`sendOptions`) flush pending text first then pass through; `editMessage` bypasses the buffer entirely.
+2. `ContextAwareTelegramService` (`core/src/services/telegram/context-aware.ts`) — wraps the real `TelegramService` and routes plain method calls through `requestContext.getStore()?.replyBuffer` when one is in scope; transparent delegate to the real transport otherwise. `editMessage` always bypasses.
+3. Router patch — `tryMultiIntentSplit` constructs a `BufferingTelegramProxy(inner: this.telegram)` (real handle, never the wrapper — Codex Round 1 #3 prevents the recursion seam), enters a `requestContext.run({ ...outer, replyBuffer })` scope with the outer store SPREAD first (Codex Round 1 #2), dispatches segments, and finally calls `buffer.flushPending` in `finally` to emit the combined message(s). Three nested `requestContext.run` sites in `dispatchMessage` / `dispatchPhoto` / `dispatchConversation` are patched to spread the outer store so the buffer survives every dispatch hop.
+
+#### REQ-ROUTE-017: Multi-intent reply buffer combines plain `send` calls across segments into one Telegram message when ≤ 4000 chars
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+When `Router.tryMultiIntentSplit` runs (≥ 2 segments after segmenter), each segment's handler call to `services.telegram.send(...)` lands in the per-request `BufferingTelegramProxy` instead of the real transport. After the segment loop completes, `buffer.flushPending(userId)` emits ONE combined message containing every buffered segment, joined by `\n\n`, as long as the total length stays under the 4000-char cap.
+
+**Standard tests** (`reply-buffer.test.ts`, `router-multi-intent.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `BufferingTelegramProxy — happy path (REQ-ROUTE-017) > buffers plain `send` calls; final flush emits one combined message`
+- `BufferingTelegramProxy — happy path (REQ-ROUTE-017) > flushPending on an empty buffer is a no-op`
+- `Router — multi-intent split (Task 4.3/4.4) + combined reply (REQ-ROUTE-017..022) > splits a two-question message → preamble + one combined send; both handlers dispatched in order`
+- `Router — multi-intent split (Task 4.3/4.4) + combined reply (REQ-ROUTE-017..022) > dispatches three segments → preamble + one combined send with three sections`
+- `Router multi-intent — reply buffer integration > two-segment message → preamble + exactly one combined send (REQ-ROUTE-017)`
+
+#### REQ-ROUTE-018: Multi-intent reply buffer auto-splits at segment boundaries when total exceeds 4000 chars
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`packSegments(segments, maxLength)` (exported from `reply-buffer.ts`) packs ordered segments into chunks, each ≤ `maxLength`. The packer always breaks between segments when possible. A single segment longer than `maxLength` is hard-split into raw `maxLength`-sized slices; content is preserved in input order under concatenation.
+
+**Standard tests** (`reply-buffer.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `BufferingTelegramProxy — length splitting (REQ-ROUTE-018) > auto-splits at segment boundaries when total exceeds maxLength`
+- `BufferingTelegramProxy — length splitting (REQ-ROUTE-018) > packs as many segments as fit per message`
+- `BufferingTelegramProxy — length splitting (REQ-ROUTE-018) > hard-splits a single segment longer than maxLength (preserves all content)`
+- `Router multi-intent — reply buffer integration > combined reply > 4000 chars auto-splits at segment boundaries (REQ-ROUTE-018)`
+
+**Persona tests** (`multi-intent-natural-language.persona.test.ts`):
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > long combined message auto-splits at segment boundaries`
+
+#### REQ-ROUTE-019: Rich sends (`sendPhoto`, `sendWithButtons`, `sendOptions`) flush pending buffer and pass through
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+When a handler calls `services.telegram.sendPhoto(...)`, `sendWithButtons(...)`, or `sendOptions(...)` while a reply buffer is active, the buffer's wrapper method calls `await this.flushPending(userId)` FIRST — emitting any accumulated plain text — and then delegates to the inner real transport with the original arguments. This preserves visible ordering for handlers that interleave plain text with media or interactive prompts.
+
+Codex Round 1 #10 narrowed this requirement to exclude `editMessage`; see REQ-ROUTE-019b for the bypass contract.
+
+**Standard tests** (`reply-buffer.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `BufferingTelegramProxy — rich sends flush + pass through (REQ-ROUTE-019) > sendPhoto flushes pending text then delegates to inner`
+- `BufferingTelegramProxy — rich sends flush + pass through (REQ-ROUTE-019) > sendWithButtons flushes pending text then delegates`
+- `BufferingTelegramProxy — rich sends flush + pass through (REQ-ROUTE-019) > sendOptions flushes pending text then delegates`
+- `Router multi-intent — reply buffer integration > sendPhoto mid-segment flushes prior plain text then passes through (REQ-ROUTE-019)`
+- `Router multi-intent — reply buffer integration > sendWithButtons mid-segment flushes prior plain text then passes through`
+
+#### REQ-ROUTE-019b: `editMessage` bypasses the buffer entirely (targets a prior message id; order-independent)
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`editMessage(chatId, messageId, text, buttons?)` targets a previously-sent message by id, not the user's current reply queue, so its visible ordering is decoupled from the buffered plain-text reply. Both `BufferingTelegramProxy.editMessage` and `ContextAwareTelegramService.editMessage` therefore bypass the buffer entirely and call the inner real transport directly. The plain-text queue continues to accumulate after the edit and is flushed at the normal flush point.
+
+Distinct from REQ-ROUTE-019 (rich sends flush-then-pass-through) — the contract here is "do nothing to the buffer; pass straight through". Codex Round 1 #10 surfaced this as a URS coherence fix; the original draft conflated `editMessage` with the rich-send flush path.
+
+**Standard tests** (`reply-buffer.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `BufferingTelegramProxy — rich sends flush + pass through (REQ-ROUTE-019) > editMessage passes through immediately (no flush) — REQ-ROUTE-019b`
+- `Router multi-intent — reply buffer integration > editMessage bypasses the buffer entirely (REQ-ROUTE-019b)`
+
+#### REQ-ROUTE-020: Buffer is isolated per-request via AsyncLocalStorage (concurrent users do not cross-contaminate)
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The reply buffer is installed on the request-scoped `requestContext` (`AsyncLocalStorage<RequestContext>`) as an optional `replyBuffer?: FlushableTelegramProxy` field. Each `Router.tryMultiIntentSplit` invocation creates its OWN `BufferingTelegramProxy` and enters its own `requestContext.run({ ...outer, replyBuffer }, ...)` scope; concurrent dispatches for different users see different buffer instances.
+
+Hardened at three additional dispatch entry points: `dispatchMessage`, `dispatchPhoto`, and `dispatchConversation` each re-establish the request context with `{ userId, householdId, [sessionId] }`. Each now spreads `requestContext.getStore() ?? {}` first so the outer `replyBuffer` survives the nested scope (Codex Round 1 #2 — the single most consequential review finding; without this fix the buffer is dropped at every handler dispatch and the reply collector silently no-ops).
+
+`BufferingTelegramProxy` also keeps per-`userId` queues internally (a `Map<userId, string[]>`), so even if two users shared a buffer instance their queued text would not merge. Production wiring guarantees one buffer per request; the per-userId map is a defense-in-depth second layer.
+
+**Standard tests** (`request-context-reply-buffer.test.ts`, `reply-buffer.test.ts`, `router-context-merge.test.ts`, `router-multi-intent.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `requestContext — replyBuffer scope > returns undefined when no buffer is in scope`
+- `requestContext — replyBuffer scope > propagates replyBuffer through nested async work`
+- `requestContext — replyBuffer scope > does not leak buffer to a parallel context (AsyncLocalStorage isolation)`
+- `requestContext — replyBuffer scope > REQ-ROUTE-020 hardening — nested run() that re-establishes context must preserve outer replyBuffer (Codex Round 1 #2)`
+- `BufferingTelegramProxy — per-user isolation (REQ-ROUTE-020) > separates buffers across userIds`
+- `Router nested-dispatch context merging — Codex Round 1 #2 regression guard > dispatchMessage preserves outer replyBuffer (REQ-ROUTE-020)`
+- `Router nested-dispatch context merging — Codex Round 1 #2 regression guard > dispatchPhoto preserves outer replyBuffer`
+- `Router nested-dispatch context merging — Codex Round 1 #2 regression guard > dispatchConversation preserves outer replyBuffer when ConversationService is wired`
+- `Router — multi-intent split (Task 4.3/4.4) + combined reply (REQ-ROUTE-017..022) > requestContext.replyBuffer is INSTALLED during multi-intent dispatch and CLEARED after flush`
+- `Router multi-intent — reply buffer integration > concurrent dispatches for two users — buffers do not cross-contaminate (REQ-ROUTE-020)`
+
+#### REQ-ROUTE-021: Buffer flushes pending text even when a segment throws
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`tryMultiIntentSplit` wraps each segment's `routeOneTextRequest` call in `try/catch`. On throw, the apology (`"(I couldn't handle that part — sorry.)"`) is sent THROUGH THE BUFFER via `buffer.send(userId, ...)` so it merges with surrounding segment replies in the final flush — not as a separate Telegram message. The final `flushPending` runs unconditionally before `tryMultiIntentSplit` returns.
+
+`BufferingTelegramProxy.flushPending` deletes the user's queue BEFORE the inner `send` call, so a rejection from the real transport does not double-emit the same text on a retry — a single failed flush leaves the buffer empty and a subsequent flush is a safe no-op.
+
+**Standard tests** (`reply-buffer.test.ts`, `router-multi-intent.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `BufferingTelegramProxy — error handling (REQ-ROUTE-021) > inner send rejection on flush propagates; buffer is cleared (no double-flush)`
+- `Router — multi-intent split (Task 4.3/4.4) + combined reply (REQ-ROUTE-017..022) > per-segment error isolation (stubbed routeOneTextRequest throw): apology + segment 2 reply combined`
+- `Router multi-intent — reply buffer integration > segment 1 throws → apology + segment 2 reply combined in one message (REQ-ROUTE-021)`
+
+#### REQ-ROUTE-022: Multi-intent natural-language persona scenarios end with one combined Telegram message under the cap
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+End-to-end coverage that realistic Telegram phrasings — multi-question dinner+spending requests, mixed grocery+recipe queries, three-segment mash-ups, leading filler ("hey could you do me a favor, …"), and ALL-CAPS-punctuation-noise messages — produce exactly one preamble + one combined message, with the combined message containing all expected substrings joined by `\n\n` separators. Six realistic positive cases plus one long-message split case (3 × 1800-char replies → 2 packed messages under the cap). Six negative cases ("whats for dinner", "good morning", "add salt and pepper to my list", …) verify the splitter declines and the single-message path runs without a preamble.
+
+**Persona tests** (`multi-intent-natural-language.persona.test.ts`):
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "What's for dinner tonight and how much did I spend at Costco?" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "add milk to the grocery list and what's in my pantry" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "show me my recipes and tell me my health stats" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "whats for dinner, add eggs to groceries, and how many calories did i eat today" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "hey could you do me a favor, add bananas to my list, and also tell me what's in the pantry?" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "GROCERY LIST. ALSO, what's the cheapest store for eggs???" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > long combined message auto-splits at segment boundaries`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "whats for dinner" → no preamble, single-message path`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "how much did i spend at costco" → no preamble, single-message path`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "hey" → no preamble, single-message path`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "good morning" → no preamble, single-message path`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "show me recipes with chicken and pasta" → no preamble, single-message path`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "add salt and pepper to my list" → no preamble, single-message path`
+
 ---
 
 ## App-Message Memory Bridge (2026-05-18)
@@ -12383,5 +12502,12 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-CONV-PAS-CLASSIFY-003 | pas-classifier.test.ts | 2 | 0 | Implemented |
 | REQ-CONV-PAS-CLASSIFY-004 | regression/src/cases/routing/pas/invite-platform.case.ts | 1 | 0 | Implemented |
 | REQ-CONV-PAS-CLASSIFY-005 | shadow-classifier-platform-invite.test.ts | 4 | 0 | Implemented |
+| REQ-ROUTE-017 | reply-buffer.test.ts, router-multi-intent.test.ts, router-multi-intent-reply-buffer.test.ts | 5 | 0 | Implemented |
+| REQ-ROUTE-018 | reply-buffer.test.ts, router-multi-intent-reply-buffer.test.ts, multi-intent-natural-language.persona.test.ts | 4 | 1 | Implemented |
+| REQ-ROUTE-019 | reply-buffer.test.ts, router-multi-intent-reply-buffer.test.ts | 5 | 0 | Implemented |
+| REQ-ROUTE-019b | reply-buffer.test.ts, router-multi-intent-reply-buffer.test.ts | 2 | 0 | Implemented |
+| REQ-ROUTE-020 | request-context-reply-buffer.test.ts, reply-buffer.test.ts, router-context-merge.test.ts, router-multi-intent.test.ts, router-multi-intent-reply-buffer.test.ts | 10 | 0 | Implemented |
+| REQ-ROUTE-021 | reply-buffer.test.ts, router-multi-intent.test.ts, router-multi-intent-reply-buffer.test.ts | 3 | 0 | Implemented |
+| REQ-ROUTE-022 | multi-intent-natural-language.persona.test.ts | 0 | 13 | Implemented |
 
-| **Totals** | **396 test files** | **2763** | **2736** | **5499 tests** |
+| **Totals** | **402 test files** | **2792** | **2750** | **5542 tests** |
