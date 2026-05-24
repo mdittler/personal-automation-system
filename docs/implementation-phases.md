@@ -3531,6 +3531,93 @@ Each batch additionally went through spec-compliance + code-quality review durin
 
 ---
 
+## Classifier + Reply-Collector + Call-Graph Guard (2026-05-24)
+
+**Goal:** Close three deferred open-items in one focused session: (1) the 2026-05-24 Accepted Risk that the PAS classifier failed to recognise platform-invite questions; (2) the 2026-05-22 deferred "Reply-collector Option B" that would combine multi-intent replies into one Telegram message; (3) the 2026-05-22 deferred "Stricter call-graph-based proactive-send guard" replacing the entrypoint-scoped Strategy A scanner with transitive call-graph reachability.
+
+**Approach:** Three independent deliverables with no shared production code; subagent-driven execution dispatched one deliverable at a time on a single feature branch. The reply-collector uses an AsyncLocalStorage-aware `TelegramService` wrapper composed at runtime so handlers remain unchanged; the call-graph guard uses `ts.createProgram` + the TypeScript type checker for cross-file symbol resolution; the classifier fix adds a fifth deterministic prefilter plus targeted LLM few-shot examples.
+
+**Codex plan review (Round 1 — 17 findings, all applied pre-implementation):**
+
+Notable corrections applied to the plan before any code was written:
+
+- (Critical×5) `requestContext.get()` does not exist — the API is `getStore()`; the buffer's `inner` MUST be the real transport, not the context-aware wrapper, or final flush infinitely re-buffers; the three nested `requestContext.run({...})` sites in Router (`dispatchMessage`/`dispatchPhoto`/`dispatchConversation`) drop the outer `replyBuffer` unless they spread the outer store first; `composeRuntime` accepts `telegramService` not `telegram` and exposes no `messageSegmenter`/`multiIntentSplit` overrides (integration tests must use a Router-level harness); existing `router-multi-intent.test.ts` fake apps were `vi.fn().mockResolvedValue(undefined)` — they had to be rewritten so each `handleMessage` call actually invokes `services.telegram.send(...)` or combined-message assertions are vacuous.
+- (Important×7) Original `PLATFORM_INVITE_RE` was over-broad (matched "inviting people to dinner") — every branch was retightened to require a PAS/platform/access/relationship anchor and reorganised into a typed `PLATFORM_INVITE_PATTERNS` array; food persona test imports were wrong (`FOOD_PERSONAS` not `PERSONAS`; `'../food-intents.js'` not `'../intents.js'`); `InlineButton.callbackData` not `callback_data`; URS conflict on `editMessage` — narrowed REQ-ROUTE-019 to `sendPhoto`/`sendWithButtons`/`sendOptions`, added REQ-ROUTE-019b for `editMessage` bypass; type-import circular dep solved by landing `FlushableTelegramProxy` in its own `reply-buffer-types.ts` module first; call-graph scanner path/exclusion was inconsistent across `apps/food` vs `apps/food/src` — normalized to `apps/food/src` as the default `projectRoot` and added a dedicated production-root exclusion test; ESM compatibility — fixtures used `__dirname` and `require()` not available in this codebase (use `fileURLToPath(import.meta.url)` per the existing test pattern; static `import { readdirSync, statSync } from 'node:fs'`).
+- (Cosmetic×5) Call-graph tests only covered `send` — extended to all four `telegram.send*` variants; `buildCallGraph` was named in the deliverable summary but only `buildGraph` existed internally — public API narrowed to just `findReachableSends` + `ProactiveSendHit`; `scanFoodProactiveSendsFromSources` retained as a thin in-memory API for the guard self-test fixture rather than removed; `it.todo` placeholders in Tasks 2.5/2.6 were filled out with full test bodies before execution; debug node-eval command for the regex was generalised to a `tsx` REPL instruction.
+
+Codex Round 2 review of the executed branch is queued separately (the user's "single end-of-phase Codex review" cadence — `feedback_batch_execution_cadence.md`).
+
+**Deliverable 1 — PAS-classifier platform-invite recognition (5 commits, REQ-CONV-PAS-CLASSIFY-001..005):**
+
+- **Task 1.1 (`363f35e`)** — Authored `core/src/services/conversation/__tests__/pas-classifier.platform-invite.test.ts` with 23 tests: 7 positive phrasings + 13 negative phrasings (Codex #6 hardening — "inviting people to dinner/concert/birthday party", "add a new user to the test database", etc.) + 3 misc edge cases (case-insensitivity, surrounding punctuation, no `dataQueryCandidate`/`settingsCandidate` leakage).
+
+- **Task 1.2 (`b7eb49d`)** — Added `PLATFORM_INVITE_PATTERNS` array of 9 named clauses and `PLATFORM_INVITE_RE = new RegExp(PLATFORM_INVITE_PATTERNS.join('|'), 'i')` to `core/src/services/conversation/pas-classifier.ts`; registered as the fifth entry in `PREFILTERS` with verdict `{pasRelated: true}` only (matching `PAS_META_RE`'s shape — no `dataQueryCandidate` or `settingsCandidate`). One adaptive tuning beyond the plan: Branch 7's optional PAS-anchor group had `\s+` placed *outside* the optional group, blocking the bare ambiguous phrasing "Can you tell me about inviting people?" that the plan documented as a positive — moving `\s+` inside the optional group permitted that single bare positive while every negative phrasing (lacking the "tell me about" prefix or carrying a non-PAS suffix like "to dinner/concert/party") still failed to match.
+
+- **Task 1.3 (`890ed48`)** — Added 3 positive (`"let my husband sign in too"`, `"add a new user"`, `"give my kids access"` → `YES_PAS NO_SETTINGS NO_DATA`) + 1 negative (`"invite my friends to a dinner party"` → `NO_PAS`) LLM few-shot mappings to the `systemPrompt` template; added 2 prompt-content unit tests asserting their presence and the prompt-length-budget guard.
+
+- **Task 1.4 (`47a9832`)** — Mirrored the new platform-invite phrasings on Food's `HOSTING_MEAL_PLANNING_INTENT` `deterministicRejectFor` block (Codex #5 — REQ-CONV-PAS-CLASSIFY-005); created `apps/food/src/routing/__tests__/shadow-classifier-platform-invite.test.ts` with 4 assertions (imports corrected to `FOOD_PERSONAS` and `'../food-intents.js'`).
+
+- **Task 1.5 (`6cede48`)** — Verified the regression case: `pnpm test:regression -- --rerun=pas-invite-platform-positive --no-manifest` returns `verdict: pass` for all 7 inputs deterministically via the prefilter — zero LLM dispatch, zero cost, durationMs 6. Added 5 new URS entries (REQ-CONV-PAS-CLASSIFY-001..005) under a new `## Phase 2026-05-24 — Classifier + Reply-Collector + Call-Graph Guard` header. Closed the 2026-05-24 Accepted Risk at `docs/open-items.md:349` with strikethrough + `✓ Closed` marker.
+
+**Deliverable 2 — Reply-Collector "Option B" (8 commits, REQ-ROUTE-017..022 inc. REQ-ROUTE-019b):**
+
+- **Task 2.1a (`bb24c6d`)** — Created `core/src/services/router/reply-buffer-types.ts` exporting the `FlushableTelegramProxy` interface (separate module first per Codex #11 — needed to break the type-import circular dep between `request-context.ts` and `reply-buffer.ts`).
+
+- **Task 2.1b (`06567b7`)** — Extended `RequestContext` in `core/src/services/context/request-context.ts` with `replyBuffer?: FlushableTelegramProxy`; created `core/src/services/context/__tests__/request-context-reply-buffer.test.ts` with 4 pinning tests (no-buffer-in-scope, propagation through nested async, AsyncLocalStorage isolation across parallel runs, and the **Codex #2 regression guard** verifying that nested `requestContext.run()` that re-establishes context must preserve the outer `replyBuffer`).
+
+- **Task 2.2 (`345113b`)** — Built `BufferingTelegramProxy` in `core/src/services/router/reply-buffer.ts` with 11 unit tests covering: happy-path buffer+combined-flush; empty-buffer no-op; auto-split at segment boundaries; segment-packing across chunks; hard-split of an oversize single segment; rich-send flush (`sendPhoto`, `sendWithButtons`, `sendOptions`); `editMessage` bypass (REQ-ROUTE-019b — Codex #10); per-user isolation; inner-send rejection cleanup (buffer cleared so no double-flush). `InlineButton.callbackData` field used throughout (Codex #9).
+
+- **Task 2.3 (`1c82af5`)** — Created `core/src/services/telegram/context-aware.ts` (`ContextAwareTelegramService`). Wired into `compose-runtime.ts` keeping BOTH `realTelegram` and `contextAwareTelegram` references (Codex #3 — the buffer's `inner` must always be the real transport, never the wrapper). Router gets `realTelegram` for its own sends and as the buffer's `inner` in `tryMultiIntentSplit`; apps get `contextAwareTelegram` via `coreServices.telegram`; `RuntimeServices.telegram` exposes the real handle.
+
+- **Task 2.4 (`a6f61fc`)** — Patched the three nested `requestContext.run({...})` sites in `core/src/services/router/index.ts` (`dispatchMessage`, `dispatchPhoto`, `dispatchConversation`) to spread `requestContext.getStore() ?? {}` first — without this, every handler dispatch drops the outer `replyBuffer` and the reply collector silently no-ops (Codex #2 is the most consequential finding). Added `core/src/services/router/__tests__/router-context-merge.test.ts` with 3 pinning tests (one per dispatch site). Rewrote `tryMultiIntentSplit` to enter a request-context scope with a `BufferingTelegramProxy` wrapping `this.telegram` (the real handle), run the segment loop, and `flushPending` in `finally`. Rewrote `router-multi-intent.test.ts` so fake apps actually call `services.telegram.send(...)` (Codex #5). The Codex #2 fix was verified by **temporary revert** of the `dispatchMessage` spread — `router-context-merge.test.ts` correctly failed with `["expected sentinel"] → [undefined]`, then restored and confirmed green.
+
+- **Task 2.5 (`303090a`)** — Created `core/src/services/router/__tests__/router-multi-intent-reply-buffer.test.ts` with 7 integration tests covering the full real-Router-through-real-Wrapper stack: combined send happy path; segment-1 throws then segment-2 + apology combined; combined > 4000 chars auto-splits at segment boundaries; concurrent dispatches for two users don't cross-contaminate (AsyncLocalStorage isolation); `sendPhoto` mid-segment flushes prior plain text; `sendWithButtons` mid-segment flushes prior plain text; `editMessage` bypasses the buffer (REQ-ROUTE-019b). Lifted `setupRouter` from `router-multi-intent.test.ts` into `core/src/services/router/__tests__/test-helpers.ts` so 4 downstream test files share it.
+
+- **Task 2.6 (`a331ba3`)** — Created `core/src/services/router/__tests__/multi-intent-natural-language.persona.test.ts` with 13 persona scenarios: 6 multi-intent positive cases (one-segment-per-question phrasings, conversational filler, mixed case + punctuation, 2-segment vs 3-segment), 1 long-message auto-split case, 6 should-not-split cases (single-intent messages, single intents with conjunctions like "salt and pepper" that aren't separate intents). Each test exercises the real wrapper + buffer through a recording real-telegram stub.
+
+- **Task 2.7 (`e8d9f04`)** — Added 7 new URS entries (REQ-ROUTE-017..022 plus REQ-ROUTE-019b) to the new phase section in `docs/urs.md`. Updated traceability matrix totals. Closed the 2026-05-22 deferred entry at `docs/open-items.md:207` with strikethrough + `✓ Closed` marker.
+
+**Deliverable 3 — Strategy B call-graph guard (3 commits, REQ-FOOD-PROACTIVE-BRIDGE-008..011):**
+
+- **Task 3.1 (`818a644`)** — Built `apps/food/src/testing/proactive-send-call-graph.ts` (305 lines) exporting only `findReachableSends` + `ProactiveSendHit` (Codex #15 — `buildGraph` is internal). Pure ESM throughout — static `import { readFileSync, readdirSync, statSync } from 'node:fs'`, no `require()`, no `__dirname` (Codex #13). The scanner builds a function-level call graph via `ts.createProgram` + the TypeScript type checker, walks BFS from each named entrypoint, and reports `telegram.send*` (all four variants — `send`, `sendWithButtons`, `sendPhoto`, `sendOptions`) call sites whose enclosing function is reachable, excluding the sanctioned bridge file. **Subtle implementation detail worth recording:** `checker.getSymbolAtLocation()` returns the import-alias symbol for cross-file `import { foo } from './bar.js'` — without dereferencing via `checker.getAliasedSymbol(symbol)` when `symbol.flags & ts.SymbolFlags.Alias` is set, every cross-file edge in the call graph would be silently dropped. With the one-line alias dereference, cross-file reachability works correctly. Test file `apps/food/src/__tests__/proactive-send-call-graph.test.ts` has 12 tests across 8 describe blocks (direct send, transitive same-file, cross-file resolution, cycle safety with mutually-recursive helpers, non-reachable code, exclusions, aliased call sites, all 4 send variants, production-root exclusion shape).
+
+- **Task 3.2 (`fefc632`)** — Rewrote `apps/food/src/testing/proactive-send-scan.ts` to delegate `scanFoodProactiveSends(root)` to `findReachableSends` (Strategy B). The `PROACTIVE_ENTRYPOINTS` set (the 13 semantic anchor names) stays as the entrypoint declaration. `scanFoodProactiveSendsFromSources` retained as a thin in-memory Strategy-A scanner for the guard self-test fixture only (Codex #16). Rewrote `apps/food/src/__tests__/proactive-send-guard.test.ts` to use `fileURLToPath(import.meta.url)` for the production-root computation (Codex #13).
+
+- **Task 3.3 — skipped (best case outcome).** The real Strategy B sweep against `apps/food/src` returns `[]`. Strategy A's explicit-helper enumeration was already accurate; no Food helper had to be routed through `sendProactiveMessage`. The deferred-item trigger — "the entrypoint list grows brittle OR a real regression sneaks through a helper not listed in the explicit set" — has not fired; the Strategy A list happened to be complete. Strategy B is now the guard going forward, so any new helper added between an entrypoint and a `telegram.send*` will be caught automatically.
+
+- **Task 3.4 (`b402f39`)** — Added 4 new URS entries (REQ-FOOD-PROACTIVE-BRIDGE-008..011) to the phase section in `docs/urs.md`. Updated traceability matrix totals. Closed the 2026-05-22 deferred entry at `docs/open-items.md:206` with strikethrough + `✓ Closed` marker.
+
+**Tests:** 12,191 root tests pass (+80 from this phase: 27 platform-invite + 2 few-shot prompt + 4 food-shadow + 4 request-context-reply-buffer + 11 reply-buffer unit + 3 router-context-merge + 11 router-multi-intent rewrite + 7 router-multi-intent-reply-buffer + 13 multi-intent-natural-language persona + 12 proactive-send-call-graph - 2 rewritten in proactive-send-guard - 12 = net +80 from the plan's task structure). `pnpm lint` zero errors; `pnpm build` clean.
+
+**Files modified or created:**
+
+- `core/src/services/conversation/pas-classifier.ts` (extended)
+- `core/src/services/conversation/__tests__/pas-classifier.platform-invite.test.ts` (new)
+- `core/src/services/conversation/__tests__/pas-classifier.test.ts` (+2 prompt tests)
+- `apps/food/src/routing/__tests__/shadow-classifier.personas.ts` (+3 deterministicRejectFor entries)
+- `apps/food/src/routing/__tests__/shadow-classifier-platform-invite.test.ts` (new)
+- `core/src/services/router/reply-buffer-types.ts` (new)
+- `core/src/services/router/reply-buffer.ts` (new)
+- `core/src/services/router/__tests__/reply-buffer.test.ts` (new)
+- `core/src/services/router/__tests__/router-context-merge.test.ts` (new)
+- `core/src/services/router/__tests__/router-multi-intent-reply-buffer.test.ts` (new)
+- `core/src/services/router/__tests__/multi-intent-natural-language.persona.test.ts` (new)
+- `core/src/services/router/__tests__/test-helpers.ts` (new — lifted shared factory)
+- `core/src/services/router/__tests__/router-multi-intent.test.ts` (rewritten — fake apps now call `services.telegram.send`)
+- `core/src/services/router/index.ts` (3 nested `requestContext.run` patches + `tryMultiIntentSplit` rewrite)
+- `core/src/services/context/request-context.ts` (replyBuffer field added)
+- `core/src/services/context/__tests__/request-context-reply-buffer.test.ts` (new)
+- `core/src/services/telegram/context-aware.ts` (new)
+- `core/src/compose-runtime.ts` (real vs context-aware telegram split)
+- `apps/food/src/testing/proactive-send-call-graph.ts` (new)
+- `apps/food/src/__tests__/proactive-send-call-graph.test.ts` (new)
+- `apps/food/src/testing/proactive-send-scan.ts` (rewritten — Strategy B delegate)
+- `apps/food/src/__tests__/proactive-send-guard.test.ts` (rewritten — Strategy B sweep)
+- `docs/urs.md` (16 new REQ entries + matrix totals)
+- `docs/open-items.md` (3 entries closed: lines 206, 207, 349)
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
