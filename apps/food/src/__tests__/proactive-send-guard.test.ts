@@ -1,22 +1,23 @@
 /**
- * Static guard: any `telegram.send` / `telegram.sendWithButtons` call inside
- * a Food proactive entrypoint MUST be routed through `sendProactiveMessage`
+ * Static guard: any `telegram.send*` call reachable from a Food proactive
+ * entrypoint MUST be routed through `sendProactiveMessage`
  * (apps/food/src/utils/proactive-message.ts), so the chatbot transcript
  * stays in sync via the AppOutboundBridge.
  *
+ * Strategy B (2026-05-24): transitive call-graph reachability. The
+ * scanner walks the call graph BFS from each `PROACTIVE_ENTRYPOINTS`
+ * member, using the TypeScript type checker for cross-file symbol
+ * resolution. Sanctioned files (`__tests__/`, `testing/`,
+ * `utils/proactive-message.ts`) are excluded.
+ *
  * Two assertions:
  *
- *  1. Self-test of the scanner — feed it an in-memory fixture whose function
- *     name is one of `PROACTIVE_ENTRYPOINTS` containing a raw
- *     `services.telegram.send(...)` call, confirm it flags.
+ *  1. Self-test of the in-memory scanner — feed it an in-memory fixture
+ *     whose function name is one of `PROACTIVE_ENTRYPOINTS` containing a
+ *     raw `services.telegram.send(...)` call, confirm it flags.
  *
- *  2. Real assertion — run the scanner against `apps/food/src/` (excluding
- *     `__tests__/`, `testing/`, and `utils/proactive-message.ts`) and assert
- *     the returned array is empty.
- *
- * Why entrypoint-scoped, not file-scoped: `apps/food/src/index.ts` mixes
- * scheduled jobs (proactive) and reactive command/callback handlers in one
- * file — a file-scoped scanner would false-positive on every reactive send.
+ *  2. Real assertion — run the Strategy B sweep against `apps/food/src/`
+ *     and assert the returned array is empty.
  *
  * Failure message points developers at `sendProactiveMessage` and
  * `docs/CREATING_AN_APP.md` (the "Proactive Messages and the Chatbot Bridge"
@@ -32,47 +33,39 @@ import {
 	scanFoodProactiveSendsFromSources,
 } from '../testing/proactive-send-scan.js';
 
+// SRC_DIR points at `apps/food/src` — the production sweep root.
 const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 function formatMessage(flagged: ReadonlyArray<{ file: string; line: number; fn: string }>): string {
 	if (flagged.length === 0) return '';
-	const lines = [
-		'Found unbridged proactive Telegram sends inside Food proactive entrypoints.',
-		'Every proactive (app-initiated, non-reply) send from a Food entrypoint must',
-		'go through `sendProactiveMessage` (apps/food/src/utils/proactive-message.ts)',
-		'so the chatbot transcript stays in sync via the AppOutboundBridge.',
+	return [
+		'Found unbridged proactive Telegram sends reachable from a Food proactive entrypoint.',
+		'Every proactive (app-initiated, non-reply) send must go through',
+		'`sendProactiveMessage` (apps/food/src/utils/proactive-message.ts) so the chatbot',
+		'transcript stays in sync via the AppOutboundBridge.',
 		'',
 		'See docs/CREATING_AN_APP.md — section "Proactive Messages and the Chatbot Bridge".',
 		'',
-		'Offending sites:',
-	];
-	for (const hit of flagged) {
-		lines.push(`  ${hit.file}:${hit.line}  inside ${hit.fn}()`);
-	}
-	return lines.join('\n');
+		'Offending sites (transitively reachable):',
+		...flagged.map((h) => `  ${h.file}:${h.line}  inside ${h.fn}()`),
+	].join('\n');
 }
 
-describe('Food proactive-send guard', () => {
-	it('self-test: scanner flags a raw telegram.send inside a proactive entrypoint name', () => {
-		// Pick any proactive entrypoint name so the self-test exercises the
-		// real PROACTIVE_ENTRYPOINTS membership check.
-		const fnName = [...PROACTIVE_ENTRYPOINTS][0];
-		expect(fnName).toBeDefined();
-
+describe('Food proactive-send guard (Strategy B)', () => {
+	it('self-test: in-memory scanner flags a raw telegram.send inside a named entrypoint', () => {
+		const entry = [...PROACTIVE_ENTRYPOINTS][0];
 		const fixture = `
 			import type { CoreServices } from '@pas/core/types';
-			export async function ${fnName}(services: CoreServices): Promise<void> {
+			export async function ${entry}(services: CoreServices): Promise<void> {
 				await services.telegram.send('user-1', 'hello, world');
 			}
 		`;
-
 		const flagged = scanFoodProactiveSendsFromSources([{ file: 'fixture.ts', source: fixture }]);
-
 		expect(flagged.length).toBeGreaterThan(0);
-		expect(flagged.some((h) => h.fn === fnName)).toBe(true);
+		expect(flagged.some((h) => h.fn === entry)).toBe(true);
 	});
 
-	it('real: no unbridged proactive sends in apps/food/src', () => {
+	it('real: no unbridged proactive sends reachable in apps/food/src (Strategy B sweep)', () => {
 		const flagged = scanFoodProactiveSends(SRC_DIR);
 		expect(flagged, formatMessage(flagged)).toEqual([]);
 	});
