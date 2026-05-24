@@ -369,6 +369,24 @@ export const FOOD_PERSONAS: readonly Persona[] = [
 				reason:
 					'platform-invite question — adding a user to PAS, not a hosting/meal-planning request; routes to PAS-aware chatbot, not Food',
 			},
+			{
+				text: 'can I give my kids access',
+				correctLabel: 'none',
+				reason:
+					'platform-invite question — granting PAS access to household members, not a meal/menu/dinner-party request',
+			},
+			{
+				text: 'how do I add my partner',
+				correctLabel: 'none',
+				reason:
+					'platform-invite question — adding a partner to PAS as a user, not hosting a meal/menu/dinner-party for them',
+			},
+			{
+				text: 'invite my wife to use this',
+				correctLabel: 'none',
+				reason:
+					'platform-invite question — "use this" anchors on PAS itself, not on hosting/inviting for a meal',
+			},
 		],
 		advisoryNearMisses: [],
 	},
