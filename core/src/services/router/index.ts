@@ -66,6 +66,7 @@ import type { FallbackHandler } from './fallback.js';
 import { IntentClassifier } from './intent-classifier.js';
 import type { preFilterMultiIntent, segmentMessage } from './message-segmenter.js';
 import { PhotoClassifier } from './photo-classifier.js';
+import { BufferingTelegramProxy } from './reply-buffer.js';
 import type { RouteVerifier, VerifyAction } from './route-verifier.js';
 
 /** Default confidence threshold for intent classification. */
@@ -641,19 +642,47 @@ export class Router {
 		}
 		if (segments.length < 2) return false;
 
+		// Preamble goes out immediately via this.telegram (the REAL transport
+		// per the compose-runtime split; never buffered). It is not part of
+		// the combined reply.
 		await this.trySend(enrichedCtx.userId, "Got it — I'll cover all of those:");
 
-		for (const segment of segments) {
-			try {
-				await this.routeOneTextRequest({ ...enrichedCtx, text: segment }, user);
-			} catch (err) {
-				this.logger.warn(
-					{ err, segment },
-					'tryMultiIntentSplit: segment handler threw; continuing',
-				);
-				await this.trySend(enrichedCtx.userId, "(I couldn't handle that part — sorry.)");
+		// Codex Round 1 #3: BufferingTelegramProxy wraps the REAL transport
+		// (`this.telegram`), never the ContextAwareTelegramService wrapper —
+		// otherwise final flush would re-enter the buffer via
+		// requestContext.getStore()?.replyBuffer and loop infinitely.
+		const buffer = new BufferingTelegramProxy({ inner: this.telegram });
+
+		// Codex Round 1 #1 + #2: spread the outer store so any pre-existing
+		// context (userId/householdId/sessionId) survives, then install the
+		// buffer on top.
+		const parentCtx = requestContext.getStore() ?? {};
+		await requestContext.run({ ...parentCtx, replyBuffer: buffer }, async () => {
+			for (const segment of segments) {
+				try {
+					await this.routeOneTextRequest({ ...enrichedCtx, text: segment }, user);
+				} catch (err) {
+					this.logger.warn(
+						{ err, segment },
+						'tryMultiIntentSplit: segment handler threw; continuing',
+					);
+					// Buffer the apology so it merges with surrounding segment replies.
+					await buffer.send(enrichedCtx.userId, "(I couldn't handle that part — sorry.)");
+				}
 			}
-		}
+			// REQ-ROUTE-017/018: final flush emits the combined message(s).
+			// REQ-ROUTE-021: any pending text is flushed even though we are
+			// inside a try/catch surface — the buffer's own internal clear-up-front
+			// guards against double-emission if the inner.send rejects.
+			try {
+				await buffer.flushPending(enrichedCtx.userId);
+			} catch (flushErr) {
+				this.logger.error(
+					{ err: flushErr, userId: enrichedCtx.userId },
+					'tryMultiIntentSplit: buffer flush failed; partial reply may be lost',
+				);
+			}
+		});
 		return true;
 	}
 
@@ -978,8 +1007,14 @@ export class Router {
 		const householdId = this.householdService?.getHouseholdForUser(ctx.userId) ?? undefined;
 		let result: Awaited<ReturnType<typeof app.module.handleMessage>>;
 		try {
-			result = await requestContext.run({ userId: ctx.userId, householdId }, () =>
-				app.module.handleMessage({ ...ctx, route }),
+			// Codex Round 1 #2: spread the outer store first so any
+			// pre-existing replyBuffer (set by Router.tryMultiIntentSplit) is
+			// preserved through the nested run scope. Without the spread, the
+			// outer buffer is dropped before any handler observes it and the
+			// reply collector silently no-ops at every multi-intent segment.
+			result = await requestContext.run(
+				{ ...(requestContext.getStore() ?? {}), userId: ctx.userId, householdId },
+				() => app.module.handleMessage({ ...ctx, route }),
 			);
 		} catch (error) {
 			this.logger.error({ appId: app.manifest.app.id, error }, 'App message handler failed');
@@ -1029,8 +1064,16 @@ export class Router {
 
 		let result: undefined | PhotoHandlerResult;
 		try {
+			// Codex Round 1 #2: spread the outer store first so an outer
+			// replyBuffer is preserved through photo dispatch (e.g., a
+			// multi-intent segment that classifies as a photo capability).
 			result = await requestContext.run(
-				{ userId: ctx.userId, householdId, sessionId: sessionInfo?.sessionId },
+				{
+					...(requestContext.getStore() ?? {}),
+					userId: ctx.userId,
+					householdId,
+					sessionId: sessionInfo?.sessionId,
+				},
 				() => app.module.handlePhoto?.({ ...ctx, route }),
 			);
 		} catch (error) {
@@ -1096,8 +1139,17 @@ export class Router {
 		const { sessionKey, sessionId } = await this.resolveSession(ctx.userId);
 		const enrichedCtx: MessageContext = { ...ctx, route, sessionKey, sessionId };
 		try {
-			await requestContext.run({ userId: ctx.userId, householdId, sessionId }, () =>
-				this.conversationService?.handleMessage(enrichedCtx),
+			// Codex Round 1 #2: spread the outer store first so an outer
+			// replyBuffer is preserved through conversation dispatch (e.g., a
+			// multi-intent segment that falls through to the chatbot fallback).
+			await requestContext.run(
+				{
+					...(requestContext.getStore() ?? {}),
+					userId: ctx.userId,
+					householdId,
+					sessionId,
+				},
+				() => this.conversationService?.handleMessage(enrichedCtx),
 			);
 		} catch (error) {
 			this.logger.error({ error }, 'ConversationService handler failed');
