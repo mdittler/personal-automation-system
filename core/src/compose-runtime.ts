@@ -143,6 +143,7 @@ import { createPendingSettingsConfirmStore } from './services/settings/pending-s
 import { SpaceService } from './services/spaces/index.js';
 import { SystemInfoServiceImpl } from './services/system-info/index.js';
 import { createBot, createWebhookCallback } from './services/telegram/bot.js';
+import { ContextAwareTelegramService } from './services/telegram/context-aware.js';
 import { TelegramServiceImpl } from './services/telegram/index.js';
 import {
 	adaptPhotoMessage,
@@ -499,6 +500,21 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		});
 	}
 
+	// 6b. Context-aware Telegram wrapper (Reply-Collector "Option B").
+	//
+	// Apps receive this wrapper through `coreServices.telegram` so per-app
+	// `send(...)` calls route through `requestContext.getStore()?.replyBuffer`
+	// when one is in scope (during `Router.tryMultiIntentSplit`). When no
+	// buffer is in scope, the wrapper is a transparent delegate to the real
+	// transport.
+	//
+	// Router, ReportService, AlertService, the AppOutboundBridge, and every
+	// other infrastructure consumer keeps the REAL `telegramService` handle so
+	// that their sends (the preamble, error notices, scheduled reports, etc.)
+	// never enter the buffer. Codex Round 1 #3: the buffer's `inner` MUST be
+	// the real handle, never the wrapper, or final flush re-enters the buffer.
+	const contextAwareTelegram: TelegramService = new ContextAwareTelegramService(telegramService);
+
 	// 8. App Toggle Store (per-user app enable/disable overrides)
 	const appToggle = new AppToggleStore({
 		dataDir: config.dataDir,
@@ -802,7 +818,11 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		const secrets = new SecretsServiceImpl({ values: secretValues });
 
 		return {
-			telegram: declaredServices.has('telegram') ? telegramService : undefined,
+			// Apps consume the context-aware wrapper so multi-intent dispatch
+			// can buffer plain `send(...)` calls via the request-scoped
+			// `replyBuffer`. Infrastructure consumers (Router, Report/Alert,
+			// AppOutboundBridge) keep the real `telegramService` handle.
+			telegram: declaredServices.has('telegram') ? contextAwareTelegram : undefined,
 			llm: appLlm,
 			data: declaredServices.has('data-store') ? dataStore : undefined,
 			scheduler: declaredServices.has('scheduler') ? scheduler : undefined,
