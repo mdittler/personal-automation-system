@@ -633,6 +633,51 @@ describe('hosting-planner', () => {
 			expect(services.llm.complete).toHaveBeenCalledTimes(1);
 		});
 
+		it('named-guests rescue: count 0 + 2 names renders "2 guests", not "0 guests"', async () => {
+			// ParsedEvent has guestCount:0 but 2 named guests — predicate accepts
+			// (rescue), and the rendered plan must use the names count, not the
+			// raw 0. Regression for Codex Round 2 finding 1.
+			const services = createMockServices([
+				// parseEventDescription — degenerate count 0 rescued by named guests
+				JSON.stringify({
+					guestCount: 0,
+					eventTime: 'Saturday 7pm',
+					guestNames: ['Sarah', 'Tom'],
+					dietaryNotes: '',
+					description: 'dinner with Sarah and Tom Saturday at 7pm',
+				}),
+				// suggestEventMenu
+				JSON.stringify([
+					{ recipeTitle: 'Pasta', recipeId: 'recipe-1', scaledServings: 2, dietaryNotes: [] },
+				]),
+				// generatePrepTimeline
+				JSON.stringify([{ time: 'T-2h', task: 'Start cooking' }]),
+			]);
+
+			const result = await planEvent(
+				services as never,
+				'dinner with Sarah and Tom Saturday',
+				[],
+				[makeRecipe()],
+				[],
+			);
+
+			expect(result.kind).toBe('plan');
+			if (result.kind !== 'plan') throw new Error('expected plan');
+			expect(result.plan.guestCount).toBe(2);
+
+			// suggestEventMenu was called with effectiveGuestCount === 2
+			// (second LLM call's prompt mentions "2 guests")
+			const menuPrompt = services.llm.complete.mock.calls[1]![0] as string;
+			expect(menuPrompt).toContain('menu for 2 guests');
+			expect(menuPrompt).not.toContain('menu for 0 guests');
+
+			// And the formatted output renders "2 guests", not "0 guests"
+			const formatted = formatEventPlan(result.plan);
+			expect(formatted).toContain('2 guests');
+			expect(formatted).not.toContain('0 guests');
+		});
+
 		it('passes a valid parse through to the full planning pipeline', async () => {
 			const services = createMockServices([
 				// parseEventDescription — valid

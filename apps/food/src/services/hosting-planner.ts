@@ -268,6 +268,23 @@ export async function planEvent(
 		return { kind: 'declined', reason: 'not-an-event' };
 	}
 
+	// Derive the effective guest count once. When ParsedEvent has a valid
+	// guestCount in (0, MAX_GUEST_COUNT], use it; otherwise fall back to the
+	// named-guests rescue (isDegenerateEvent guarantees guestNames is non-empty
+	// in that branch). Without this, a rescue parse like {guestCount: 0,
+	// guestNames: ['Sarah','Tom']} would pass 0 to suggestEventMenu and render
+	// "0 guests" in the final plan. Do not mutate `parsed` — it stays as the
+	// raw untrusted LLM output.
+	const effectiveGuestCount =
+		typeof parsed.guestCount === 'number' &&
+		Number.isFinite(parsed.guestCount) &&
+		parsed.guestCount > 0 &&
+		parsed.guestCount <= MAX_GUEST_COUNT
+			? parsed.guestCount
+			: Array.isArray(parsed.guestNames)
+				? parsed.guestNames.length
+				: 0;
+
 	// Step 2: Match named guests to profiles
 	const matchedGuests: GuestProfile[] = [];
 	for (const name of parsed.guestNames) {
@@ -276,7 +293,7 @@ export async function planEvent(
 	}
 
 	// Step 3: Suggest menu considering guest restrictions
-	const menu = await suggestEventMenu(services, parsed.guestCount, matchedGuests, recipes);
+	const menu = await suggestEventMenu(services, effectiveGuestCount, matchedGuests, recipes);
 
 	// Step 4: Generate prep timeline — graceful degradation on LLM failure
 	let prepTimeline: PrepTimelineStep[] = [];
@@ -294,7 +311,7 @@ export async function planEvent(
 	const plan: EventPlan = {
 		description: parsed.description,
 		eventTime: parsed.eventTime,
-		guestCount: parsed.guestCount,
+		guestCount: effectiveGuestCount,
 		guests: matchedGuests,
 		menu,
 		prepTimeline,
