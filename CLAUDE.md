@@ -10,7 +10,7 @@ A local-first home automation platform where users interact through a single Tel
 
 ### Runtime & Monorepo
 - **Node.js 22 LTS + TypeScript 5.x**, ESM only, `strict: true`
-- **pnpm workspaces** — `core/` is infrastructure (published as the `@pas/core` workspace package), `apps/*` are plugins that depend on it via TypeScript project references
+- **pnpm workspaces** — `core/` is infrastructure, `apps/*` are plugins. Path aliases: `@core/*` → `core/src/*`
 - **Single process** — all apps in one Node.js process (target: Mac Mini with 32GB RAM)
 - **Developer commands**: `pnpm dev`, `pnpm build`, `pnpm lint`, `pnpm test`, `pnpm scaffold-app --name=<app>`, `pnpm install-app <git-url>`
 
@@ -53,7 +53,7 @@ App system patterns (manifests, distribution, install-time trust model, message 
 
 ### File Naming & Imports
 - Lowercase with hyphens: `scoped-store.ts`. Tests: `__tests__/<name>.test.ts`
-- ESM imports with `.js` extension. Apps import types from `@pas/core/types`, receive services via `CoreServices` in `init()`
+- ESM imports with `.js` extension. Apps import types from `@core/types`, receive services via `CoreServices` in `init()`
 
 ### Error Handling & Logging
 - App failures caught and logged — never crash the system
