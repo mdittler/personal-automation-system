@@ -438,11 +438,14 @@ export class Router {
 	}
 
 	/**
-	 * Hot-update the multi-intent-split kill switch without restart. Mirrors the
-	 * `setIdleMinutes` setter pattern. Compose-runtime wires this into the
-	 * SettingsWriter post-write hook (same as `chat.sessions.auto_reset_idle_minutes`)
-	 * if/when operators want to flip the feature live; today it is restart-required
-	 * via the SettingDef and this setter is invoked only from tests.
+	 * Test-only setter for the multi-intent-split kill switch. Production toggles
+	 * happen via the `routing.multi_intent_split` config key (see
+	 * `settings-metadata.ts`, which marks the def `restartRequired: true`); there
+	 * is no SettingsWriter post-write hook wiring this setter to a live config
+	 * write today. This entry point exists so router-multi-intent tests can flip
+	 * the gate without rebuilding the Router. Do not call from production code —
+	 * if/when operators need a live toggle, add a post-write hook in
+	 * compose-runtime and flip `restartRequired` to `false`.
 	 */
 	setMultiIntentSplit(value: boolean): void {
 		this.multiIntentSplit = value;

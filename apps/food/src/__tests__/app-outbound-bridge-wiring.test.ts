@@ -410,10 +410,15 @@ async function makeRealBridgeEnv(): Promise<RealBridgeEnv> {
 		if (turns.length < 2) {
 			throw new Error(`expected ≥2 turns, found ${turns.length}`);
 		}
-		// Take the most recent user/assistant pair (last two turns).
-		const userTurn = turns[turns.length - 2]!.content;
-		const assistantTurn = turns[turns.length - 1]!.content;
-		return { userTurn, assistantTurn };
+		// Take the most recent user/assistant pair (last two turns). The
+		// length-≥2 guard above makes both lookups defined; explicit guards
+		// keep the test type-safe without leaning on non-null assertions.
+		const userTurnEntry = turns[turns.length - 2];
+		const assistantTurnEntry = turns[turns.length - 1];
+		if (!userTurnEntry || !assistantTurnEntry) {
+			throw new Error(`unexpected: turn lookup returned undefined despite length=${turns.length}`);
+		}
+		return { userTurn: userTurnEntry.content, assistantTurn: assistantTurnEntry.content };
 	}
 
 	return {

@@ -413,7 +413,7 @@ The user controls visibility via the `chat.app_message_bridge_enabled` setting
 (default ON). Do not gate your own delivery on the bridge; just call it.
 
 **Pair the send and the bridge call.**
-Two separate calls (`telegram.send` then `appOutboundBridge.recordOutboundMessage`) is fragile — the next person adding a proactive message forgets the second one. Wrap the pair in one helper per app and route every proactive send through it.
+Two separate calls (`telegram.send` then `appOutboundBridge.recordOutboundMessage`) is fragile — the next person adding a proactive message forgets the second one. Wrap the pair in one helper per app and route every proactive send through it. The static guard below catches a forgotten helper in the **listed entrypoints**, not across arbitrary indirection — so the convention is "every proactive entrypoint goes through the helper", and you register the entrypoint name in the guard's `PROACTIVE_ENTRYPOINTS` set so the scanner can enforce it.
 
 The Food app's `sendProactiveMessage` is the reference implementation:
 ```typescript
@@ -438,15 +438,16 @@ Properties enforced by the helper:
 - **Raw body passthrough** — the body sent to Telegram is byte-identical to the body sent to the bridge. The bridge owns sanitization.
 - **Return value preserved** — `SentMessage` is returned for the buttons path so callers needing `messageId` (callback resolution, message editing) keep working.
 
-Apps with proactive sends SHOULD provide an equivalent `proactive-message.ts` wrapper and a static guard test (next subsection) so a future un-bridged proactive send fails CI.
+Apps with proactive sends SHOULD provide an equivalent `proactive-message.ts` wrapper and a static guard test (next subsection) so a future un-bridged proactive send in a **registered entrypoint** fails CI.
 
-**Automated guard.**
-Pair the helper with a build-failing static guard so a developer who forgets to use the helper fails CI immediately. The Food app's guard is `apps/food/src/__tests__/proactive-send-guard.test.ts`, backed by the AST scanner `apps/food/src/testing/proactive-send-scan.ts`:
+**Automated guard (with known scope limits).**
+Pair the helper with a build-failing static guard so a developer who forgets to use the helper in a registered proactive entrypoint fails CI immediately. The Food app's guard is `apps/food/src/__tests__/proactive-send-guard.test.ts`, backed by the AST scanner `apps/food/src/testing/proactive-send-scan.ts`:
 
 - Maintain a `PROACTIVE_ENTRYPOINTS` set of function names that are allowed to perform proactive Telegram sends.
-- The scanner walks each `.ts` file (excluding `__tests__/`, `testing/`, and the helper itself), parses with the TypeScript compiler API, and flags any `*.telegram.send` / `*.telegram.sendWithButtons` call whose immediate enclosing function name is in `PROACTIVE_ENTRYPOINTS` (since after migration, those should ALL go through the helper).
+- The scanner walks each `.ts` file (excluding `__tests__/`, `testing/`, and the helper itself), parses with the TypeScript compiler API, and flags any `*.telegram.send` / `*.telegram.sendWithButtons` call whose **immediate enclosing function name** is in `PROACTIVE_ENTRYPOINTS`.
+- **Scope limit (be honest about it):** the scanner only inspects the immediate enclosing function — it does not build a transitive call graph. A raw `telegram.send` inside a brand-new helper called *from* a proactive entrypoint will slip past the guard unless you also add that helper's name to `PROACTIVE_ENTRYPOINTS`. The follow-up call-graph upgrade (Strategy B) is tracked in `docs/open-items.md` under "Stricter call-graph-based proactive-send guard (2026-05-22)".
 - On failure the test emits a message naming the offending file/function/line and pointing the developer at the helper and this document.
-- Adding a new proactive job means either (a) routing the send through the helper, or (b) explicitly adding the new entrypoint name to `PROACTIVE_ENTRYPOINTS` and routing it through the helper. The set is the deliberate audit point.
+- Adding a new proactive job means: (a) routing the send through the helper, and (b) **adding every entrypoint and intermediate helper name to `PROACTIVE_ENTRYPOINTS`** so the scanner can see the send site. The set is the deliberate audit point — keep it complete or the guard silently weakens.
 
 **When NOT to call it:**
 
