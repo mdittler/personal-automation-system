@@ -117,7 +117,6 @@ describe('BufferingTelegramProxy — rich sends flush + pass through (REQ-ROUTE-
 		const { inner, calls } = makeInnerStub();
 		const proxy = new BufferingTelegramProxy({ inner, maxLength: 4000 });
 		await proxy.send('u1', 'pending text');
-		// Codex Round 1 #9: InlineButton uses `callbackData`, not `callback_data`.
 		const buttons: InlineButton[][] = [[{ text: 'Yes', callbackData: 'y' }]];
 		const result = await proxy.sendWithButtons('u1', 'Confirm?', buttons);
 		expect(calls).toHaveLength(2);

@@ -37,8 +37,6 @@ interface FnNode {
 	id: FnId;
 	name: string;
 	file: string;
-	declStart: number;
-	declEnd: number;
 	source: ts.SourceFile;
 	declaration: ts.Node;
 }
@@ -108,8 +106,6 @@ function tryExtractFn(node: ts.Node, sf: ts.SourceFile): FnNode | undefined {
 			id: `${sf.fileName}#${node.getStart(sf)}`,
 			name: node.name.text,
 			file: sf.fileName,
-			declStart: node.getStart(sf),
-			declEnd: node.getEnd(),
 			source: sf,
 			declaration: node,
 		};
@@ -120,8 +116,6 @@ function tryExtractFn(node: ts.Node, sf: ts.SourceFile): FnNode | undefined {
 			id: `${sf.fileName}#${node.getStart(sf)}`,
 			name: node.name.text,
 			file: sf.fileName,
-			declStart: node.getStart(sf),
-			declEnd: node.getEnd(),
 			source: sf,
 			declaration: node,
 		};
@@ -134,8 +128,6 @@ function tryExtractFn(node: ts.Node, sf: ts.SourceFile): FnNode | undefined {
 				id: `${sf.fileName}#${init.getStart(sf)}`,
 				name: node.name.text,
 				file: sf.fileName,
-				declStart: init.getStart(sf),
-				declEnd: init.getEnd(),
 				source: sf,
 				declaration: init,
 			};
@@ -151,8 +143,6 @@ function tryExtractFn(node: ts.Node, sf: ts.SourceFile): FnNode | undefined {
 				id: `${sf.fileName}#${init.getStart(sf)}`,
 				name,
 				file: sf.fileName,
-				declStart: init.getStart(sf),
-				declEnd: init.getEnd(),
 				source: sf,
 				declaration: init,
 			};

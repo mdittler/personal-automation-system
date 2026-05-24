@@ -13,7 +13,6 @@
  * scope) can do so deterministically. A buffer that wrapped this wrapper
  * would loop infinitely on flush.
  *
- * Codex Round 1 #1: AsyncLocalStorage API is `getStore()` — not `get()`.
  * Codex Round 1 #10: `editMessage` ALWAYS goes straight to the real transport
  *                    (REQ-ROUTE-019b).
  */
