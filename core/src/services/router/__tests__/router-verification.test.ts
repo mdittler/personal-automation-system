@@ -6,7 +6,7 @@
  */
 
 import type { Logger } from 'pino';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, test, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import type { AppModule } from '../../../types/app-module.js';
 import type { SystemConfig } from '../../../types/config.js';
@@ -1065,6 +1065,122 @@ describe('alwaysVerifyIntents — force verify above the upper bound', () => {
 		expect(verifier.verify).not.toHaveBeenCalled();
 		expect(groceryModule.handlePhoto).toHaveBeenCalledOnce();
 	});
+});
+
+// ---------------------------------------------------------------------------
+// Codex Round 2 finding 3 — deterministic invite-platform redirect.
+//
+// The LLM-backed regression case (`pas-invite-platform-positive`) asserts
+// `pasRelated:true` against the live classifier. That's necessary but
+// asymmetric: it does not prove that, IF a future classifier emits the
+// bug-shaped match (HOSTING_MEAL_PLANNING_INTENT at high confidence), the
+// router's always-verify gate + verifier path actually rescue the message
+// from Food and hand it to the chatbot. This block proves exactly that, with
+// no LLM in the loop:
+//
+//   1. classifier returns HOSTING_MEAL_PLANNING_INTENT @ 0.85 (above upper
+//      bound — the bug scenario from before Task 3.3 wired the gate).
+//   2. alwaysVerifyIntents contains the hosting intent (Task 3.2 default →
+//      Task 3.3 gate consults verifier despite high confidence).
+//   3. verifier picks 'chatbot' (the production behavior for these phrasings
+//      once route-verifier reads the classifier output and the user's text).
+//
+// Assertion: ConversationService.handleMessage is called (chatbot path),
+// food's handleMessage is NOT (food-hosting path is bypassed).
+// ---------------------------------------------------------------------------
+
+describe('invite-platform routing — deterministic gate (Codex R2 F3)', () => {
+	// Mirror the production manifest's hosting intent string. Imported via the
+	// canonical Food constant so a future rename can't desynchronize this test.
+	const HOSTING_INTENT =
+		'user wants to plan a meal or menu for a dinner party or guests they are hosting';
+
+	const platformInvitePhrasings = [
+		'Can you tell me about inviting people?',
+		'how do I invite someone to PAS',
+		'how do invite codes work',
+		'add a new user to the platform',
+		'invite my wife to use this',
+	];
+
+	const foodManifest: AppManifest = {
+		app: { id: 'food', name: 'Food', version: '1.0.0', description: 'Food', author: 'Test' },
+		capabilities: { messages: { intents: [HOSTING_INTENT] } },
+	};
+
+	const testUser = {
+		id: 'user1',
+		name: 'Test',
+		isAdmin: true,
+		enabledApps: ['*'] as string[],
+		sharedScopes: [] as string[],
+	};
+
+	// One test per phrasing: each user-typed invite-platform sentence, when
+	// shoved through the bug-shaped classifier verdict, MUST be force-verified
+	// and redirected to the chatbot, NOT dispatched to Food hosting.
+	test.each(platformInvitePhrasings)(
+		'verifier-mediated redirect — "%s" → chatbot, NOT food',
+		async (phrase) => {
+			const foodModule = createMockModule();
+			// Bug-shaped classifier verdict: high-confidence hosting match.
+			const bugShapedLlm = createMockLLM({
+				category: HOSTING_INTENT,
+				confidence: 0.85,
+			});
+			// Verifier rescues to chatbot — the post-Task-3.3 production behavior.
+			const verifier = createMockVerifier({
+				action: 'route',
+				appId: 'chatbot',
+				intent: 'chatbot',
+				confidence: 0.85,
+				verifierStatus: 'degraded',
+			});
+			const conversationService = { handleMessage: vi.fn().mockResolvedValue(undefined) };
+
+			const config = createMockConfig([testUser]);
+			const cache = new ManifestCache();
+			cache.add(foodManifest, '/apps/food');
+			const registry = {
+				getApp: (id: string) => {
+					if (id === 'food')
+						return {
+							manifest: foodManifest,
+							module: foodModule,
+							appDir: '/apps/food',
+						} as RegisteredApp;
+					return undefined;
+				},
+				getManifestCache: () => cache,
+				getLoadedAppIds: () => ['food'],
+			} as unknown as AppRegistry;
+
+			const router = new Router({
+				registry,
+				llm: bugShapedLlm,
+				telegram: createMockTelegram(),
+				fallback: createMockFallback(),
+				config,
+				logger: createMockLogger(),
+				confidenceThreshold: 0.4,
+				routeVerifier: verifier,
+				// Task 3.2's default — hosting intent is in the always-verify list,
+				// which (per Task 3.3) forces verification despite confidence > UB.
+				alwaysVerifyIntents: [HOSTING_INTENT],
+				conversationService: conversationService as never,
+			});
+			router.buildRoutingTables();
+
+			await router.routeMessage(createTextCtx(phrase, 'user1'));
+
+			// (a) Verifier WAS consulted (always-verify gate fired despite 0.85 > UB).
+			expect(verifier.verify).toHaveBeenCalledOnce();
+			// (b) Chatbot got the message.
+			expect(conversationService.handleMessage).toHaveBeenCalledOnce();
+			// (c) Food hosting handler did NOT — this is the bug we are guarding.
+			expect(foodModule.handleMessage).not.toHaveBeenCalled();
+		},
+	);
 });
 
 describe('Router.dispatchConversation — public error isolation (rv:chatbot regression)', () => {
