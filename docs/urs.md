@@ -5513,6 +5513,89 @@ Both `buildSystemPrompt` and `buildAppAwareSystemPrompt` MUST include `PHOTO_SUM
 
 ---
 
+## Phase 2026-05-24 — Classifier + Reply-Collector + Call-Graph Guard
+
+Closes three deferred items from `docs/open-items.md` in one focused phase. Deliverable 1 (entries below) ships the PAS-classifier `PLATFORM_INVITE_RE` prefilter + LLM few-shot examples so the chatbot's PAS-aware prompt path engages for platform-invite questions. Deliverable 2 (reply-collector) and Deliverable 3 (Strategy B call-graph guard) land in subsequent commits in this same phase.
+
+### REQ-CONV-PAS-CLASSIFY — PAS classifier platform-invite recognition
+
+#### REQ-CONV-PAS-CLASSIFY-001: `PLATFORM_INVITE_RE` deterministic prefilter accepts platform-invite phrasings
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`PLATFORM_INVITE_RE` short-circuits the LLM path for platform-invite phrasings ("how do I invite someone to PAS", "add a new user to the platform", "give my kids access", etc.) and returns `{pasRelated: true}` deterministically — no `dataQueryCandidate`, no `settingsCandidate`. The regex is composed from a typed `PLATFORM_INVITE_PATTERNS` array of 11 branches; every branch requires an explicit PAS / platform / access / user-management anchor. Inserted at the tail of `PREFILTERS` after `PAS_META_RE` so the deterministic-prefilter ordering is unchanged for non-invite phrasings. Closes the 2026-05-24 Accepted Risk where Gemma 4 31B (and Haiku 4.5) mis-classified all 7 regression-case phrasings as `NO_PAS`.
+
+**Standard tests** (`pas-classifier.platform-invite.test.ts`):
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "Can you tell me about inviting people?" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "how do I invite someone to PAS" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "how do invite codes work" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "add a new user to the platform" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "invite my wife to use this" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "how do I add my partner" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "can I give my kids access" → pasRelated:true via prefilter, no LLM call`
+
+**Edge case tests** (`pas-classifier.platform-invite.test.ts`):
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > prefilter is case-insensitive`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > prefilter does not set dataQueryCandidate or settingsCandidate`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > handles surrounding punctuation`
+
+#### REQ-CONV-PAS-CLASSIFY-002: `PLATFORM_INVITE_RE` does not collide with food-hosting or generic-invite phrasings
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+Each branch of `PLATFORM_INVITE_PATTERNS` requires an explicit PAS/platform/access/relationship anchor — Codex Round 1 finding #6. Generic invite phrasings ("invite my friends to a concert", "inviting people to dinner", "inviting people to a birthday party", "inviting users to my party", "add a new user to the test database", "how do I register a new user in postgres"), food-hosting phrasings ("hosting a dinner party next Saturday", "we're having 8 people over for dinner", "planning a dinner for guests"), and generic conversational ("what's the weather like", "tell me a joke") all flow through to the LLM path instead of short-circuiting on the prefilter.
+
+**Standard tests** (`pas-classifier.platform-invite.test.ts`):
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "hosting a dinner party next Saturday" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "we're having 8 people over for dinner" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "planning a dinner for guests" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "what's the weather like" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "tell me a joke" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "I want to invite my friends to a concert" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "who invites the band on Saturday Night Live" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "inviting people to dinner" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "inviting people to a birthday party" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "inviting people to a concert" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "inviting users to my party" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "add a new user to the test database" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "how do I register a new user in postgres" → no prefilter short-circuit, LLM is called`
+
+#### REQ-CONV-PAS-CLASSIFY-003: LLM few-shot examples cover invite/access paraphrases
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The `systemPrompt` template advertises "inviting people to use the platform (invite codes, adding users, granting access to household members)" in the PAS-topics list and includes three positive mappings (`"let my husband sign in too"`, `"add a new user"`, `"give my kids access"` → `YES_PAS NO_SETTINGS NO_DATA`) plus one negative counter-example (`"invite my friends to a dinner party"` → `NO_PAS`). This is the backstop for paraphrases `PLATFORM_INVITE_RE` does not catch — the LLM learns the disambiguator is the platform/user/access anchor, not the word "invite" alone. Prompt-length compactness assertion (< 2000 chars) continues to hold.
+
+**Standard tests** (`pas-classifier.test.ts`):
+- `PAS classifier — invite/access few-shot examples > prompt contains at least one platform-invite few-shot mapping → YES_PAS`
+- `PAS classifier — invite/access few-shot examples > prompt contains a generic-invite NO_PAS counter-example`
+
+**Edge case tests** (`pas-classifier.test.ts`):
+- `classifyPASMessage > classifier prompt is compact (no large app metadata blocks)` (prompt length cap regression guard — < 2000 chars after few-shot additions)
+
+#### REQ-CONV-PAS-CLASSIFY-004: `pas-invite-platform-positive` regression case passes deterministically
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The persona regression case `pas-invite-platform-positive` (`regression/src/cases/routing/pas/invite-platform.case.ts`) flips from FAIL → PASS via the `PLATFORM_INVITE_RE` prefilter — all 7 inputs return `{pasRelated: true}` deterministically with `costUsd: 0` and `tokenCounts.{input, output}: 0` (no LLM dispatch). Verified 2026-05-24 via `pnpm test:regression -- --rerun=pas-invite-platform-positive --no-manifest --json`: `verdict: pass`, `source: fresh`, 7 of 7 oracleVerdicts `pass`.
+
+**Standard tests:**
+- `regression/src/cases/routing/pas/invite-platform.case.ts` (persona regression case, validated under REQ-REG-011 routing-accuracy gate)
+
+#### REQ-CONV-PAS-CLASSIFY-005: Food shadow-classifier still rejects platform-invite phrasings
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The three new regression-case phrasings the PAS classifier now accepts ("can I give my kids access", "how do I add my partner", "invite my wife to use this") are added to `HOSTING_MEAL_PLANNING_INTENT`'s `deterministicRejectFor` block in `shadow-classifier.personas.ts` with `correctLabel: 'none'`. Belt-and-suspenders against future intent-wording drift — proves the PAS-side fix does not regress Food's side of the boundary. Existing 123 shadow-classifier tests continue to pass alongside the 4 new platform-invite tests.
+
+**Standard tests** (`shadow-classifier-platform-invite.test.ts`):
+- `Food shadow-classifier — platform-invite phrasings stay rejected > hosting persona exists`
+- `Food shadow-classifier — platform-invite phrasings stay rejected > deterministicRejectFor includes "can I give my kids access" with correctLabel="none"`
+- `Food shadow-classifier — platform-invite phrasings stay rejected > deterministicRejectFor includes "how do I add my partner" with correctLabel="none"`
+- `Food shadow-classifier — platform-invite phrasings stay rejected > deterministicRejectFor includes "invite my wife to use this" with correctLabel="none"`
+
+---
+
 ## App-Message Memory Bridge (2026-05-18)
 
 ### REQ-CONV-APP-BRIDGE — App-Message Memory Bridge
@@ -12295,5 +12378,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-ROUTE-014 | message-segmenter.test.ts, router-multi-intent.persona.test.ts | 8 | 7 | Implemented |
 | REQ-ROUTE-015 | router-multi-intent.test.ts, router-multi-intent.persona.test.ts | 0 | 6 | Implemented |
 | REQ-ROUTE-016 | router-multi-intent.test.ts, config.test.ts, pas-yaml-schema.test.ts, settings-metadata.test.ts, system-config-writer.test.ts | 13 | 6 | Implemented |
+| REQ-CONV-PAS-CLASSIFY-001 | pas-classifier.platform-invite.test.ts | 7 | 3 | Implemented |
+| REQ-CONV-PAS-CLASSIFY-002 | pas-classifier.platform-invite.test.ts | 13 | 0 | Implemented |
+| REQ-CONV-PAS-CLASSIFY-003 | pas-classifier.test.ts | 2 | 0 | Implemented |
+| REQ-CONV-PAS-CLASSIFY-004 | regression/src/cases/routing/pas/invite-platform.case.ts | 1 | 0 | Implemented |
+| REQ-CONV-PAS-CLASSIFY-005 | shadow-classifier-platform-invite.test.ts | 4 | 0 | Implemented |
 
-| **Totals** | **394 test files** | **2736** | **2733** | **5469 tests** |
+| **Totals** | **396 test files** | **2763** | **2736** | **5499 tests** |
