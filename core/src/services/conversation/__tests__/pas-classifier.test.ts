@@ -386,3 +386,35 @@ describe('classifyPASMessage pre-filter (deterministic price/receipt detection)'
 		expect(systemPrompt).toMatch(/change my fast model|set my timezone|installed apps/i);
 	});
 });
+
+describe('PAS classifier — invite/access few-shot examples', () => {
+	// REQ-CONV-PAS-CLASSIFY-003. The LLM is the backup path for paraphrases
+	// that PLATFORM_INVITE_RE doesn't catch (e.g., "let my husband sign in
+	// too"). Few-shot examples in the system prompt steer fast-tier models
+	// toward YES_PAS for invite/access topics.
+
+	it('prompt contains at least one platform-invite few-shot mapping → YES_PAS', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO_PAS');
+		// Use a phrasing the prefilter won't catch so the LLM path runs.
+		await classifyPASMessage('how do I get my wife on this', services);
+		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
+		const prompt = (callArgs?.[1]?.systemPrompt ?? '') as string;
+		// Look for at least one invite/access pattern explicitly mapping to YES_PAS.
+		expect(prompt).toMatch(
+			/(invite\s+(?:my|someone|users?|people)|add\s+(?:a\s+)?(?:new\s+)?user|give\s+\w+\s+access).*YES_PAS/is,
+		);
+	});
+
+	it('prompt contains a generic-invite NO_PAS counter-example', async () => {
+		const services = createMockCoreServices();
+		vi.mocked(services.llm.complete).mockResolvedValueOnce('NO_PAS');
+		await classifyPASMessage('how do I get my wife on this', services);
+		const callArgs = vi.mocked(services.llm.complete).mock.calls[0];
+		const prompt = (callArgs?.[1]?.systemPrompt ?? '') as string;
+		// Counter-example: "invite my friends to dinner" must map to NO_PAS so
+		// the LLM understands the disambiguator is the platform/user/access
+		// anchor, not the word "invite" by itself.
+		expect(prompt).toMatch(/invite.*(friends|concert|dinner).*NO_PAS/is);
+	});
+});
