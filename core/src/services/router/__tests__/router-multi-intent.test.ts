@@ -390,6 +390,66 @@ describe('Router — multi-intent split (Task 4.3/4.4)', () => {
 		expect(built.groceryModule.handleMessage).toHaveBeenCalledTimes(1);
 	});
 
+	it('integration: segment 1 routes to an app whose handleMessage throws — segment 2 still runs', async () => {
+		// Codex Round 2 finding 7 — the patched-routeOneTextRequest test above
+		// proves the per-segment catch in tryMultiIntentSplit; this test proves
+		// the REAL dispatch path also recovers when an app's handleMessage
+		// throws inside dispatchMessage. The error is caught by dispatchMessage,
+		// which sends a "Something went wrong" reply but does NOT re-throw, so
+		// the loop in tryMultiIntentSplit proceeds to segment 2 normally.
+		const segA = 'echo this back';
+		const segB = 'add milk to list';
+
+		// Build two REAL-ish app modules; app-a's handleMessage throws.
+		const throwingEchoModule: AppModule = {
+			init: vi.fn().mockResolvedValue(undefined),
+			handleMessage: vi.fn().mockRejectedValue(new Error('boom: real handleMessage failed')),
+			handleCommand: vi.fn().mockResolvedValue(undefined),
+			handlePhoto: vi.fn().mockResolvedValue(undefined),
+		};
+		const recordingGroceryModule: AppModule = {
+			init: vi.fn().mockResolvedValue(undefined),
+			handleMessage: vi.fn().mockResolvedValue(undefined),
+			handleCommand: vi.fn().mockResolvedValue(undefined),
+			handlePhoto: vi.fn().mockResolvedValue(undefined),
+		};
+
+		const built = buildRouter({
+			preFilter: vi.fn(() => true),
+			segment: vi.fn(async () => [segA, segB]),
+			// Both segments classify — segment 1 → echo (which throws), segment 2 → grocery.
+			classifyResults: [
+				{ appId: 'echo', intent: 'echo something back to the user', confidence: 0.95 },
+				{ appId: 'grocery', intent: 'add an item to the grocery list', confidence: 0.95 },
+			],
+			apps: [
+				{ manifest: echoManifest, module: throwingEchoModule },
+				{ manifest: groceryManifest, module: recordingGroceryModule },
+			],
+		});
+
+		await built.router.routeMessage(createTextCtx(`${segA} Also, ${segB}`));
+
+		// 1. app-a's REAL handleMessage was invoked AND threw (proof we exercised
+		//    the real dispatch path, not a stubbed routeOneTextRequest).
+		expect(throwingEchoModule.handleMessage).toHaveBeenCalledTimes(1);
+		// 2. app-b ran to completion — proves the run-loop did NOT abort on the
+		//    real handler throw.
+		expect(recordingGroceryModule.handleMessage).toHaveBeenCalledTimes(1);
+		// 3. Telegram sees three sends:
+		//    - 1 preamble ("Got it — I'll cover all of those:")
+		//    - 1 dispatchMessage error reply ("Something went wrong. Please try again later.")
+		//    - 0 per-segment apology (dispatchMessage swallowed the throw, so
+		//      tryMultiIntentSplit's per-segment catch doesn't fire here)
+		//    Note: app-b's handler resolves silently, so it adds no send of its own.
+		expect(built.telegram.send).toHaveBeenCalledWith('u1', "Got it — I'll cover all of those:");
+		expect(built.telegram.send).toHaveBeenCalledWith(
+			'u1',
+			'Something went wrong. Please try again later.',
+		);
+		expect(built.telegram.send).toHaveBeenCalledTimes(2);
+	});
+
 	it('segmenter throws: degrade to single dispatch (no preamble, single-message path runs)', async () => {
 		const built = buildRouter({
 			preFilter: vi.fn(() => true),

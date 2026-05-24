@@ -42,6 +42,93 @@ const MIN_MULTI_INTENT_LENGTH = 25;
 const MAX_RECONSTRUCT_RATIO = 1.5;
 
 /**
+ * Anti-hallucination token-coverage floor (Codex Round 2 finding 8). The
+ * length-ratio cap above only catches verbose hallucinations; a SHORT
+ * hallucinated segment (e.g. "weather forecast?" injected into a dinner +
+ * dentist message) slips under the cap. This floor requires that at least
+ * `MIN_SEGMENT_TOKEN_COVERAGE` of each returned segment's CONTENT tokens
+ * (stopwords stripped) appear in the original message. 0.5 (50%) leaves
+ * room for natural rephrasings like "groceries" → "grocery list" that
+ * introduce one new content word per pair, while still rejecting fully
+ * invented segments (which score 0 content-token overlap). Threshold not
+ * lowered below 0.5 — at that point we'd accept arbitrary new content.
+ */
+const MIN_SEGMENT_TOKEN_COVERAGE = 0.5;
+
+/**
+ * Short connectives the LLM legitimately ADDS when paraphrasing a fragment
+ * into a complete sentence/question — e.g. "Also the calendar" →
+ * "What is on the calendar?" injects what/is/on without any hallucination.
+ * Filtering these before coverage comparison lets the guard focus on CONTENT
+ * words (the only thing the LLM should be drawing from the original message).
+ *
+ * Kept intentionally small; expanding it risks letting actual hallucinated
+ * content slip through. Lowercase only — normalization handles casing.
+ */
+const COVERAGE_STOPWORDS = new Set([
+	'am',
+	'an',
+	'and',
+	'are',
+	'as',
+	'at',
+	'be',
+	'by',
+	'can',
+	'do',
+	'does',
+	'for',
+	'from',
+	'has',
+	'have',
+	'how',
+	'if',
+	'in',
+	'is',
+	'it',
+	'me',
+	'my',
+	'of',
+	'on',
+	'or',
+	'so',
+	'that',
+	'the',
+	'then',
+	'there',
+	'these',
+	'this',
+	'those',
+	'to',
+	'up',
+	'was',
+	'were',
+	'what',
+	'when',
+	'where',
+	'who',
+	'why',
+	'will',
+	'with',
+	'would',
+	'you',
+	'your',
+]);
+
+/**
+ * Normalise a string into comparable tokens: lowercase, split on any non-
+ * alphanumeric, drop single-character tokens (catches "a", "i", stray
+ * punctuation residue). Used by the token-coverage hallucination guard so
+ * coverage comparisons ignore casing and punctuation.
+ */
+function normalizeTokens(s: string): string[] {
+	return s
+		.toLowerCase()
+		.split(/[^a-z0-9]+/)
+		.filter((t) => t.length > 1);
+}
+
+/**
  * Word-bounded continuation markers that strongly suggest multi-intent.
  *
  * Bare "and" is intentionally OMITTED — it appears in too many single-intent
@@ -187,6 +274,27 @@ export async function segmentMessage(text: string, deps: SegmenterDeps): Promise
 			'segmentMessage: reconstructed length exceeds 1.5x cap; degrading to single segment',
 		);
 		return fallback;
+	}
+
+	// Anti-hallucination: each segment's CONTENT tokens (stopwords filtered)
+	// must overlap the original message above MIN_SEGMENT_TOKEN_COVERAGE. The
+	// length cap above only catches verbose invention; a short hallucinated
+	// segment (Codex Round 2 finding 8) otherwise slips through. Segments
+	// with zero content tokens (pure stopwords / single-char chatter) are
+	// passed over here — the empty-string + length-ratio checks already
+	// rejected the pathological shapes.
+	const originalTokens = new Set(normalizeTokens(text));
+	for (const segment of cleaned) {
+		const segContentTokens = normalizeTokens(segment).filter((t) => !COVERAGE_STOPWORDS.has(t));
+		if (segContentTokens.length === 0) continue;
+		const matching = segContentTokens.filter((t) => originalTokens.has(t)).length;
+		if (matching / segContentTokens.length < MIN_SEGMENT_TOKEN_COVERAGE) {
+			deps.logger?.warn(
+				{ originalLength: text.length, segment, matching, total: segContentTokens.length },
+				'segmentMessage: segment token coverage below threshold; degrading to single segment',
+			);
+			return fallback;
+		}
 	}
 
 	// Cap at MAX_SEGMENTS by MERGING overflow into the last segment (Codex contract).

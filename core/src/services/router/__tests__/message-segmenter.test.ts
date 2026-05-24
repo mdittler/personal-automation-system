@@ -259,6 +259,32 @@ describe('segmentMessage', () => {
 		expect(result).toEqual([original]);
 	});
 
+	it('degrades to [text] when LLM returns short hallucinated segments under the length cap', async () => {
+		// Codex Round 2 finding 8: the length-only hallucination guard misses
+		// short hallucinated segments whose total length stays under the 1.5x
+		// cap. A token-coverage check rejects segments whose tokens are not
+		// predominantly drawn from the original message.
+		const text = 'what is for dinner tonight? Also, when is my next dentist appointment?';
+		const deps = makeDepsJson({
+			segments: ['weather forecast?', 'show stock prices'],
+		});
+		const result = await segmentMessage(text, deps);
+		expect(result).toEqual([text]);
+	});
+
+	it('accepts segments whose tokens are predominantly from the original', async () => {
+		// Sanity check on the coverage threshold: faithful segments whose tokens
+		// are drawn from the original must pass through unchanged.
+		const text = 'what is for dinner tonight? Also, when is my next dentist appointment?';
+		const deps = makeDepsJson({
+			segments: ['what is for dinner tonight?', 'when is my next dentist appointment?'],
+		});
+		const result = await segmentMessage(text, deps);
+		expect(result).toHaveLength(2);
+		expect(result[0]).toBe('what is for dinner tonight?');
+		expect(result[1]).toBe('when is my next dentist appointment?');
+	});
+
 	it('degrades to [text] when LLM returns null', async () => {
 		const deps = makeDeps('null');
 		const result = await segmentMessage('Some message that should not be split', deps);
