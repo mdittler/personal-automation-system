@@ -5523,7 +5523,7 @@ Closes three deferred items from `docs/open-items.md` in one focused phase. Deli
 
 **Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
 
-`PLATFORM_INVITE_RE` short-circuits the LLM path for platform-invite phrasings ("how do I invite someone to PAS", "add a new user to the platform", "give my kids access", etc.) and returns `{pasRelated: true}` deterministically — no `dataQueryCandidate`, no `settingsCandidate`. The regex is composed from a typed `PLATFORM_INVITE_PATTERNS` array of 11 branches; every branch requires an explicit PAS / platform / access / user-management anchor. Inserted at the tail of `PREFILTERS` after `PAS_META_RE` so the deterministic-prefilter ordering is unchanged for non-invite phrasings. Closes the 2026-05-24 Accepted Risk where Gemma 4 31B (and Haiku 4.5) mis-classified all 7 regression-case phrasings as `NO_PAS`.
+`PLATFORM_INVITE_RE` short-circuits the LLM path for platform-invite phrasings ("how do I invite someone to PAS", "add a new user to the platform", "give my kids access", etc.) and returns `{pasRelated: true}` deterministically — no `dataQueryCandidate`, no `settingsCandidate`. The regex is composed from a typed `PLATFORM_INVITE_PATTERNS` array of 10 entries across 8 numbered branches; every branch requires an explicit PAS / platform / access / user-management anchor. Inserted at the tail of `PREFILTERS` after `PAS_META_RE` so the deterministic-prefilter ordering is unchanged for non-invite phrasings. Closes the 2026-05-24 Accepted Risk where Gemma 4 31B (and Haiku 4.5) mis-classified all 7 regression-case phrasings as `NO_PAS`.
 
 **Standard tests** (`pas-classifier.platform-invite.test.ts`):
 - `PAS classifier — PLATFORM_INVITE_RE prefilter > "Can you tell me about inviting people?" → pasRelated:true via prefilter, no LLM call`
@@ -12551,7 +12551,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-ROUTE-016 | router-multi-intent.test.ts, config.test.ts, pas-yaml-schema.test.ts, settings-metadata.test.ts, system-config-writer.test.ts | 13 | 6 | Implemented |
 | REQ-CONV-PAS-CLASSIFY-001 | pas-classifier.platform-invite.test.ts | 7 | 3 | Implemented |
 | REQ-CONV-PAS-CLASSIFY-002 | pas-classifier.platform-invite.test.ts | 13 | 0 | Implemented |
-| REQ-CONV-PAS-CLASSIFY-003 | pas-classifier.test.ts | 2 | 0 | Implemented |
+| REQ-CONV-PAS-CLASSIFY-003 | pas-classifier.test.ts | 2 | 1 | Implemented |
 | REQ-CONV-PAS-CLASSIFY-004 | regression/src/cases/routing/pas/invite-platform.case.ts | 1 | 0 | Implemented |
 | REQ-CONV-PAS-CLASSIFY-005 | shadow-classifier-platform-invite.test.ts | 4 | 0 | Implemented |
 | REQ-ROUTE-017 | reply-buffer.test.ts, router-multi-intent.test.ts, router-multi-intent-reply-buffer.test.ts | 5 | 0 | Implemented |
@@ -12566,4 +12566,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-PROACTIVE-BRIDGE-010 | proactive-send-call-graph.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-PROACTIVE-BRIDGE-011 | proactive-send-guard.test.ts | 1 | 1 | Implemented |
 
-| **Totals** | **403 test files** | **2805** | **2751** | **5556 tests** |
+| **Totals** | **403 test files** | **2805** | **2752** | **5557 tests** |
