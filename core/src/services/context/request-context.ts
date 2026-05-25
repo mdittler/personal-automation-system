@@ -15,6 +15,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { FlushableTelegramProxy } from '../router/reply-buffer-types.js';
 
 export interface RequestContext {
 	/**
@@ -37,6 +38,23 @@ export interface RequestContext {
 	 * consumer responsibility (the ALS stores the value verbatim).
 	 */
 	sessionId?: string;
+
+	/**
+	 * Optional multi-intent reply buffer. Present only inside
+	 * `Router.tryMultiIntentSplit`. When present, the
+	 * `ContextAwareTelegramService` wrapper routes plain `send(...)` through
+	 * the buffer instead of the underlying transport; rich sends
+	 * (`sendPhoto`/`sendWithButtons`/`sendOptions`) flush the buffer first
+	 * and pass through; `editMessage` bypasses the buffer entirely (REQ-ROUTE-019b).
+	 *
+	 * See `core/src/services/router/reply-buffer.ts`.
+	 *
+	 * Codex Round 1 #2: every nested `requestContext.run(...)` site in Router
+	 * must spread the outer store first or this field is dropped before any
+	 * handler observes it. The `request-context-reply-buffer.test.ts` regression
+	 * test pins that contract.
+	 */
+	replyBuffer?: FlushableTelegramProxy;
 }
 
 export const requestContext = new AsyncLocalStorage<RequestContext>();

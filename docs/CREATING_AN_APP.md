@@ -440,14 +440,14 @@ Properties enforced by the helper:
 
 Apps with proactive sends SHOULD provide an equivalent `proactive-message.ts` wrapper and a static guard test (next subsection) so a future un-bridged proactive send in a **registered entrypoint** fails CI.
 
-**Automated guard (with known scope limits).**
-Pair the helper with a build-failing static guard so a developer who forgets to use the helper in a registered proactive entrypoint fails CI immediately. The Food app's guard is `apps/food/src/__tests__/proactive-send-guard.test.ts`, backed by the AST scanner `apps/food/src/testing/proactive-send-scan.ts`:
+**Automated guard (transitive call-graph reachability).**
+Pair the helper with a build-failing static guard so a developer who forgets to use the helper anywhere reachable from a registered proactive entrypoint fails CI immediately. The Food app's guard is `apps/food/src/__tests__/proactive-send-guard.test.ts`, backed by the call-graph scanner `apps/food/src/testing/proactive-send-call-graph.ts` (and delegated through `apps/food/src/testing/proactive-send-scan.ts`):
 
-- Maintain a `PROACTIVE_ENTRYPOINTS` set of function names that are allowed to perform proactive Telegram sends.
-- The scanner walks each `.ts` file (excluding `__tests__/`, `testing/`, and the helper itself), parses with the TypeScript compiler API, and flags any `*.telegram.send` / `*.telegram.sendWithButtons` call whose **immediate enclosing function name** is in `PROACTIVE_ENTRYPOINTS`.
-- **Scope limit (be honest about it):** the scanner only inspects the immediate enclosing function — it does not build a transitive call graph. A raw `telegram.send` inside a brand-new helper called *from* a proactive entrypoint will slip past the guard unless you also add that helper's name to `PROACTIVE_ENTRYPOINTS`. The follow-up call-graph upgrade (Strategy B) is tracked in `docs/open-items.md` under "Stricter call-graph-based proactive-send guard (2026-05-22)".
-- On failure the test emits a message naming the offending file/function/line and pointing the developer at the helper and this document.
-- Adding a new proactive job means: (a) routing the send through the helper, and (b) **adding every entrypoint and intermediate helper name to `PROACTIVE_ENTRYPOINTS`** so the scanner can see the send site. The set is the deliberate audit point — keep it complete or the guard silently weakens.
+- Maintain a `PROACTIVE_ENTRYPOINTS` set of function names that are the **semantic entrypoints** for proactive Telegram sends (typically your `handle*Job` cron handlers).
+- The scanner uses `ts.createProgram` + the TypeScript type checker to build a function-level call graph across all `.ts` files (excluding `__tests__/`, `testing/`, and the sanctioned helper at `utils/proactive-message.ts`). Cross-file imports are resolved via the checker — `checker.getAliasedSymbol(symbol)` is applied when `symbol.flags & ts.SymbolFlags.Alias` is set, so ESM `import { foo } from './bar.js'` edges are followed correctly.
+- From each name in `PROACTIVE_ENTRYPOINTS`, the scanner BFS-walks the call graph (cycle-safe via a visited Set) and flags any reachable `telegram.send` / `telegram.sendWithButtons` / `telegram.sendPhoto` / `telegram.sendOptions` call site whose enclosing function is reachable from at least one entrypoint.
+- On failure the test emits a message naming each offending file / function / line and points the developer at the helper and this document.
+- Adding a new proactive job means: (a) routing the send through the helper, and (b) adding **only the entrypoint name** to `PROACTIVE_ENTRYPOINTS`. Helpers reachable from the entrypoint are chased transitively — you no longer need to enumerate them.
 
 **When NOT to call it:**
 

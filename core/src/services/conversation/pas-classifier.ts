@@ -173,12 +173,52 @@ const SYSTEM_DATA_KEYWORDS_RE = /\b(?:system\s+logs?|scheduled\s+alerts?|model\s
 const PAS_META_RE =
 	/\b(?:installed\s+apps?|apps?\s+(?:do\s+)?i\s+have\s+installed|apps?\s+(?:are\s+)?installed)\b|\bhow\s+(?:do\s+i|to)\s+(?:install|uninstall|add|remove)\s+(?:(?:a|an|the)\s+)?(?:new\s+|another\s+)?apps?\b/i;
 
+/**
+ * Platform-invite questions — adding users to PAS, invite codes, granting
+ * platform access to household members. Closes the 2026-05-24 Accepted
+ * Risk: Gemma 4 31B (and Haiku 4.5) mis-classified all 7 regression-case
+ * phrasings as NO_PAS, so the chatbot never engaged its PAS-aware prompt
+ * to help with invite-code questions.
+ *
+ * Each branch REQUIRES an explicit PAS / platform / access / user-management
+ * anchor. "Inviting people to dinner / a concert / a birthday party" does
+ * NOT match — those are out-of-scope generic invite phrasings.
+ */
+const PLATFORM_INVITE_PATTERNS = [
+	// Branch 1: "invite (someone|people|users|members) to (PAS|the platform|this|the system)"
+	String.raw`\binvit(?:e|ing)\s+(?:someone|somebody|people|users?|members?)\s+(?:to|on(?:to)?|into)\s+(?:pas|the\s+platform|this(?:\s+(?:platform|system|app))?|the\s+system)\b`,
+	// Branch 2: "invite (my wife/husband/partner/spouse/kids/children/family/household)" — explicit relationship-to-PAS-user signal
+	String.raw`\binvit(?:e|ing)\s+my\s+(?:wife|husband|partner|spouse|kids?|children|family|household)\b`,
+	// Branch 3: invite codes — PAS-specific concept
+	String.raw`\binvite\s+codes?\b`,
+	// Branch 4a: "add (a new |another )(user|account|member) to (the platform|PAS|this|the system)" — REQUIRES explicit platform target (Codex #6 hardening — no optional anchor)
+	String.raw`\b(?:add(?:ing)?|register(?:ing)?)\s+(?:a\s+|another\s+)?(?:new\s+)?(?:user|users|account|accounts|member|members)\s+to\s+(?:pas|the\s+platform|this(?:\s+(?:platform|system|app))?|the\s+system)\b`,
+	// Branch 4b: relationship form — "add my wife/husband/…" — relationship token alone is the anchor
+	String.raw`\b(?:add(?:ing)?|register(?:ing)?)\s+my\s+(?:wife|husband|partner|spouse|kids?|children|family|household)\b`,
+	// Branch 5: "give (my X|X) (PAS )?access" — access verb with possessive subject
+	String.raw`\bgive\s+(?:my\s+(?:wife|husband|partner|spouse|kids?|children|family|household)|(?:\w+))\s+(?:pas\s+)?access\b`,
+	// Branch 6: "let my (wife|partner|kids|…) (sign in|use this|use PAS|join)" — covers the LLM few-shot territory deterministically when phrased with the household relationship
+	String.raw`\blet\s+my\s+(?:wife|husband|partner|spouse|kids?|children|family|household)\s+(?:sign\s+in|log\s+in|use\s+(?:this|pas|the\s+platform)|join)\b`,
+	// Branch 7: "how do invite codes work" / "tell me about inviting people (to PAS|to the platform)?"
+	// The "to PAS/platform/this" anchor is optional — "tell me about inviting people" alone is
+	// PAS-disambiguated by the "tell me about" prefix (no realistic non-PAS use of that phrasing).
+	// Whitespace lives inside the optional group so a bare "...inviting people\b" matches
+	// without requiring a trailing space.
+	String.raw`\b(?:how\s+do\s+invite\s+codes\s+work)\b`,
+	String.raw`\btell\s+me\s+about\s+invit(?:e|ing)\s+(?:people|users?|members?)(?:\s+to\s+(?:pas|the\s+platform|this))?\b`,
+	// Branch 8: "(can I |how do I )give my (kids|family|…) access" — common phrasing with possessive object
+	String.raw`\b(?:can\s+i|how\s+(?:do\s+i|to))\s+give\s+my\s+(?:wife|husband|partner|spouse|kids?|children|family|household)\s+access\b`,
+];
+
+const PLATFORM_INVITE_RE = new RegExp(PLATFORM_INVITE_PATTERNS.join('|'), 'i');
+
 /** Pre-filter table consulted in order — first matching pattern wins. */
 const PREFILTERS: ReadonlyArray<readonly [RegExp, PASClassification]> = [
 	[DATA_QUERY_PREFILTER, { pasRelated: true, dataQueryCandidate: true }],
 	[SETTINGS_KEYWORDS_RE, { pasRelated: true, settingsCandidate: true }],
 	[SYSTEM_DATA_KEYWORDS_RE, { pasRelated: true, dataQueryCandidate: true }],
 	[PAS_META_RE, { pasRelated: true }],
+	[PLATFORM_INVITE_RE, { pasRelated: true }],
 ];
 
 /**
@@ -223,7 +263,7 @@ export async function classifyPASMessage(
 	// Append recent context when available — helps resolve follow-up queries
 	const contextHint = recentContext?.trim() ? ` Recent user actions: ${recentContext}.` : '';
 
-	const systemPrompt = `You are a classifier. Determine if a message is related to a personal automation system (PAS). PAS topics include: home automation, installed apps, scheduling, data queries about food/grocery/health/notes, system status, model/cost info. DATA QUERY: asking about stored data — prices, recipes, nutrition, grocery history, health logs, notes, meals, pantry, comparisons. SETTINGS: asking about or requesting a change to a PAS configuration setting (e.g. "turn on X", "how do I configure Y", "what settings are available").${appHint} Reply with space-separated tokens (any order). Token format:\n  YES_PAS YES_SETTINGS NO_DATA  — PAS question about a setting\n  YES_PAS NO_SETTINGS YES_DATA  — PAS question about stored data\n  YES_PAS NO_SETTINGS NO_DATA   — PAS question (general)\n  NO_PAS                        — not PAS-related\nExamples mapping input → tokens (Batch 3 — Gemma-friendly):\n  "change my fast model"             → YES_PAS YES_SETTINGS NO_DATA\n  "set my timezone to UTC"           → YES_PAS YES_SETTINGS NO_DATA\n  "what is my current standard model"→ YES_PAS YES_SETTINGS NO_DATA\n  "show me my system logs"           → YES_PAS NO_SETTINGS YES_DATA\n  "list my scheduled alerts"         → YES_PAS NO_SETTINGS YES_DATA\n  "what apps do I have installed"    → YES_PAS NO_SETTINGS NO_DATA\n  "what's in my pantry right now"    → YES_PAS NO_SETTINGS YES_DATA\n  "what's the weather"               → NO_PAS\nBackward-compat: bare YES/NO/YES_DATA tokens are also accepted.${contextHint}`;
+	const systemPrompt = `You are a classifier. Determine if a message is related to a personal automation system (PAS). PAS topics include: home automation, installed apps, scheduling, data queries about food/grocery/health/notes, system status, model/cost info, **inviting people to use the platform (invite codes, adding users, granting access to household members)**. DATA QUERY: asking about stored data — prices, recipes, nutrition, grocery history, health logs, notes, meals, pantry, comparisons. SETTINGS: asking about or requesting a change to a PAS configuration setting (e.g. "turn on X", "how do I configure Y", "what settings are available").${appHint} Reply with space-separated tokens (any order). Token format:\n  YES_PAS YES_SETTINGS NO_DATA  — PAS question about a setting\n  YES_PAS NO_SETTINGS YES_DATA  — PAS question about stored data\n  YES_PAS NO_SETTINGS NO_DATA   — PAS question (general)\n  NO_PAS                        — not PAS-related\nExamples mapping input → tokens (Batch 3 — Gemma-friendly):\n  "change my fast model"             → YES_PAS YES_SETTINGS NO_DATA\n  "set my timezone to UTC"           → YES_PAS YES_SETTINGS NO_DATA\n  "what is my current standard model"→ YES_PAS YES_SETTINGS NO_DATA\n  "show me my system logs"           → YES_PAS NO_SETTINGS YES_DATA\n  "list my scheduled alerts"         → YES_PAS NO_SETTINGS YES_DATA\n  "what apps do I have installed"    → YES_PAS NO_SETTINGS NO_DATA\n  "what's in my pantry right now"    → YES_PAS NO_SETTINGS YES_DATA\n  "let my husband sign in too"        → YES_PAS NO_SETTINGS NO_DATA\n  "add a new user"                    → YES_PAS NO_SETTINGS NO_DATA\n  "give my kids access"               → YES_PAS NO_SETTINGS NO_DATA\n  "invite my friends to a dinner party"→ NO_PAS\n  "what's the weather"               → NO_PAS\nBackward-compat: bare YES/NO/YES_DATA tokens are also accepted.${contextHint}`;
 
 	try {
 		const response = await deps.llm.complete(sanitizeInput(text), {

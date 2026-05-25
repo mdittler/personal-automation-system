@@ -5513,6 +5513,258 @@ Both `buildSystemPrompt` and `buildAppAwareSystemPrompt` MUST include `PHOTO_SUM
 
 ---
 
+## Phase 2026-05-24 — Classifier + Reply-Collector + Call-Graph Guard
+
+Closes three deferred items from `docs/open-items.md` in one focused phase. Deliverable 1 (entries below) ships the PAS-classifier `PLATFORM_INVITE_RE` prefilter + LLM few-shot examples so the chatbot's PAS-aware prompt path engages for platform-invite questions. Deliverable 2 (reply-collector) and Deliverable 3 (Strategy B call-graph guard) land in subsequent commits in this same phase.
+
+### REQ-CONV-PAS-CLASSIFY — PAS classifier platform-invite recognition
+
+#### REQ-CONV-PAS-CLASSIFY-001: `PLATFORM_INVITE_RE` deterministic prefilter accepts platform-invite phrasings
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`PLATFORM_INVITE_RE` short-circuits the LLM path for platform-invite phrasings ("how do I invite someone to PAS", "add a new user to the platform", "give my kids access", etc.) and returns `{pasRelated: true}` deterministically — no `dataQueryCandidate`, no `settingsCandidate`. The regex is composed from a typed `PLATFORM_INVITE_PATTERNS` array of 10 entries across 8 numbered branches; every branch requires an explicit PAS / platform / access / user-management anchor. Inserted at the tail of `PREFILTERS` after `PAS_META_RE` so the deterministic-prefilter ordering is unchanged for non-invite phrasings. Closes the 2026-05-24 Accepted Risk where Gemma 4 31B (and Haiku 4.5) mis-classified all 7 regression-case phrasings as `NO_PAS`.
+
+**Standard tests** (`pas-classifier.platform-invite.test.ts`):
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "Can you tell me about inviting people?" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "how do I invite someone to PAS" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "how do invite codes work" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "add a new user to the platform" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "invite my wife to use this" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "how do I add my partner" → pasRelated:true via prefilter, no LLM call`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "can I give my kids access" → pasRelated:true via prefilter, no LLM call`
+
+**Edge case tests** (`pas-classifier.platform-invite.test.ts`):
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > prefilter is case-insensitive`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > prefilter does not set dataQueryCandidate or settingsCandidate`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > handles surrounding punctuation`
+
+#### REQ-CONV-PAS-CLASSIFY-002: `PLATFORM_INVITE_RE` does not collide with food-hosting or generic-invite phrasings
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+Each branch of `PLATFORM_INVITE_PATTERNS` requires an explicit PAS/platform/access/relationship anchor — Codex Round 1 finding #6. Generic invite phrasings ("invite my friends to a concert", "inviting people to dinner", "inviting people to a birthday party", "inviting users to my party", "add a new user to the test database", "how do I register a new user in postgres"), food-hosting phrasings ("hosting a dinner party next Saturday", "we're having 8 people over for dinner", "planning a dinner for guests"), and generic conversational ("what's the weather like", "tell me a joke") all flow through to the LLM path instead of short-circuiting on the prefilter.
+
+**Standard tests** (`pas-classifier.platform-invite.test.ts`):
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "hosting a dinner party next Saturday" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "we're having 8 people over for dinner" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "planning a dinner for guests" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "what's the weather like" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "tell me a joke" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "I want to invite my friends to a concert" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "who invites the band on Saturday Night Live" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "inviting people to dinner" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "inviting people to a birthday party" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "inviting people to a concert" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "inviting users to my party" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "add a new user to the test database" → no prefilter short-circuit, LLM is called`
+- `PAS classifier — PLATFORM_INVITE_RE prefilter > "how do I register a new user in postgres" → no prefilter short-circuit, LLM is called`
+
+#### REQ-CONV-PAS-CLASSIFY-003: LLM few-shot examples cover invite/access paraphrases
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The `systemPrompt` template advertises "inviting people to use the platform (invite codes, adding users, granting access to household members)" in the PAS-topics list and includes three positive mappings (`"let my husband sign in too"`, `"add a new user"`, `"give my kids access"` → `YES_PAS NO_SETTINGS NO_DATA`) plus one negative counter-example (`"invite my friends to a dinner party"` → `NO_PAS`). This is the backstop for paraphrases `PLATFORM_INVITE_RE` does not catch — the LLM learns the disambiguator is the platform/user/access anchor, not the word "invite" alone. Prompt-length compactness assertion (< 2000 chars) continues to hold.
+
+**Standard tests** (`pas-classifier.test.ts`):
+- `PAS classifier — invite/access few-shot examples > prompt contains at least one platform-invite few-shot mapping → YES_PAS`
+- `PAS classifier — invite/access few-shot examples > prompt contains a generic-invite NO_PAS counter-example`
+
+**Edge case tests** (`pas-classifier.test.ts`):
+- `classifyPASMessage > classifier prompt is compact (no large app metadata blocks)` (prompt length cap regression guard — < 2000 chars after few-shot additions)
+
+#### REQ-CONV-PAS-CLASSIFY-004: `pas-invite-platform-positive` regression case passes deterministically
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The persona regression case `pas-invite-platform-positive` (`regression/src/cases/routing/pas/invite-platform.case.ts`) flips from FAIL → PASS via the `PLATFORM_INVITE_RE` prefilter — all 7 inputs return `{pasRelated: true}` deterministically with `costUsd: 0` and `tokenCounts.{input, output}: 0` (no LLM dispatch). Verified 2026-05-24 via `pnpm test:regression -- --rerun=pas-invite-platform-positive --no-manifest --json`: `verdict: pass`, `source: fresh`, 7 of 7 oracleVerdicts `pass`.
+
+**Standard tests:**
+- `regression/src/cases/routing/pas/invite-platform.case.ts` (persona regression case, validated under REQ-REG-011 routing-accuracy gate)
+
+#### REQ-CONV-PAS-CLASSIFY-005: Food shadow-classifier still rejects platform-invite phrasings
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The three new regression-case phrasings the PAS classifier now accepts ("can I give my kids access", "how do I add my partner", "invite my wife to use this") are added to `HOSTING_MEAL_PLANNING_INTENT`'s `deterministicRejectFor` block in `shadow-classifier.personas.ts` with `correctLabel: 'none'`. Belt-and-suspenders against future intent-wording drift — proves the PAS-side fix does not regress Food's side of the boundary. Existing 123 shadow-classifier tests continue to pass alongside the 4 new platform-invite tests.
+
+**Standard tests** (`shadow-classifier-platform-invite.test.ts`):
+- `Food shadow-classifier — platform-invite phrasings stay rejected > hosting persona exists`
+- `Food shadow-classifier — platform-invite phrasings stay rejected > deterministicRejectFor includes "can I give my kids access" with correctLabel="none"`
+- `Food shadow-classifier — platform-invite phrasings stay rejected > deterministicRejectFor includes "how do I add my partner" with correctLabel="none"`
+- `Food shadow-classifier — platform-invite phrasings stay rejected > deterministicRejectFor includes "invite my wife to use this" with correctLabel="none"`
+
+### REQ-ROUTE — Multi-intent reply collector (Option B)
+
+Deliverable 2 of the Classifier + Reply-Collector + Call-Graph Guard phase. Replaces the per-segment Telegram message storm with one combined message (or as few as possible under the 4000-char cap). The implementation has three load-bearing pieces:
+
+1. `BufferingTelegramProxy` (`core/src/services/router/reply-buffer.ts`) — `TelegramService`-compatible wrapper around the REAL transport; buffers plain `send` calls per `userId`; rich sends (`sendPhoto`/`sendWithButtons`/`sendOptions`) flush pending text first then pass through; `editMessage` bypasses the buffer entirely.
+2. `ContextAwareTelegramService` (`core/src/services/telegram/context-aware.ts`) — wraps the real `TelegramService` and routes plain method calls through `requestContext.getStore()?.replyBuffer` when one is in scope; transparent delegate to the real transport otherwise. `editMessage` always bypasses.
+3. Router patch — `tryMultiIntentSplit` constructs a `BufferingTelegramProxy(inner: this.telegram)` (real handle, never the wrapper — Codex Round 1 #3 prevents the recursion seam), enters a `requestContext.run({ ...outer, replyBuffer })` scope with the outer store SPREAD first (Codex Round 1 #2), dispatches segments, and finally calls `buffer.flushPending` in `finally` to emit the combined message(s). Three nested `requestContext.run` sites in `dispatchMessage` / `dispatchPhoto` / `dispatchConversation` are patched to spread the outer store so the buffer survives every dispatch hop.
+
+#### REQ-ROUTE-017: Multi-intent reply buffer combines plain `send` calls across segments into one Telegram message when ≤ 4000 chars
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+When `Router.tryMultiIntentSplit` runs (≥ 2 segments after segmenter), each segment's handler call to `services.telegram.send(...)` lands in the per-request `BufferingTelegramProxy` instead of the real transport. After the segment loop completes, `buffer.flushPending(userId)` emits ONE combined message containing every buffered segment, joined by `\n\n`, as long as the total length stays under the 4000-char cap.
+
+**Standard tests** (`reply-buffer.test.ts`, `router-multi-intent.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `BufferingTelegramProxy — happy path (REQ-ROUTE-017) > buffers plain `send` calls; final flush emits one combined message`
+- `BufferingTelegramProxy — happy path (REQ-ROUTE-017) > flushPending on an empty buffer is a no-op`
+- `Router — multi-intent split (Task 4.3/4.4) + combined reply (REQ-ROUTE-017..022) > splits a two-question message → preamble + one combined send; both handlers dispatched in order`
+- `Router — multi-intent split (Task 4.3/4.4) + combined reply (REQ-ROUTE-017..022) > dispatches three segments → preamble + one combined send with three sections`
+- `Router multi-intent — reply buffer integration > two-segment message → preamble + exactly one combined send (REQ-ROUTE-017)`
+
+#### REQ-ROUTE-018: Multi-intent reply buffer auto-splits at segment boundaries when total exceeds 4000 chars
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`packSegments(segments, maxLength)` (exported from `reply-buffer.ts`) packs ordered segments into chunks, each ≤ `maxLength`. The packer always breaks between segments when possible. A single segment longer than `maxLength` is hard-split into raw `maxLength`-sized slices; content is preserved in input order under concatenation.
+
+**Standard tests** (`reply-buffer.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `BufferingTelegramProxy — length splitting (REQ-ROUTE-018) > auto-splits at segment boundaries when total exceeds maxLength`
+- `BufferingTelegramProxy — length splitting (REQ-ROUTE-018) > packs as many segments as fit per message`
+- `BufferingTelegramProxy — length splitting (REQ-ROUTE-018) > hard-splits a single segment longer than maxLength (preserves all content)`
+- `Router multi-intent — reply buffer integration > combined reply > 4000 chars auto-splits at segment boundaries (REQ-ROUTE-018)`
+
+**Persona tests** (`multi-intent-natural-language.persona.test.ts`):
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > long combined message auto-splits at segment boundaries`
+
+#### REQ-ROUTE-019: Rich sends (`sendPhoto`, `sendWithButtons`, `sendOptions`) flush pending buffer and pass through
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+When a handler calls `services.telegram.sendPhoto(...)`, `sendWithButtons(...)`, or `sendOptions(...)` while a reply buffer is active, the buffer's wrapper method calls `await this.flushPending(userId)` FIRST — emitting any accumulated plain text — and then delegates to the inner real transport with the original arguments. This preserves visible ordering for handlers that interleave plain text with media or interactive prompts.
+
+Codex Round 1 #10 narrowed this requirement to exclude `editMessage`; see REQ-ROUTE-019b for the bypass contract.
+
+**Standard tests** (`reply-buffer.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `BufferingTelegramProxy — rich sends flush + pass through (REQ-ROUTE-019) > sendPhoto flushes pending text then delegates to inner`
+- `BufferingTelegramProxy — rich sends flush + pass through (REQ-ROUTE-019) > sendWithButtons flushes pending text then delegates`
+- `BufferingTelegramProxy — rich sends flush + pass through (REQ-ROUTE-019) > sendOptions flushes pending text then delegates`
+- `Router multi-intent — reply buffer integration > sendPhoto mid-segment flushes prior plain text then passes through (REQ-ROUTE-019)`
+- `Router multi-intent — reply buffer integration > sendWithButtons mid-segment flushes prior plain text then passes through`
+
+#### REQ-ROUTE-019b: `editMessage` bypasses the buffer entirely (targets a prior message id; order-independent)
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`editMessage(chatId, messageId, text, buttons?)` targets a previously-sent message by id, not the user's current reply queue, so its visible ordering is decoupled from the buffered plain-text reply. Both `BufferingTelegramProxy.editMessage` and `ContextAwareTelegramService.editMessage` therefore bypass the buffer entirely and call the inner real transport directly. The plain-text queue continues to accumulate after the edit and is flushed at the normal flush point.
+
+Distinct from REQ-ROUTE-019 (rich sends flush-then-pass-through) — the contract here is "do nothing to the buffer; pass straight through". Codex Round 1 #10 surfaced this as a URS coherence fix; the original draft conflated `editMessage` with the rich-send flush path.
+
+**Standard tests** (`reply-buffer.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `BufferingTelegramProxy — rich sends flush + pass through (REQ-ROUTE-019) > editMessage passes through immediately (no flush) — REQ-ROUTE-019b`
+- `Router multi-intent — reply buffer integration > editMessage bypasses the buffer entirely (REQ-ROUTE-019b)`
+
+#### REQ-ROUTE-020: Buffer is isolated per-request via AsyncLocalStorage (concurrent users do not cross-contaminate)
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The reply buffer is installed on the request-scoped `requestContext` (`AsyncLocalStorage<RequestContext>`) as an optional `replyBuffer?: FlushableTelegramProxy` field. Each `Router.tryMultiIntentSplit` invocation creates its OWN `BufferingTelegramProxy` and enters its own `requestContext.run({ ...outer, replyBuffer }, ...)` scope; concurrent dispatches for different users see different buffer instances.
+
+Hardened at three additional dispatch entry points: `dispatchMessage`, `dispatchPhoto`, and `dispatchConversation` each re-establish the request context with `{ userId, householdId, [sessionId] }`. Each now spreads `requestContext.getStore() ?? {}` first so the outer `replyBuffer` survives the nested scope (Codex Round 1 #2 — the single most consequential review finding; without this fix the buffer is dropped at every handler dispatch and the reply collector silently no-ops).
+
+`BufferingTelegramProxy` also keeps per-`userId` queues internally (a `Map<userId, string[]>`), so even if two users shared a buffer instance their queued text would not merge. Production wiring guarantees one buffer per request; the per-userId map is a defense-in-depth second layer.
+
+**Standard tests** (`request-context-reply-buffer.test.ts`, `reply-buffer.test.ts`, `router-context-merge.test.ts`, `router-multi-intent.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `requestContext — replyBuffer scope > returns undefined when no buffer is in scope`
+- `requestContext — replyBuffer scope > propagates replyBuffer through nested async work`
+- `requestContext — replyBuffer scope > does not leak buffer to a parallel context (AsyncLocalStorage isolation)`
+- `requestContext — replyBuffer scope > REQ-ROUTE-020 hardening — nested run() that re-establishes context must preserve outer replyBuffer (Codex Round 1 #2)`
+- `BufferingTelegramProxy — per-user isolation (REQ-ROUTE-020) > separates buffers across userIds`
+- `Router nested-dispatch context merging — Codex Round 1 #2 regression guard > dispatchMessage preserves outer replyBuffer (REQ-ROUTE-020)`
+- `Router nested-dispatch context merging — Codex Round 1 #2 regression guard > dispatchPhoto preserves outer replyBuffer`
+- `Router nested-dispatch context merging — Codex Round 1 #2 regression guard > dispatchConversation preserves outer replyBuffer when ConversationService is wired`
+- `Router — multi-intent split (Task 4.3/4.4) + combined reply (REQ-ROUTE-017..022) > requestContext.replyBuffer is INSTALLED during multi-intent dispatch and CLEARED after flush`
+- `Router multi-intent — reply buffer integration > concurrent dispatches for two users — buffers do not cross-contaminate (REQ-ROUTE-020)`
+
+#### REQ-ROUTE-021: Buffer flushes pending text even when a segment throws
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`tryMultiIntentSplit` wraps each segment's `routeOneTextRequest` call in `try/catch`. On throw, the apology (`"(I couldn't handle that part — sorry.)"`) is sent THROUGH THE BUFFER via `buffer.send(userId, ...)` so it merges with surrounding segment replies in the final flush — not as a separate Telegram message. The final `flushPending` runs unconditionally before `tryMultiIntentSplit` returns.
+
+`BufferingTelegramProxy.flushPending` deletes the user's queue BEFORE the inner `send` call, so a rejection from the real transport does not double-emit the same text on a retry — a single failed flush leaves the buffer empty and a subsequent flush is a safe no-op.
+
+**Standard tests** (`reply-buffer.test.ts`, `router-multi-intent.test.ts`, `router-multi-intent-reply-buffer.test.ts`):
+- `BufferingTelegramProxy — error handling (REQ-ROUTE-021) > inner send rejection on flush propagates; buffer is cleared (no double-flush)`
+- `Router — multi-intent split (Task 4.3/4.4) + combined reply (REQ-ROUTE-017..022) > per-segment error isolation (stubbed routeOneTextRequest throw): apology + segment 2 reply combined`
+- `Router multi-intent — reply buffer integration > segment 1 throws → apology + segment 2 reply combined in one message (REQ-ROUTE-021)`
+
+#### REQ-ROUTE-022: Multi-intent natural-language persona scenarios end with one combined Telegram message under the cap
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+End-to-end coverage that realistic Telegram phrasings — multi-question dinner+spending requests, mixed grocery+recipe queries, three-segment mash-ups, leading filler ("hey could you do me a favor, …"), and ALL-CAPS-punctuation-noise messages — produce exactly one preamble + one combined message, with the combined message containing all expected substrings joined by `\n\n` separators. Six realistic positive cases plus one long-message split case (3 × 1800-char replies → 2 packed messages under the cap). Six negative cases ("whats for dinner", "good morning", "add salt and pepper to my list", …) verify the splitter declines and the single-message path runs without a preamble.
+
+**Persona tests** (`multi-intent-natural-language.persona.test.ts`):
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "What's for dinner tonight and how much did I spend at Costco?" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "add milk to the grocery list and what's in my pantry" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "show me my recipes and tell me my health stats" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "whats for dinner, add eggs to groceries, and how many calories did i eat today" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "hey could you do me a favor, add bananas to my list, and also tell me what's in the pantry?" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "GROCERY LIST. ALSO, what's the cheapest store for eggs???" → preamble + 1 combined message`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > long combined message auto-splits at segment boundaries`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "whats for dinner" → no preamble, single-message path`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "how much did i spend at costco" → no preamble, single-message path`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "hey" → no preamble, single-message path`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "good morning" → no preamble, single-message path`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "show me recipes with chicken and pasta" → no preamble, single-message path`
+- `Multi-intent natural-language persona — combined-reply UX (REQ-ROUTE-022) > "add salt and pepper to my list" → no preamble, single-message path`
+
+### REQ-FOOD-PROACTIVE-BRIDGE — Strategy B transitive call-graph guard
+
+Deliverable 3 of the Classifier + Reply-Collector + Call-Graph Guard phase. The Strategy A "direct helpers" enumeration on the proactive-send guard (`apps/food/src/testing/proactive-send-scan.ts`) was brittle and drift-prone — any new helper added between a `PROACTIVE_ENTRYPOINTS` member and a `telegram.send*` would silently bypass the guard until manually added. Strategy B replaces it with a true transitive call-graph reachability analysis built on the TypeScript compiler API: from each named entrypoint, walk the call graph BFS through `ts.Program` + the type checker (so cross-file helpers resolve), and flag any reachable `telegram.send*` call outside sanctioned files. Cycle-safe via a visited Set; supports all four send variants; the explicit helper list is gone.
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-008: `findReachableSends` builds a function-level call graph and BFS-walks from each named entrypoint
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`findReachableSends({ projectRoot, entrypoints, excludeFiles? })` (`apps/food/src/testing/proactive-send-call-graph.ts`) builds a function-level adjacency map keyed by stable `${fileName}#${declarationStart}` IDs, then BFS-walks from each entrypoint name to collect every reachable function. Cross-file call targets resolve through `ts.TypeChecker.getSymbolAtLocation(...).getAliasedSymbol(...)` so ES-module imports (with `.js` extensions) are followed back to the original declaration. The internal `buildGraph` helper stays module-private — only `findReachableSends` and the `ProactiveSendHit` type are exported (Codex Round 1 #15). Function-shape coverage includes named declarations, methods, `const X = () =>`, and `{ X: () => }` property assignments. Direct entrypoint sends, transitive same-file helpers, transitive cross-file helpers, and aliased call sites (`const { telegram } = services`) are all detected. Non-reachable code (e.g., reactive handlers in the same file as an entrypoint) is correctly NOT flagged.
+
+**Standard tests** (`proactive-send-call-graph.test.ts`):
+- `Strategy B call-graph guard — direct entrypoint sends > flags a raw telegram.send inside an entrypoint (no helper involved)`
+- `Strategy B — transitive same-file helper > flags a telegram.send inside a helper that the entrypoint calls`
+- `Strategy B — cross-file helper resolution > flags a telegram.send in a helper defined in another file`
+- `Strategy B — non-reachable code is not flagged > does not flag a telegram.send that no entrypoint can reach`
+- `Strategy B — alias / aliased call sites > flags telegram.send through a destructured alias`
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-009: `findReachableSends` detects all four `telegram.send*` variants (Codex #14)
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The `isTelegramSendCall` predicate matches `send`, `sendWithButtons`, `sendPhoto`, AND `sendOptions` — the four `TelegramService` methods that emit a user-visible message and therefore must be bridged. Each variant is exercised individually as a transitive call through a helper. Direct/transitive coverage is established for every variant; receiver detection accepts both property-access (`services.telegram.send`) and bare-identifier (`telegram.send` after destructuring) shapes.
+
+**Standard tests** (`proactive-send-call-graph.test.ts`):
+- `Strategy B — all telegram.send* variants (Codex #14) > flags telegram.send reachable via a transitive helper`
+- `Strategy B — all telegram.send* variants (Codex #14) > flags telegram.sendWithButtons reachable via a transitive helper`
+- `Strategy B — all telegram.send* variants (Codex #14) > flags telegram.sendPhoto reachable via a transitive helper`
+- `Strategy B — all telegram.send* variants (Codex #14) > flags telegram.sendOptions reachable via a transitive helper`
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-010: BFS visited-set guard makes the scanner cycle-safe; exclusions match against `projectRoot`-relative POSIX paths
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+The BFS in `findReachableSends` uses a `reachable: Set<FnId>` visited guard — mutually-recursive helpers (`a` → `b` → `a`) terminate within the per-test 3-second cap and the recursion-induced send inside `b` is still flagged. Exclusion strings are matched relative to the passed `projectRoot` (default `apps/food/src`), via a POSIX-normalized prefix slice; the canonical `utils/proactive-message.ts` exclusion holds regardless of OS path separator or absolute-vs-relative root (Codex Round 1 #12). `__tests__/` and `testing/` are excluded unconditionally as scaffolding.
+
+**Standard tests** (`proactive-send-call-graph.test.ts`):
+- `Strategy B — cycle safety > does not infinite-loop on mutually-recursive helpers` (3-second cap)
+- `Strategy B — exclusions > excludes __tests__/, testing/, and utils/proactive-message.ts even when reachable`
+- `Strategy B — production-root exclusion shape (Codex #12) > the real sanctioned bridge path "utils/proactive-message.ts" is excluded under projectRoot=apps/food/src`
+
+#### REQ-FOOD-PROACTIVE-BRIDGE-011: `proactive-send-scan.ts` delegates the production sweep to Strategy B; in-memory self-test API preserved (Codex #16)
+
+**Phase:** 2026-05-24 (Classifier + Reply-Collector + Call-Graph Guard) | **Status:** Implemented
+
+`scanFoodProactiveSends(projectRoot = 'apps/food/src')` now delegates to `findReachableSends` with `entrypoints = [...PROACTIVE_ENTRYPOINTS]`. The explicit "direct helpers" list that Strategy A required is gone — any helper transitively reachable from a `PROACTIVE_ENTRYPOINTS` member is automatically chased. `scanFoodProactiveSendsFromSources(sources)` is retained as a thin Strategy-A-style in-memory scanner for the guard self-test fixture only (Codex Round 1 #16), so the guard does not need a real `ts.Program` for its self-test. `PROACTIVE_ENTRYPOINTS` (13 names) remains as the semantic anchor list — the closed catalog of Food functions that perform proactive Telegram sends. The real Strategy B sweep against `apps/food/src` returns `[]`, confirming Strategy A's helper list was already accurate (no latent bugs surfaced by the migration). The build-failing guard test uses `fileURLToPath(import.meta.url)` per the project's pure-ESM contract (Codex Round 1 #13).
+
+**Standard tests** (`proactive-send-guard.test.ts`):
+- `Food proactive-send guard (Strategy B) > self-test: in-memory scanner flags a raw telegram.send inside a named entrypoint`
+- `Food proactive-send guard (Strategy B) > real: no unbridged proactive sends reachable in apps/food/src (Strategy B sweep)`
+
+---
+
 ## App-Message Memory Bridge (2026-05-18)
 
 ### REQ-CONV-APP-BRIDGE — App-Message Memory Bridge
@@ -5625,10 +5877,12 @@ When `recordOutboundMessage` rejects but Telegram delivery succeeded, `sendProac
 The `scanFoodProactiveSends` AST scanner (`apps/food/src/testing/proactive-send-scan.ts`) walks every `.ts` file under `apps/food/src/` (excluding `__tests__/`, `testing/`, and `utils/proactive-message.ts`); inside any function whose name is in the explicit `PROACTIVE_ENTRYPOINTS` set, it flags every `CallExpression` whose callee is a `PropertyAccessExpression` ending in `.telegram.send` or `.telegram.sendWithButtons`. The build-failing test asserts (a) the scanner self-test detects a fixture violation and (b) the real project tree has zero flagged sites. A new proactive job either routes through `sendProactiveMessage` or must be deliberately added to the entrypoint set (reviewed edit).
 
 **Standard tests:**
-- `proactive-send-guard.test.ts` > Food proactive-send guard > real: no unbridged proactive sends in apps/food/src
+- `proactive-send-guard.test.ts` > Food proactive-send guard (Strategy B) > real: no unbridged proactive sends reachable in apps/food/src (Strategy B sweep)
 
 **Security tests:**
-- `proactive-send-guard.test.ts` > Food proactive-send guard > self-test: scanner flags a raw telegram.send inside a proactive entrypoint name
+- `proactive-send-guard.test.ts` > Food proactive-send guard (Strategy B) > self-test: in-memory scanner flags a raw telegram.send inside a named entrypoint
+
+**Fixes (2026-05-24):** Strategy A entrypoint-scoped enumeration replaced by Strategy B transitive call-graph reachability (REQ-FOOD-PROACTIVE-BRIDGE-008..011). The guard's contract is unchanged — the real sweep still must return zero hits — but the implementation now chases helpers transitively via the TypeScript type checker. Test describe-block renamed to `(Strategy B)`; the in-memory self-test fixture is preserved via `scanFoodProactiveSendsFromSources`.
 
 #### REQ-FOOD-PROACTIVE-BRIDGE-007: `FoodProactiveKind` is the closed catalog; reactive Food paths MUST NOT bridge separately
 
@@ -12295,5 +12549,21 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-ROUTE-014 | message-segmenter.test.ts, router-multi-intent.persona.test.ts | 8 | 7 | Implemented |
 | REQ-ROUTE-015 | router-multi-intent.test.ts, router-multi-intent.persona.test.ts | 0 | 6 | Implemented |
 | REQ-ROUTE-016 | router-multi-intent.test.ts, config.test.ts, pas-yaml-schema.test.ts, settings-metadata.test.ts, system-config-writer.test.ts | 13 | 6 | Implemented |
+| REQ-CONV-PAS-CLASSIFY-001 | pas-classifier.platform-invite.test.ts | 7 | 3 | Implemented |
+| REQ-CONV-PAS-CLASSIFY-002 | pas-classifier.platform-invite.test.ts | 13 | 0 | Implemented |
+| REQ-CONV-PAS-CLASSIFY-003 | pas-classifier.test.ts | 2 | 1 | Implemented |
+| REQ-CONV-PAS-CLASSIFY-004 | regression/src/cases/routing/pas/invite-platform.case.ts | 1 | 0 | Implemented |
+| REQ-CONV-PAS-CLASSIFY-005 | shadow-classifier-platform-invite.test.ts | 4 | 0 | Implemented |
+| REQ-ROUTE-017 | reply-buffer.test.ts, router-multi-intent.test.ts, router-multi-intent-reply-buffer.test.ts | 5 | 0 | Implemented |
+| REQ-ROUTE-018 | reply-buffer.test.ts, router-multi-intent-reply-buffer.test.ts, multi-intent-natural-language.persona.test.ts | 4 | 1 | Implemented |
+| REQ-ROUTE-019 | reply-buffer.test.ts, router-multi-intent-reply-buffer.test.ts | 5 | 0 | Implemented |
+| REQ-ROUTE-019b | reply-buffer.test.ts, router-multi-intent-reply-buffer.test.ts | 2 | 0 | Implemented |
+| REQ-ROUTE-020 | request-context-reply-buffer.test.ts, reply-buffer.test.ts, router-context-merge.test.ts, router-multi-intent.test.ts, router-multi-intent-reply-buffer.test.ts | 10 | 0 | Implemented |
+| REQ-ROUTE-021 | reply-buffer.test.ts, router-multi-intent.test.ts, router-multi-intent-reply-buffer.test.ts | 3 | 0 | Implemented |
+| REQ-ROUTE-022 | multi-intent-natural-language.persona.test.ts | 0 | 13 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-008 | proactive-send-call-graph.test.ts | 5 | 0 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-009 | proactive-send-call-graph.test.ts | 4 | 0 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-010 | proactive-send-call-graph.test.ts | 3 | 0 | Implemented |
+| REQ-FOOD-PROACTIVE-BRIDGE-011 | proactive-send-guard.test.ts | 1 | 1 | Implemented |
 
-| **Totals** | **394 test files** | **2736** | **2733** | **5469 tests** |
+| **Totals** | **403 test files** | **2805** | **2752** | **5557 tests** |
