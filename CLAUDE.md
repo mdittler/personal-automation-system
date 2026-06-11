@@ -149,6 +149,8 @@ Spec pointers: deployment-readiness — `docs/superpowers/specs/2026-04-13-deplo
 
 **Open items:** see `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
 
+**UX review findings** (2026-06-11) — 19 verified UX issues across Telegram routing, conversation flow, and the management GUI; findings + per-issue fix recommendations at `docs/superpowers/plans/2026-06-11-ux-review-findings-and-fix-plan.md`; queued as the UX Hardening Phase under Confirmed Phases in `docs/open-items.md`.
+
 ### Implementation Status Discipline (anti-bloat rule)
 
 **This section must not grow.** When a new phase completes, do the following — *do not* add a "Current Priority" or "Previous Priority" prose block in CLAUDE.md.
