@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { isDeliveryVisible } from '../../gui/guards/resolve-viewer-scope.js';
+import { sendErrorFragment } from '../../gui/utils/error-fragment.js';
 import type { ReportService } from '../../services/reports/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type {
@@ -220,11 +221,21 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 		async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
 			// D5b-5: only platform-admin can toggle reports.
 			if (request.user && !request.user.isPlatformAdmin) {
-				return reply.status(403).send('Forbidden');
+				return sendErrorFragment(
+					reply,
+					403,
+					"Couldn't change this report.",
+					'Only an administrator can turn reports on or off.',
+				);
 			}
 			const report = await reportService.getReport(request.params.id);
 			if (!report) {
-				return reply.code(404).send('Report not found');
+				return sendErrorFragment(
+					reply,
+					404,
+					"Couldn't find this report.",
+					'It may have been deleted. Refresh the page and try again.',
+				);
 			}
 
 			report.enabled = !report.enabled;

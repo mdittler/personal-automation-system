@@ -145,6 +145,9 @@
     <!-- Sidebar overlay (mobile) -->
     <div class="pas-sidebar-overlay" id="sidebar-overlay"></div>
 
+    <!-- Toast region for htmx failures that have no local target (I5) -->
+    <div id="pas-toast" aria-live="polite"></div>
+
     <!-- Main content -->
     <div class="pas-main-content">
       <main>
@@ -225,6 +228,39 @@
             e.preventDefault();
           }
         }
+      });
+
+      // Guarantee no unstyled htmx failure ever reaches the user (I5).
+      // htmx's default responseHandling does NOT swap 4xx/5xx bodies into
+      // the target — it only fires htmx:responseError. So on every failed
+      // htmx request we manually swap the styled error card into the
+      // request's own hx-target when one exists (the fragment renders in
+      // context, e.g. next to the toggle button that failed); otherwise —
+      // or on a network-level failure with no response body — we fall back
+      // to the shared toast region so the user still sees something.
+      var toast = document.getElementById('pas-toast');
+      function showToast(html) {
+        if (!toast) return;
+        toast.innerHTML = html;
+        window.clearTimeout(showToast._timer);
+        showToast._timer = window.setTimeout(function() {
+          toast.innerHTML = '';
+        }, 8000);
+      }
+      var GENERIC_ERROR_CARD = '<div class="pas-error-card" role="alert"><strong>Something went wrong</strong><p>Try again in a moment.</p></div>';
+      document.addEventListener('htmx:responseError', function(evt) {
+        var xhr = evt.detail && evt.detail.xhr;
+        var body = xhr && xhr.responseText ? xhr.responseText : '';
+        var isErrorCard = body.indexOf('pas-error-card') !== -1;
+        var target = evt.detail && evt.detail.target;
+        if (target && isErrorCard) {
+          target.innerHTML = body;
+          return;
+        }
+        showToast(isErrorCard ? body : GENERIC_ERROR_CARD);
+      });
+      document.addEventListener('htmx:sendError', function() {
+        showToast('<div class="pas-error-card" role="alert"><strong>Something went wrong</strong><p>Check your connection and try again.</p></div>');
       });
     })();
   </script>

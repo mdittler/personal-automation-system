@@ -1,0 +1,4 @@
+<div class="pas-error-card" role="alert">
+  <strong><%= it.title %></strong>
+  <% if (it.hint) { %><p><%= it.hint %></p><% } %>
+</div>

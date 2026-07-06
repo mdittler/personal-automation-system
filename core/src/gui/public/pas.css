@@ -448,6 +448,42 @@ table tbody tr:nth-child(even):hover {
 	color: var(--pas-success);
 }
 
+/* ----- 9a. Shared htmx error fragment (I5) ----- */
+/* Every htmx failure response (validation error or network error) swaps
+   this card into the target/toast region — never a raw unstyled string. */
+.pas-error-card {
+	background: var(--pas-danger-light);
+	border: 1px solid var(--pas-danger);
+	border-left: 4px solid var(--pas-danger);
+	border-radius: var(--pas-radius-sm);
+	padding: 0.85rem 1rem;
+	color: var(--pas-danger);
+	box-shadow: var(--pas-card-shadow);
+}
+
+.pas-error-card strong {
+	color: var(--pas-danger);
+	display: block;
+}
+
+.pas-error-card p {
+	margin: 0.35rem 0 0;
+	color: var(--pico-color, inherit);
+	font-size: 0.9rem;
+}
+
+#pas-toast {
+	position: fixed;
+	top: 4.5rem;
+	right: 1rem;
+	z-index: 1000;
+	max-width: 22rem;
+}
+
+#pas-toast:empty {
+	display: none;
+}
+
 /* ----- 9b. Regression terminal banners ----- */
 /* `gate-failed` is a model result, not a crash — it must read amber/warning,
    visibly distinct from the red `failed` (real error) state. */

@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { isDeliveryVisible } from '../../gui/guards/resolve-viewer-scope.js';
+import { sendErrorFragment } from '../../gui/utils/error-fragment.js';
 import { humanizeLabel } from '../../gui/utils/humanize.js';
 import type { AlertService } from '../../services/alerts/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
@@ -241,11 +242,21 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 		async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
 			// D5b-5: only platform-admin can toggle alerts.
 			if (request.user && !request.user.isPlatformAdmin) {
-				return reply.status(403).send('Forbidden');
+				return sendErrorFragment(
+					reply,
+					403,
+					"Couldn't change this alert.",
+					'Only an administrator can turn alerts on or off.',
+				);
 			}
 			const alert = await alertService.getAlert(request.params.id);
 			if (!alert) {
-				return reply.code(404).send('Alert not found');
+				return sendErrorFragment(
+					reply,
+					404,
+					"Couldn't find this alert.",
+					'It may have been deleted. Refresh the page and try again.',
+				);
 			}
 
 			alert.enabled = !alert.enabled;

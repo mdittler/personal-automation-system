@@ -27,6 +27,7 @@ import type { SystemConfig } from '../../types/config.js';
 import type { AppConfigService } from '../../types/config.js';
 import { escapeHtml } from '../../utils/escape-html.js';
 import { requirePlatformAdmin } from '../guards/require-platform-admin.js';
+import { sendErrorFragment } from '../utils/error-fragment.js';
 import { matchesDangerConfirmPhrase } from './settings-confirm-helpers.js';
 
 const NON_ADMIN_CATEGORIES: readonly SettingsCategory[] = [
@@ -688,7 +689,13 @@ export function registerSettingsRoutes(
 					source: 'admin-confirmed',
 				});
 				if (!result.ok) {
-					return reply.status(400).send(`Write failed: ${result.reason}`);
+					logger.warn({ appId, key, reason: result.reason }, 'settings confirm: write failed');
+					return sendErrorFragment(
+						reply,
+						400,
+						"Couldn't save this setting.",
+						'The value entered is not valid for this setting. Check it and try again.',
+					);
 				}
 			} else {
 				// action === 'reset'
