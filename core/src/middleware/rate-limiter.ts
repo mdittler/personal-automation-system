@@ -39,6 +39,16 @@ export class RateLimiter {
 		this.windowMs = windowMs;
 	}
 
+	/** The configured rolling window duration, in milliseconds. */
+	getWindowMs(): number {
+		return this.windowMs;
+	}
+
+	/** The configured max attempts allowed within the window. */
+	getMaxAttempts(): number {
+		return this.maxAttempts;
+	}
+
 	/**
 	 * Peek — check if a request would be allowed WITHOUT recording it.
 	 * Call commit() on the result to record the attempt.

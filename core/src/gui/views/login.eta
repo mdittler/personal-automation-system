@@ -17,8 +17,21 @@
       <% if (it.error) { %>
         <div class="alert-banner alert-banner-error"><%= it.error %></div>
       <% } %>
-      <% if (it.reason === 'password-required') { %>
-        <div class="alert-banner alert-banner-warning">Multiple admin accounts exist — please log in with your username (or Telegram user ID) and password.</div>
+      <%
+        // I4/I7: plain-language explanation for every forced sign-out reason
+        // the auth guard can redirect with (auth.ts). Unknown/missing values
+        // render nothing — never echo an arbitrary querystring value.
+        var reasonMessages = {
+          'expired': 'You were signed out because your session expired. Log in again to continue.',
+          'session-invalidated': 'You were signed out because your password was changed or the server restarted. Log in again with your current password.',
+          'user-removed': 'You were signed out because your account is no longer registered. Contact your system administrator if this is unexpected.',
+          'household-missing': 'You were signed out because your account is not linked to a household. Contact your system administrator.',
+          'password-required': 'Multiple admin accounts exist — please log in with your username (or Telegram user ID) and password.',
+        };
+        var reasonMessage = reasonMessages[it.reason];
+      %>
+      <% if (reasonMessage) { %>
+        <div class="alert-banner alert-banner-warning"><%= reasonMessage %></div>
       <% } %>
 
       <!-- Primary: username (or Telegram user ID) + password -->

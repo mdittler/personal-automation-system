@@ -59,6 +59,19 @@ function isSecureCookie(): boolean {
 	return process.env.NODE_ENV === 'production' || process.env.GUI_SECURE_COOKIES === 'true';
 }
 
+/** Plain-language rolling-window duration for the login rate-limit message (I7). */
+function formatWindow(windowMs: number): string {
+	const minutes = Math.round(windowMs / 60_000);
+	if (minutes >= 1) return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+	const seconds = Math.round(windowMs / 1000);
+	return `${seconds} second${seconds === 1 ? '' : 's'}`;
+}
+
+/** Build the rate-limit error message naming the real configured wait window (I7). */
+function rateLimitMessage(limiter: RateLimiter, suffix = ''): string {
+	return `Too many login attempts${suffix}. Wait ${formatWindow(limiter.getWindowMs())} and try again.`;
+}
+
 /** Compute the legacy HMAC cookie value (pre-D5b-3 format). */
 function legacyCookieValue(authToken: string): string {
 	return createHmac('sha256', authToken).update('pas-gui-auth').digest('hex');
@@ -146,8 +159,13 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 	// -------------------------------------------------------------------------
 	// GET /login — show the login form
 	// -------------------------------------------------------------------------
-	server.get('/login', async (_request: FastifyRequest, reply: FastifyReply) => {
-		return reply.viewAsync('login', { title: 'Login — PAS', error: null });
+	server.get('/login', async (request: FastifyRequest, reply: FastifyReply) => {
+		// I4/I7: surface WHY the user landed here (forced sign-out reason) so
+		// login.eta can render a plain-language explanation instead of a bare
+		// form. `reason` is an enum of known values only — never rendered
+		// unescaped, and unknown values render nothing (see login.eta).
+		const query = request.query as Record<string, string | undefined>;
+		return reply.viewAsync('login', { title: 'Login — PAS', error: null, reason: query.reason });
 	});
 
 	// -------------------------------------------------------------------------
@@ -166,7 +184,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 			if (loginRateLimiter && !loginRateLimiter.isAllowed(clientIp)) {
 				return reply.status(429).viewAsync('login', {
 					title: 'Login — PAS',
-					error: 'Too many login attempts. Please try again later.',
+					error: rateLimitMessage(loginRateLimiter),
 				});
 			}
 			const submitted = body?.token ?? '';
@@ -195,7 +213,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 			if (loginRateLimiter && !loginRateLimiter.isAllowed(clientIp)) {
 				return reply.status(429).viewAsync('login', {
 					title: 'Login — PAS',
-					error: 'Too many login attempts. Please try again later.',
+					error: rateLimitMessage(loginRateLimiter),
 				});
 			}
 
@@ -242,7 +260,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		if (loginRateLimiter && !loginRateLimiter.isAllowed(clientIp)) {
 			return reply.status(429).viewAsync('login', {
 				title: 'Login — PAS',
-				error: 'Too many login attempts. Please try again later.',
+				error: rateLimitMessage(loginRateLimiter),
 			});
 		}
 
@@ -280,7 +298,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		if (loginRateLimiter && !loginRateLimiter.isAllowed(userLimitKey)) {
 			return reply.status(429).viewAsync('login', {
 				title: 'Login — PAS',
-				error: 'Too many login attempts for this account. Please try again later.',
+				error: rateLimitMessage(loginRateLimiter, ' for this account'),
 			});
 		}
 
