@@ -406,7 +406,7 @@ Remaining audit areas, ordered by priority against the open-source goal. Areas 1
 | 2 | **Fresh-install reality check** — clean-VM walkthrough of README Quick Start + DEPLOYMENT.md (clone → configure → first Telegram message), including the launchd/Docker paths | Docs have never been executed by a non-author on a non-author machine; first-run failure is the #1 cause of abandoned OSS evaluations. (Passing observation from pass 4: the launchd plist in DEPLOYMENT.md references `dist/core/src/main.js`, which does not match the actual build layout — likely one of several stale spots.) | **Done — Fifth-Pass Review below** |
 | 3 | **Privacy / data-flow statement** — document exactly what leaves the machine (Anthropic API receives transcripts/prompts on standard tier; n8n webhooks; nothing else) and under which settings | "Local-first" is the pitch; users will ask precisely this. Complements the existing secret-redaction proposal (code half) in open-items | **Done — Sixth-Pass Review below** |
 | 4 | **Backup/restore drill** — rehearse a full restore: markdown tree + `chat-state.db` + YAML indexes + vault symlinks; document ordering/consistency assumptions | BackupService exists but restore has never been exercised; recovery claims are untested | **Done — Seventh-Pass Review below** |
-| 5 | **Long-horizon resource audit** — project `data/` growth over years (transcripts, photos, `change-log.jsonl`, regression cache, SQLite WAL); define retention policies beyond P5's opt-in session prune | System is designed to run indefinitely; unbounded growth is a slow failure | Open |
+| 5 | **Long-horizon resource audit** — project `data/` growth over years (transcripts, photos, `change-log.jsonl`, regression cache, SQLite WAL); define retention policies beyond P5's opt-in session prune | System is designed to run indefinitely; unbounded growth is a slow failure | **Done — Eighth-Pass Review below** |
 | 6 | **Dependency / supply-chain pass** — `pnpm audit`, outdated majors, pinning policy, lockfile hygiene | Routine, but becomes public-facing hygiene the moment other households run this lockfile | Open |
 
 Already covered elsewhere: test-suite quality (staged review queued in `docs/test-review-roadmap.md`); GUI accessibility (partially, M7 + Batch 2); user-facing docs accuracy (USER_GUIDE) folds naturally into area 2.
@@ -640,3 +640,66 @@ Retention rotation is correct (lexicographic sort of ISO-timestamped names = chr
 2. **One docs session:** BKP-2 restore-doc completion (+ BKP-4's assumptions written down); pairs naturally with the INST-2/3/6/7 DEPLOYMENT/OPERATIONS batch.
 3. **Small code batch (pre-open-source, not blocking):** BKP-3 flag coupling, BKP-4 auto-disable exemption, BKP-5 path guard.
 4. **Fold into Docker work:** BKP-6 busybox-tar verification alongside INST-5.
+
+---
+---
+
+# Eighth-Pass Review (2026-07-06): Long-Horizon Resource Audit
+
+Audit of area #5 from the roadmap. Method: measured every growth surface in the live `data/` tree (deployed 2026-03-10, actively written through 2026-06-15 — a 97-day observation window), traced each store's writer and reader in code, and inventoried every retention mechanism that exists. Projections extrapolate the *observed* single-user rates; multi-user households scale the per-user stores roughly linearly. No code changed.
+
+**Headline:** disk space is a non-issue — at observed rates the canonical data tree grows on the order of **tens of MB per year**, and two feared growth surfaces turned out not to exist (no photos are ever persisted to disk; the FTS index is derived and pruneable). The real long-horizon risks are different: **the production log file has no rotation and lives inside the backup scope** (RES-1), several append-forever files are **read whole** by code that runs at boot or per-GUI-view, so cost grows linearly with age even though bytes don't matter (RES-2, RES-5), and per-run history files accumulate **file-count** rather than bytes (RES-3). One telemetry class (the shadow-classifier log) demonstrated a 40MB/yr appetite while it was enabled (RES-4).
+
+## Measured inventory (97-day window, single user)
+
+| Store | Size today | Rate (observed) | Retention mechanism | Unbounded? |
+|---|---|---|---|---|
+| Chat transcripts (`sessions/*.md`) | 60KB (2 sessions, 144 turns) | ~0.2MB/yr at this usage | **P5 opt-in prune** (`sessions.auto_prune`, default off) + `chat-index-prune` | Yes, by design (canonical) |
+| `chat-state.db` (+WAL/SHM) | 232KB | derived — tracks transcripts | Rebuildable (`chat-index-rebuild`); WAL auto-checkpoints, flushed on shutdown | No (derived) |
+| `change-log.jsonl` | 334KB / 2,052 lines | **~1.0MB/yr** | None — append-forever | **Yes** |
+| `llm-usage.md` | 320KB / 3,391 rows | **~1.0MB/yr** | None — append-forever | **Yes** |
+| Shadow-classifier log | 6.1MB archived + 4KB live | **~40MB/yr while enabled** (Mar 10–May 5) | Per-entry truncation only; the one archive was manual | **Yes, when enabled** |
+| Report/alert history | 140KB, 9 run-files | 1 file per run — an hourly alert would add **~8,760 files/yr** | None (MAX_REPORTS/MAX_ALERTS cap *definitions*, not history) | **Yes (file count)** |
+| `daily-diff/` | 100KB, 23 files | ~365 small files/yr | None | Yes (slow) |
+| Regression cache | 4.4MB / 78 files | grows per model ever tried | None — no eviction | **Yes** |
+| `pas.log` (production only) | n/a locally (dev mode = stdout only) | est. 10–100MB/yr at info level | **None — single file, no rotation** | **Yes** |
+| Model journal | 12KB | bounded | Monthly archive rotation (`model-journal-archive/<slug>/YYYY-MM.md`) ✅ | No |
+| Vaults | 0B (symlinks) | — | Rebuilt at boot ✅ | No |
+| Receipt/recipe photos | **0 bytes — never persisted** | — | Processed in-memory; only extracted text is stored | No |
+| Backups | outside `data/` by default | retention_count × archive size | Rolling retention ✅ (when enabled — see BKP-1) | No |
+
+**Three-year projection at observed usage:** canonical tree ≈ 20–60MB; with regression experimentation and one telemetry campaign ≈ 100–250MB; production `pas.log` is the wildcard (potentially larger than everything else combined). A 32GB Mac Mini will not notice any of this for a decade. The findings below are therefore about *cost-of-reading* and *operability*, not disk exhaustion.
+
+## Findings
+
+### RES-1. Production log file: no rotation, and it lives inside the backup scope
+`createLogger` in production adds a pino file transport to a **single file**, `data/system/logs/pas.log` (`core/src/services/logger/index.ts:59-66`) — no size cap, no rotation, no retention. Two compounding effects: (a) it grows without bound for the life of the deployment; (b) it sits inside `data/`, so **every nightly backup archives the entire log history again** — the tar.gz series inflates with redundant log bytes. The current live deployment runs `pnpm dev` (pretty stdout, no file transport), which is why this hasn't bitten yet — it bites exactly when someone deploys "properly." **Fix:** add rotation (e.g. `pino-roll` size/date-based with a keep-count) *or* move logs out of `data/` (launchd already redirects stdout to `~/Library/Logs/pas/`); either alone fixes the backup inflation.
+
+### RES-2. `llm-usage.md` is append-forever *and* read whole in hot paths
+The cost tracker's rebuild path reads the **entire** usage log (`cost-tracker.ts:234`, triggered when the monthly cache needs reconstruction at boot) and the GUI usage page reads the whole file per view (`readUsage()`, `cost-tracker.ts:512`). At ~1MB/yr the bytes are trivial, but the pattern is linear-with-age on a file that never resets — after some years, boot-time rebuild and every `/gui/llm-usage` render pay for the full deployment history. **Fix:** monthly rotation using the model-journal pattern that already exists (`llm-usage/YYYY-MM.md`); `rebuildFromLog` only ever cares about the current month anyway, and the GUI defaults to recent months with older files loaded on demand.
+
+### RES-3. Report/alert history: one file per run, forever — a file-count problem, not a byte problem
+Every report run and alert fire writes a timestamped markdown file under `data/system/report-history/<id>/` (`reports/index.ts:461-469`, `alerts/index.ts:662-670`) with no retention of any kind. An hourly alert generates ~8,760 files/yr, indefinitely. Mitigating factors verified: `FileIndexService` scans only `users/spaces/households/collaborations` — **not** `data/system` — so the in-memory index and boot walk don't inflate (`file-index/index.ts:42`), and vaults don't expose system dirs. The pain arrives via directory listings (GUI history views, backup tar walks, Obsidian if someone points it at `data/` wholesale). **Fix:** per-target retention — keep last N run-files (N≈100), with an optional monthly-digest archive for the rest, consistent with the "archive, don't delete" principle.
+
+### RES-4. Telemetry logs have per-entry caps but no file rotation — and one of them demonstrated a 40MB/yr appetite
+The shadow-classifier log grew to **6.1MB in eight weeks** while shadow mode was active (Mar 10–May 5); its one archive (`shadow-classifier-log.archive-2026-05-05.md`) was a manual intervention, not code — no `archive-` writer exists anywhere in `core/` or `apps/`. `route-verification-log.md` and `session-control-log.md` follow the same pattern (per-entry `MAX_MSG` truncation, no file-level rotation); their observed rates are tiny, but they share the failure mode: any future telemetry campaign (new classifier shadow run, T-track migration validation) re-creates the 6MB/8wk situation with no automatic relief. **Fix:** a shared size-triggered rotate-to-archive helper (the model-journal archive naming convention is the precedent) applied to the three telemetry logs; cheap and closes the class.
+
+### RES-5. `change-log.jsonl` is append-forever and read whole by the daily diff
+~1MB/yr, no rotation, and `daily-diff/collector.ts:28` does `readFile` of the entire file (daily cron + `/changes` API). Same shape as RES-2, a decade from mattering at current rates — but a busy multi-user household with chatty apps multiplies the write rate, and the whole-file read runs *daily*. **Fix:** monthly rotation (`change-log/YYYY-MM.jsonl`); the collector only wants a 24-hour window and would read at most two monthly files.
+
+### RES-6. Regression cache never evicts — entries for abandoned models persist forever
+4.4MB across 78 files today; the cache key is model-ID-aware by design (good for comparisons), which means every model ever tried in `--model-matrix` experiments leaves its result set on disk permanently — no eviction, no age-out, nothing in `regression/src/runner/cache.ts`. **Fix (low priority):** an age-based sweep or a `/gui/regression` "clear caches for models not in the current tier map" button.
+
+### RES-7. Retention posture is implicit, not documented (observation)
+The system's actual policy today is: transcripts pruneable (opt-in), model journal rotated, backups rotated — **everything else append-forever**, in line with the "history never deleted" principle. That's a defensible stance for a local-first system, but it's written down nowhere; an operator asking "what grows and what can I safely delete?" has no answer short of reading code. **Fix (docs):** a short "Data growth & retention" section in OPERATIONS.md — essentially the measured-inventory table above plus which stores are safe to prune/rotate — folded into the same OPERATIONS.md session as BKP-2.
+
+## Verified strong (for the record)
+
+**No photos are ever written to disk** — receipt/recipe/pantry images are processed in-memory and only extracted text persists (0 image files in a 4-month-old deployment; also independently good for the privacy posture). **FTS index is genuinely derived** — rebuildable and pruneable (`chat-index-rebuild`/`chat-index-prune`), WAL auto-checkpoints and is flushed on shutdown (`compose-runtime.ts:1750`). **FileIndexService is scoped** to user-data trees, so system-dir file growth cannot inflate the in-memory index or boot scan. **Model journal rotation** works and is the reusable pattern for RES-2/4/5. **P5 transcript prune** exists with sane bounds (1–3650 days) and honest destructive-operation warnings. **Backup retention** rotates correctly (verified in the seventh pass). **MAX_REPORTS/MAX_ALERTS** cap definition counts. **Vaults are zero-byte** symlink trees.
+
+## Recommended sequencing
+
+1. **Fold into the existing OPERATIONS.md session** (with BKP-2/INST batch): RES-7 retention documentation — zero code, closes the "what grows?" question for operators.
+2. **One small code batch, pre-open-source:** RES-1 log rotation (highest leverage — it's the wildcard store and poisons backups), RES-2 + RES-5 monthly rotation via the model-journal pattern, RES-4 shared telemetry rotate-to-archive helper.
+3. **Post-launch, low priority:** RES-3 history retention (keep-last-N), RES-6 regression-cache sweep.
+4. Re-measure the table above after a year of multi-user operation; the single-user rates here are the baseline.
