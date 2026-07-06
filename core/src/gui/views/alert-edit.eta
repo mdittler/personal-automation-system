@@ -159,7 +159,7 @@
           </label>
           <label>
             Scope
-            <div>
+            <div role="radiogroup" aria-label="Data source scope">
               <label style="display:inline-flex;align-items:center;gap:0.4rem;margin-right:1rem">
                 <input type="radio" name="ds_scope_<%= i %>" value="user" <%= !isDsSpaceScope ? 'checked' : '' %> onchange="toggleScope(<%= i %>,'ds')" /> User
               </label>
@@ -355,7 +355,7 @@ function addDataSource() {
   var html = '<fieldset class="section-fieldset">';
   html += '<div class="grid">';
   html += '<label>App ID' + buildAppSelect('ds_app_id_' + i, '') + '</label>';
-  html += '<label>Scope<div>';
+  html += '<label>Scope<div role="radiogroup" aria-label="Data source scope">';
   html += '<label style="display:inline-flex;align-items:center;gap:0.4rem;margin-right:1rem"><input type="radio" name="ds_scope_' + i + '" value="user" checked onchange="toggleScope(' + i + ',\'ds\')" /> User</label>';
   html += '<label style="display:inline-flex;align-items:center;gap:0.4rem"><input type="radio" name="ds_scope_' + i + '" value="space" onchange="toggleScope(' + i + ',\'ds\')" /> Space</label>';
   html += '</div></label>';
