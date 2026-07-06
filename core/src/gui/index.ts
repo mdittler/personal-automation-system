@@ -14,6 +14,7 @@ import type { AlertService } from '../services/alerts/index.js';
 import type { ApiKeyService } from '../services/api-keys/index.js';
 import type { AppRegistry } from '../services/app-registry/index.js';
 import type { AppToggleStore } from '../services/app-toggle/index.js';
+import type { ChatTranscriptIndex } from '../services/chat-transcript-index/index.js';
 import type { SystemConfigWriter } from '../services/config/system-config-writer.js';
 import type { ContextStoreServiceImpl } from '../services/context-store/index.js';
 import type { CredentialService } from '../services/credentials/index.js';
@@ -45,6 +46,7 @@ import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerDataRoutes } from './routes/data.js';
 import { registerLlmUsageRoutes } from './routes/llm-usage.js';
 import { registerLogsRoutes } from './routes/logs.js';
+import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerRegressionRoutes } from './routes/regression.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerSchedulerRoutes } from './routes/scheduler.js';
@@ -105,6 +107,13 @@ export interface GuiOptions {
 	systemConfig?: SystemConfig;
 	/** `false` ⇒ login-by-name disabled (see scanForDuplicateNames). Default `true`. */
 	loginByNameAllowed?: boolean;
+	/**
+	 * Batch 2 (GUI UX redesign): chat transcript FTS index, used by the
+	 * permission-scoped activity-daily metrics endpoint (message counts) and,
+	 * in a later batch, the Conversations browser. Optional — when absent,
+	 * activity-daily's message counts are always 0 rather than erroring.
+	 */
+	chatTranscriptIndex?: Pick<ChatTranscriptIndex, 'countMessagesByDay'>;
 }
 
 /**
@@ -165,6 +174,11 @@ export async function registerGuiRoutes(
 
 			// Content routes
 			registerDashboardRoutes(gui, { registry, scheduler, config, modelSelector, dataDir, logger });
+			registerMetricsRoutes(gui, {
+				dataDir,
+				chatTranscriptIndex: options.chatTranscriptIndex,
+				logger,
+			});
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir, logger });
 			registerSchedulerRoutes(gui, { scheduler, timezone: config.timezone, logger });
 			registerLogsRoutes(gui, { dataDir, logger });
