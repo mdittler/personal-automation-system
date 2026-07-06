@@ -368,6 +368,18 @@ describe('GUI Routes', () => {
 			const res = await authenticatedGet(app, '/gui/');
 			expect(res.body).toContain('1'); // One loaded app (echo)
 		});
+
+		it('wires global loading indicators for htmx and full-page form submits (I6)', async () => {
+			const res = await authenticatedGet(app, '/gui/');
+			// htmx request lifecycle hooks disable the triggering submit + toggle aria-busy
+			expect(res.body).toContain('htmx:beforeRequest');
+			expect(res.body).toContain('htmx:afterRequest');
+			expect(res.body).toContain('aria-busy');
+			// Full-page (non-htmx) form submits also get a disabled/aria-busy submit button
+			expect(res.body).toContain("addEventListener('submit'");
+			// Visible spinner class exists so .htmx-request has a rendered indicator
+			expect(res.body).toContain('pas-spinner');
+		});
 	});
 
 	describe('GET /gui/apps', () => {

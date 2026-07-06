@@ -31,6 +31,7 @@
       <a href="/gui/" class="pas-topbar-link <% if (it.activePage === 'dashboard') { %>active<% } %>" title="Dashboard">
         Dashboard
       </a>
+      <span class="pas-spinner" id="pas-global-spinner" role="status" aria-label="Loading" aria-hidden="true"></span>
     </div>
     <div class="pas-topbar-right">
       <% if (it.currentUser) { %>
@@ -261,6 +262,59 @@
       });
       document.addEventListener('htmx:sendError', function() {
         showToast('<div class="pas-error-card" role="alert"><strong>Something went wrong</strong><p>Check your connection and try again.</p></div>');
+      });
+
+      // Global loading indicators + disabled submits during requests (I6).
+      // htmx requests: disable the triggering submit button and mark it
+      // aria-busy while the request is in flight (so a slow request can't
+      // be double-submitted), and show the topbar spinner as a global,
+      // always-visible loading cue regardless of which element triggered
+      // the request.
+      var globalSpinner = document.getElementById('pas-global-spinner');
+      var inFlightCount = 0;
+      document.addEventListener('htmx:beforeRequest', function(evt) {
+        inFlightCount++;
+        if (globalSpinner) globalSpinner.classList.add('htmx-request');
+        var el = evt.target;
+        if (!el || !(el instanceof Element)) return;
+        var submitBtn = el.matches && el.matches('button, input[type="submit"]')
+          ? el
+          : el.querySelector && el.querySelector('button[type="submit"], input[type="submit"]');
+        if (submitBtn) {
+          submitBtn.setAttribute('aria-busy', 'true');
+          submitBtn.disabled = true;
+        }
+      });
+      document.addEventListener('htmx:afterRequest', function(evt) {
+        inFlightCount = Math.max(0, inFlightCount - 1);
+        if (globalSpinner && inFlightCount === 0) globalSpinner.classList.remove('htmx-request');
+        var el = evt.target;
+        if (!el || !(el instanceof Element)) return;
+        var submitBtn = el.matches && el.matches('button, input[type="submit"]')
+          ? el
+          : el.querySelector && el.querySelector('button[type="submit"], input[type="submit"]');
+        if (submitBtn) {
+          submitBtn.removeAttribute('aria-busy');
+          submitBtn.disabled = false;
+        }
+      });
+
+      // Full-page (non-htmx) form submits: disable the submit button and
+      // mark it aria-busy AFTER the browser has serialized the form data,
+      // so the disabled attribute doesn't drop the button's value from the
+      // submission. setTimeout(0) defers past the current submit tick.
+      document.addEventListener('submit', function(evt) {
+        var form = evt.target;
+        if (!form || !(form instanceof HTMLFormElement)) return;
+        if (form.hasAttribute('hx-post') || form.hasAttribute('hx-get') || form.hasAttribute('hx-put') || form.hasAttribute('hx-delete')) {
+          return; // htmx owns this form's lifecycle instead
+        }
+        var submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+        if (!submitBtn) return;
+        window.setTimeout(function() {
+          submitBtn.setAttribute('aria-busy', 'true');
+          submitBtn.disabled = true;
+        }, 0);
       });
     })();
   </script>

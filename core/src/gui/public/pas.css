@@ -484,6 +484,38 @@ table tbody tr:nth-child(even):hover {
 	display: none;
 }
 
+/* ----- 9c. Global loading indicator (I6) ----- */
+/* Shown alongside any element htmx has marked as in-flight
+   (htmx adds/removes .htmx-request automatically during a request). */
+.pas-spinner {
+	display: none;
+	width: 1em;
+	height: 1em;
+	margin-left: 0.4em;
+	border: 2px solid var(--pas-border);
+	border-top-color: var(--pas-primary);
+	border-radius: 50%;
+	vertical-align: middle;
+	animation: pas-spin 0.6s linear infinite;
+}
+
+.htmx-request .pas-spinner,
+.htmx-request.pas-spinner {
+	display: inline-block;
+}
+
+@keyframes pas-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+button[aria-busy="true"],
+input[aria-busy="true"] {
+	opacity: 0.7;
+	cursor: progress;
+}
+
 /* ----- 9b. Regression terminal banners ----- */
 /* `gate-failed` is a model result, not a crash — it must read amber/warning,
    visibly distinct from the red `failed` (real error) state. */
