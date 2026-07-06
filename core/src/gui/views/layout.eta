@@ -7,6 +7,9 @@
   <link rel="stylesheet" href="/gui/public/pico.min.css" />
   <link rel="stylesheet" href="/gui/public/pas.css" />
   <script src="/gui/public/htmx.min.js"></script>
+  <% if (it.charts && it.charts.length > 0) { %>
+  <script src="/gui/public/chart.umd.min.js"></script>
+  <% } %>
   <% if (it.csrfToken) { %>
   <meta name="csrf-token" content="<%= it.csrfToken %>" />
   <% } %>
@@ -169,6 +172,10 @@
       </footer>
     </div>
   </div>
+
+  <% if (it.charts && it.charts.length > 0) { %>
+  <script src="/gui/public/pas-charts.js"></script>
+  <% } %>
 
   <script>
     (function() {

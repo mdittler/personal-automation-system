@@ -87,4 +87,14 @@ describe('createServer', () => {
 		expect(res.headers['content-type']).toContain('javascript');
 		expect(res.body).toContain('Chart.js');
 	});
+
+	it('serves the chart-agnostic slot renderer used by the declarative chart registry', async () => {
+		server = await createServer({ logger });
+
+		const res = await server.inject({ method: 'GET', url: '/gui/public/pas-charts.js' });
+
+		expect(res.statusCode).toBe(200);
+		expect(res.headers['content-type']).toContain('javascript');
+		expect(res.body).toContain('data-pas-chart');
+	});
 });

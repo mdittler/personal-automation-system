@@ -690,3 +690,36 @@ fieldset {
 	margin-bottom: 1rem;
 	border-radius: var(--pas-radius-sm);
 }
+
+/* ----- 18. Chart slots (Batch 2: declarative chart registry) ----- */
+/* Rendered by pas-charts.js from core/src/gui/charts/registry.ts descriptors.
+   Never hand-write per-chart CSS — this block is generic for all charts. */
+.pas-chart-card {
+	background: var(--pas-card-bg, var(--pico-card-background-color));
+	border: 1px solid var(--pas-border);
+	border-radius: var(--pas-radius-sm);
+	padding: 1rem;
+	margin-bottom: 1rem;
+}
+
+.pas-chart-card h3 {
+	margin-top: 0;
+	font-size: 1rem;
+}
+
+.pas-chart-slot {
+	position: relative;
+	width: 100%;
+}
+
+.pas-chart-slot canvas {
+	width: 100% !important;
+	height: 100% !important;
+}
+
+.pas-chart-unavailable {
+	color: var(--pas-text-muted);
+	font-size: 0.9rem;
+	text-align: center;
+	padding: 2rem 0;
+}
