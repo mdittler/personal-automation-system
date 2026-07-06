@@ -407,7 +407,7 @@ Remaining audit areas, ordered by priority against the open-source goal. Areas 1
 | 3 | **Privacy / data-flow statement** — document exactly what leaves the machine (Anthropic API receives transcripts/prompts on standard tier; n8n webhooks; nothing else) and under which settings | "Local-first" is the pitch; users will ask precisely this. Complements the existing secret-redaction proposal (code half) in open-items | **Done — Sixth-Pass Review below** |
 | 4 | **Backup/restore drill** — rehearse a full restore: markdown tree + `chat-state.db` + YAML indexes + vault symlinks; document ordering/consistency assumptions | BackupService exists but restore has never been exercised; recovery claims are untested | **Done — Seventh-Pass Review below** |
 | 5 | **Long-horizon resource audit** — project `data/` growth over years (transcripts, photos, `change-log.jsonl`, regression cache, SQLite WAL); define retention policies beyond P5's opt-in session prune | System is designed to run indefinitely; unbounded growth is a slow failure | **Done — Eighth-Pass Review below** |
-| 6 | **Dependency / supply-chain pass** — `pnpm audit`, outdated majors, pinning policy, lockfile hygiene | Routine, but becomes public-facing hygiene the moment other households run this lockfile | Open |
+| 6 | **Dependency / supply-chain pass** — `pnpm audit`, outdated majors, pinning policy, lockfile hygiene | Routine, but becomes public-facing hygiene the moment other households run this lockfile | **Done — Ninth-Pass Review below. Roadmap complete.** |
 
 Already covered elsewhere: test-suite quality (staged review queued in `docs/test-review-roadmap.md`); GUI accessibility (partially, M7 + Batch 2); user-facing docs accuracy (USER_GUIDE) folds naturally into area 2.
 
@@ -703,3 +703,59 @@ The system's actual policy today is: transcripts pruneable (opt-in), model journ
 2. **One small code batch, pre-open-source:** RES-1 log rotation (highest leverage — it's the wildcard store and poisons backups), RES-2 + RES-5 monthly rotation via the model-journal pattern, RES-4 shared telemetry rotate-to-archive helper.
 3. **Post-launch, low priority:** RES-3 history retention (keep-last-N), RES-6 regression-cache sweep.
 4. Re-measure the table above after a year of multi-user operation; the single-user rates here are the baseline.
+
+---
+---
+
+# Ninth-Pass Review (2026-07-06): Dependency / Supply-Chain Audit
+
+Audit of area #6 — the final area on the roadmap. Method: ran `pnpm audit` (full advisory review, not just the count), `pnpm -r outdated` across all workspaces, and inspected the pinning/lockfile/install-script posture (`package.json` manifests, `pnpm-workspace.yaml`, Dockerfile, hook chain, CI presence). No code changed.
+
+**Headline:** the *structural* hygiene is genuinely good — one lockfile, no stray npm/yarn artifacts, no git/URL dependencies, a lean 34-direct-dependency tree, pinned `packageManager`, `--frozen-lockfile` in Docker, and pnpm 10's install-script allowlist blocking postinstall scripts for everything except three vetted native packages. What's missing is *cadence and automation*: the lockfile hasn't been refreshed since ~May, which is the entire reason **35 known vulnerabilities (2 critical, 13 high, 19 moderate, 1 low)** have accumulated — nearly all of them patched upstream within the semver ranges the manifests already allow — and there is no CI, no scheduled audit, and no automated update flow to prevent the same drift from recurring after publication.
+
+## Findings
+
+### DEP-1. 35 known vulnerabilities, most fixable by a single in-range update
+Current advisory state (2026-07-06):
+
+| Package (version) | Sev. | Reaches production? | Patched in | Notes |
+|---|---|---|---|---|
+| `fastify` 5.7.4 | **1 high**, 2 mod | **Yes — the HTTP server** | ≥5.8.5 | High: body schema validation bypass via leading space in Content-Type; moderates include `X-Forwarded-*` spoofing — directly relevant to the documented `TRUST_PROXY`/tunnel deployment |
+| `@fastify/static` 9.0.0 | 2 mod | **Yes — serves `/gui/public`** | ≥9.1.1 | Path traversal in directory listing + route-guard bypass via encoded separators |
+| `fast-uri` 3.1.0 (via `ajv`) | 2 high | Yes (manifest/schema validation) | ≥3.1.2 | Percent-encoding traversal/host confusion |
+| `protobufjs` 7.5.4 (via `@google/genai`) | **1 critical**, 4 high, 5 mod | Yes — provider imports are **static**, so the tree loads in every install even with no Google key | ≥7.6.3 | Critical is arbitrary code execution in generated-code paths; practical exploitability here is low (client talks to Google's own API), but it's in the loaded tree |
+| `ws` 8.19.0 (via `@google/genai`) | 1 high, 1 mod | Yes | ≥8.21.0 | DoS + memory disclosure |
+| `yaml` 2.8.2 | 1 mod | Yes (config/data parsing) | ≥2.8.3 | Stack overflow on deeply nested collections |
+| `brace-expansion`, `@protobufjs/utf8` | 4 mod | Yes (transitive) | patch bumps | DoS-class |
+| `vitest` 3.2.4 | **1 critical** | Dev only (UI server) | ≥3.2.6 | Plus `vite` (3 high/2 mod), `picomatch` (1 high/1 mod), `postcss` (1 mod) — all dev-tree |
+| `esbuild` 0.27.3 (via `tsx`) | 1 low | See DEP-5 | ≥0.28.1 | Dev-server-on-Windows scenario |
+
+Nearly everything lands within existing caret ranges — **one `pnpm update -r` + full test run clears the bulk**, including both fastify GUI-surface issues and the vitest critical. The exception: protobufjs ≥7.6.3 requires `@google/genai` 2.x (current manifest allows 1.x) or a `pnpm.overrides` pin. The root cause is not policy but cadence — the lockfile has simply not been refreshed since the last dependency-touching phase.
+
+### DEP-2. No CI exists — no automated tests, lint, audit, or anything else
+`.github/workflows` does not exist. Every quality gate (tsc, Biome, the test suite) runs only in local git hooks, which forks and PR contributors won't have. Nothing anywhere runs `pnpm audit` — today's 35-advisory state was invisible until this pass. For a public repo this is the single highest-leverage gap: a fork PR gets zero checks, and the README's quality claims are unverifiable. **Fix:** one GitHub Actions workflow — install (frozen lockfile), build, lint, test, `pnpm audit --prod --audit-level=high` as a soft gate, plus the SEC-2 gitleaks job already queued. This closes SEC-2 and DEP-2 in the same file.
+
+### DEP-3. No automated update flow and no fresh-package protection
+No Renovate/Dependabot config, and pnpm's `minimumReleaseAge` is unset. Given the 2025–26 wave of npm account-takeover attacks (malicious versions typically caught within days of publish), `minimumReleaseAge` (e.g. 4–7 days) in `pnpm-workspace.yaml` is a one-line control that makes the update cadence from DEP-1's fix safe to automate. **Fix:** add `minimumReleaseAge`, then a Renovate config (grouped weekly PRs, majors separated) so the DEP-1 situation cannot silently recur.
+
+### DEP-4. Major-version backlog — needs an upgrade ledger, not a blanket bump
+Majors currently behind: `@anthropic-ai/sdk` 0.78 → 0.110 (**32 minor versions behind — notable for an LLM-centric product**: new model IDs, pricing metadata, and API features accrue there), `@google/genai` 1 → 2 (carries the protobufjs fix — do this one), `zod` 3 → 4 (core + food, real migration), `better-sqlite3` 11 → 12 (native module, Node-version coupling), `@fastify/view` 11 → 12, `emittery` 1 → 2, and the dev toolchain (`vitest` 3 → 4, `@biomejs/biome` 1.9 → 2.5, `typescript` 5 → 6 — each a config-migration session). None are urgent except as noted; the failure mode to avoid is doing them accidentally inside an unrelated `pnpm update`. **Fix:** record them (this table is the ledger), pin update automation to exclude majors, and schedule the Anthropic SDK + `@google/genai` bumps first.
+
+### DEP-5. The dev/prod dependency boundary is blurred while tsx is the production runtime
+`tsx` is a devDependency, but per INST-2 the only working non-Docker run mode is `pnpm dev` (tsx watch) — the current live deployment runs on it. Until INST-2 lands, dev-tree advisories (esbuild et al.) are effectively production advisories for native installs, and `pnpm install --prod` cannot produce a runnable native deployment. No action beyond what INST-2 already prescribes — recorded here so the audit trail explains why "dev-only" is not fully reassuring today. (Docker is unaffected: the image prunes to prod deps and runs compiled JS.)
+
+## Verified strong (for the record)
+
+**Install-script allowlist:** pnpm 10 blocks lifecycle scripts by default and `onlyBuiltDependencies` permits exactly three vetted native builds (`@biomejs/biome`, `better-sqlite3`, `esbuild`) — a strong default against install-time supply-chain attacks. **Lockfile hygiene:** single `pnpm-lock.yaml`, no stray `package-lock.json`/`yarn.lock`, Docker builds with `--frozen-lockfile`, `packageManager` pinned to an exact pnpm version with engines enforcement. **Tree discipline:** 34 unique direct dependencies across all six workspace manifests, no git/URL/file dependencies, no deprecated-registry sources. **Update mechanics:** caret ranges + committed lockfile is the right shape — the manifests already permit every non-major security fix identified above.
+
+## Recommended sequencing
+
+1. **Now (one session, pre-publication):** DEP-1 — `pnpm update -r`, bump `@google/genai` to 2.x (or add a protobufjs override), run the full suite, confirm `pnpm audit` is clean. This also de-risks the README the moment the repo is public.
+2. **Pre-publication (pairs with SEC-2):** DEP-2 — GitHub Actions workflow with build/lint/test/audit + gitleaks.
+3. **Same week:** DEP-3 — `minimumReleaseAge` + Renovate config so the drift never re-accumulates.
+4. **Scheduled, not urgent:** DEP-4 ledger — Anthropic SDK and `@google/genai` majors first; toolchain majors as standalone sessions.
+5. DEP-5 resolves itself when INST-2 lands.
+
+---
+
+**This completes the audit roadmap.** All six areas are done: security & trust boundary (pass 4), fresh-install reality (pass 5), privacy/data-flow (pass 6), backup/restore (pass 7), long-horizon resources (pass 8), and dependency/supply-chain (pass 9). Cross-cutting priority order for the fix work lives in `docs/open-items.md`; the single highest-leverage items surfaced by the whole audit series are INST-1 (fresh-install boot crash), SEC-1 (PII scrub + history decision), DEP-1/DEP-2 (update + CI), and BKP-1 (enable backups in production).
