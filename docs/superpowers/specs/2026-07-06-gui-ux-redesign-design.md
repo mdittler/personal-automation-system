@@ -16,7 +16,7 @@ Reorganize the management GUI around what a nontechnical person is trying to do,
 | Audience | Both personas (admin and member) are nontechnical. |
 | Priority workflows | All four: Reports & Alerts creation, Dashboard/orientation, People & household admin, Data browsing & settings — **plus** surfacing backend functionality that has no UI today, and adding useful metrics with graphs. |
 | Charts | Vendor a small chart library (Chart.js UMD build) alongside the existing vendored `htmx.min.js`/`pico.min.css`. No CDN; local-first preserved. |
-| Device | Desktop/laptop first. Mobile stays functional via the existing responsive sidebar; no mobile-first rework. |
+| Device | **Truly both** (amended 2026-07-06 after initial "desktop first" answer): the system is intended to be shared, and how others will use it is unknown — every redesigned flow must be first-class on both desktop and phone. See "Responsive requirements" in §5. |
 | Approach | B — task-oriented restructure. Keep the stack (Fastify + Eta + htmx + Pico CSS) and all backend services/route contracts; reorganize presentation. (A "polish in place" and C "full rebuild" were considered and rejected: A doesn't streamline workflows; C has unacceptable correctness risk.) |
 
 ## Non-goals
@@ -115,12 +115,20 @@ Steps:
 
 **Voice:** sentence case, verb-first buttons, no raw exception strings, errors say what happened + what to do, empty states invite rather than apologize.
 
+**Responsive requirements** (every redesigned or new page — the system will be shared and the audience's devices are unknown):
+- Single-column layout at narrow viewports: metric cards stack, wizard steps are one column, tables that can't fit collapse to stacked label/value rows or scroll horizontally without breaking the page.
+- Touch targets ≥ 44×44 px for all interactive elements (buttons, step navigation, picker cards, chart legend toggles).
+- Charts resize with the viewport (Chart.js responsive mode) and remain legible at ~375 px width; where a chart is too dense for phones, show a simplified variant, not a clipped one.
+- The existing hamburger/overlay sidebar remains the mobile navigation; new nav sections must work within it.
+- No hover-only affordances: anything revealed on hover must also be reachable by tap/focus.
+
 ## 6. Correctness strategy
 
 - **Zero failing tests policy holds after every batch.** The existing GUI suite (30+ test files: auth, CSRF, admin guards, escaping, settings concurrency) must stay green.
 - **Contract tests** for both wizards: final submission payload shape equals what the current forms produce, verified against the existing handler expectations.
 - **Schedule presets**: unit tests for preset→cron mapping and next-run preview (uses the scheduler's own parser — no second cron implementation).
 - **New routes** each get tests per `pas-testing-standards`: auth guard, admin/user scoping, CSRF on POSTs, output escaping (transcript content, user-supplied names), error paths.
+- **Responsive verification**: each batch's acceptance includes a manual check of its redesigned pages at a phone viewport (~375 px) and desktop — layout integrity, touch-target size, chart legibility per the §5 responsive requirements. (Server-rendered markup keeps this a check of CSS/markup, not a JS test-infrastructure investment.)
 - **Security posture** (per `pas-security-posture` skill): transcript viewer HTML-escapes all stored content; metrics endpoints derive scope from the session, never from query params alone; backup trigger admin-gated + CSRF; no new path handling accepts user-supplied paths.
 - **Docs:** URS entries + traceability matrix per `pas-urs-workflow`; phase write-up in `docs/implementation-phases.md`; one-line CLAUDE.md status bullet; `docs/open-items.md` updated (retire Batch 2 and D2 as absorbed here).
 
