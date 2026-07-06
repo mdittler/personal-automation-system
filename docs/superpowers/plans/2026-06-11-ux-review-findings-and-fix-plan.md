@@ -405,7 +405,7 @@ Remaining audit areas, ordered by priority against the open-source goal. Areas 1
 | 1 | **Security & trust-boundary audit** — repo hygiene (secrets/PII in tree + history), API/GUI auth surfaces, installer trust model, network exposure | Threat model changes completely when the repo and install surface go public; history scrubbing is irreversible after publication | **Done — Fourth-Pass Review below** |
 | 2 | **Fresh-install reality check** — clean-VM walkthrough of README Quick Start + DEPLOYMENT.md (clone → configure → first Telegram message), including the launchd/Docker paths | Docs have never been executed by a non-author on a non-author machine; first-run failure is the #1 cause of abandoned OSS evaluations. (Passing observation from pass 4: the launchd plist in DEPLOYMENT.md references `dist/core/src/main.js`, which does not match the actual build layout — likely one of several stale spots.) | **Done — Fifth-Pass Review below** |
 | 3 | **Privacy / data-flow statement** — document exactly what leaves the machine (Anthropic API receives transcripts/prompts on standard tier; n8n webhooks; nothing else) and under which settings | "Local-first" is the pitch; users will ask precisely this. Complements the existing secret-redaction proposal (code half) in open-items | **Done — Sixth-Pass Review below** |
-| 4 | **Backup/restore drill** — rehearse a full restore: markdown tree + `chat-state.db` + YAML indexes + vault symlinks; document ordering/consistency assumptions | BackupService exists but restore has never been exercised; recovery claims are untested | Open |
+| 4 | **Backup/restore drill** — rehearse a full restore: markdown tree + `chat-state.db` + YAML indexes + vault symlinks; document ordering/consistency assumptions | BackupService exists but restore has never been exercised; recovery claims are untested | **Done — Seventh-Pass Review below** |
 | 5 | **Long-horizon resource audit** — project `data/` growth over years (transcripts, photos, `change-log.jsonl`, regression cache, SQLite WAL); define retention policies beyond P5's opt-in session prune | System is designed to run indefinitely; unbounded growth is a slow failure | Open |
 | 6 | **Dependency / supply-chain pass** — `pnpm audit`, outdated majors, pinning policy, lockfile hygiene | Routine, but becomes public-facing hygiene the moment other households run this lockfile | Open |
 
@@ -588,3 +588,55 @@ No telemetry, crash reporting, update checks, or analytics anywhere in `core/` o
 2. **Same session:** PRIV-4 template cleanup (delete or annotate the three dead integration surfaces).
 3. **Small code follow-up (optional but cheap):** PRIV-2's startup log line for the resolved tier→provider map.
 4. **Unchanged:** PRIV-3's code half stays as the existing secret-redaction proposal in open-items.
+
+---
+---
+
+# Seventh-Pass Review (2026-07-06): Backup / Restore Drill
+
+Audit of area #4 from the roadmap. Method: reviewed `BackupService`, its bootstrap wiring, and the OPERATIONS.md restore procedure — then **actually rehearsed the restore** in an isolated scratchpad against the live 16MB data tree: created an archive with the exact tar invocation `BackupService.createBackup()` uses, extracted it, verified file/symlink fidelity, checked SQLite integrity, and exercised the worst case (derived index deleted, rebuilt from restored transcripts). No repo code changed; the live system was untouched except one remediated side effect noted in BKP-3.
+
+**Headline:** the mechanism works — the drill succeeded end-to-end, including the worst-case index rebuild. The real risks are operational, not mechanical: **backups are off by default and off on the only production deployment** (the live `pas.yaml` has no `backup:` section — BackupService has never run in production), the restore doc is missing the steps that make a restore actually complete (index rebuild, `.env`, installed apps), and the recovery tooling has a flag-default footgun that the drill itself tripped over.
+
+## Drill results (executed, not inferred)
+
+| Step | Result |
+|---|---|
+| Archive with BackupService's exact tar shape (`tar -czf … -C <parent> data -C <parent> config`) | ✅ 2.2MB archive from the 16MB live tree, exit 0 |
+| Extract to staging | ✅ 1,015/1,015 files, 6/6 symlinks restored *as symlinks* (tar does not follow them — no data duplication) |
+| Restored `chat-state.db` (+ `-wal` + `-shm`, all captured) | ✅ `PRAGMA integrity_check` = ok |
+| Worst case: derived DB deleted, rebuilt from restored markdown via `chat-index-rebuild --data <restored> --db <restored>` | ✅ 2 sessions / 144 turns indexed, integrity ok |
+| Vault symlink self-heal | ✅ `VaultService.rebuildAll()` runs unconditionally at boot (`compose-runtime.ts:1063`) — dangling absolute links are recreated on first start |
+
+Ordering/consistency assumptions confirmed: the household-migration marker lives *inside* `data/system/`, so a restore does not re-trigger the migration; markdown transcripts are the canonical store and the SQLite index is genuinely reconstructible from them.
+
+## Findings
+
+### BKP-1. Backups are off by default — and off in production
+`backup.enabled` defaults to `false` and the live `config/pas.yaml` has no `backup:` section, so the scheduled backup has **never run** on the real deployment. The only backup that has ever executed is the one-shot pre-migration copy from D5a. For a system holding years of household data, the current protection is whatever the host machine's own backup regime is. **Fix (config-only, do today):** add the four-line `backup:` block to the live config. For the open-source audience, consider flipping the default to `enabled: true` when the platform supports it (tar present, non-Windows) — an opt-out backup is the safer default for non-expert operators.
+
+### BKP-2. The restore doc stops before the restore is actually complete
+OPERATIONS.md's procedure (stop → extract → replace `data/`+`config/` → restart) worked in the drill, but it omits: **(a)** the archive filename pattern is stale (`pas-2026-04-14-030001.tar.gz` vs actual `pas-backup-<ISO-with-T>.tar.gz`); **(b)** the staging dir must exist before `tar -C` into it; **(c)** what the archive does *not* contain — `.env` (all secrets), the codebase itself, and **installed third-party apps** (`install-app` clones into the repo's `apps/`, outside the `data`+`config` scope) — so a bare-machine restore needs repo clone + `.env` recreation + app re-installs, none of which is stated; **(d)** the post-restore `pnpm chat-index-rebuild` step for the derived index (with both `--data` and `--db` if restoring to a staging path); **(e)** a note that vault symlinks carry absolute paths and self-heal on first boot. **Fix:** one editing session on OPERATIONS.md § Backup & Restore adding a "what's in / not in the archive" table and the missing steps.
+
+### BKP-3. `chat-index-rebuild`'s `--data` and `--db` defaults don't travel together (footgun, tripped during the drill)
+Passing only `--data <restored>` reindexes from the restored transcripts but writes to the **live** DB (`--db` independently defaults to `<cwd>/data/system/chat-state.db`, `scripts/chat-index-rebuild.ts:30-36`). The drill hit exactly this; it was harmless (the index stores session/user/household IDs and content, no absolute paths, and the restored transcripts were minutes-old copies of the live ones — the live DB was re-rebuilt from live data immediately after as remediation). But in the reverse recovery scenario — inspecting an *old* backup while the live system exists — the same invocation silently overwrites the live index with stale content. **Fix:** derive the default DB path from `--data` when it's provided (or refuse/warn when the data root and db root differ); one-line doc note meanwhile.
+
+### BKP-4. Live-tree consistency assumptions are real but undocumented
+`createBackup()` tars the live tree with no quiescing or snapshot. Two consequences to document rather than fix: **(a)** `chat-state.db` runs in WAL mode (`schema.ts:63`; the live WAL was 1.7MB — 10× the DB itself), so an archive taken mid-write can capture a torn db/wal pair — acceptable *only because* the index is derived and rebuildable, which is why BKP-2(d)'s rebuild step belongs in the restore doc; **(b)** behavior under concurrent writes differs by platform: GNU tar (Linux/Docker) exits non-zero on "file changed as we read it", making `createBackup()` delete the partial archive and throw — that night's backup simply doesn't happen — while macOS bsdtar tolerates it. Failure *is* surfaced (the scheduler's job-failure notifier Telegrams the admin, URS-SCH-005) — but the notifier's **consecutive-failure auto-disable** applies to `system-backup` like any job: a transient week of failures silently turns backups off until manually re-enabled. **Fix:** exempt `system-backup` from auto-disable (or add a "days since last successful backup" line to `/gui` dashboard / a periodic report).
+
+### BKP-5. No guard against `backup.path` inside the data directory (minor)
+The default (`<dataDir>/../backups`) is safe, but a user-set `path:` under `data/` makes every archive include all previous archives — geometric growth. One `resolve()`-prefix check at config load.
+
+### BKP-6. Docker backup path untested (minor)
+In the container, `BackupService` shells to Alpine's busybox tar; the multi-`-C` invocation should work on busybox but has never been exercised there, and the flow assumes the `/backups` volume mount from DEPLOYMENT.md exists. Verify once when touching the Docker path (pairs with INST-5's compose work).
+
+## Verified strong (for the record)
+
+Retention rotation is correct (lexicographic sort of ISO-timestamped names = chronological; oldest-first deletion honors `retention_count`). Partial archives are deleted on tar failure before rethrow, so a failed run can't poison the retention window. Output is stat-verified nonzero. Symlinks are archived as links, not followed. Windows is an explicit logged no-op matching the docs. The migration marker, model journal, cost cache, and all YAML indexes live under `data/` and are therefore in scope. Scheduled-job failures notify the admin over Telegram with rate limiting (URS-SCH-005).
+
+## Recommended sequencing
+
+1. **Today (operator, config-only):** BKP-1 — enable backups on the live deployment.
+2. **One docs session:** BKP-2 restore-doc completion (+ BKP-4's assumptions written down); pairs naturally with the INST-2/3/6/7 DEPLOYMENT/OPERATIONS batch.
+3. **Small code batch (pre-open-source, not blocking):** BKP-3 flag coupling, BKP-4 auto-disable exemption, BKP-5 path guard.
+4. **Fold into Docker work:** BKP-6 busybox-tar verification alongside INST-5.
