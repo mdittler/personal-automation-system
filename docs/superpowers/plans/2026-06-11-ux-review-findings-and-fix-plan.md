@@ -392,3 +392,74 @@ Every structural latency cost above (L2, L3, L5) is an artifact of the determini
 | L5 | Measure verification frequency; test local verification | gated on regression | S | Component dies in T6b |
 | L3 | Per-purpose model overrides for non-routing classifiers | gated on regression | M | Overlaps cascading-models proposal |
 | L7 | T-track collapses the classifier chain | positive | (roadmap) | Sequencing decision, not new work |
+
+---
+---
+
+# Audit Roadmap (2026-07-06)
+
+Remaining audit areas, ordered by priority against the open-source goal. Areas 1–3 should complete before the repo goes public; 4–6 can follow. Each completed audit appends its findings as a new pass in this document.
+
+| # | Area | Why | Status |
+|---|---|---|---|
+| 1 | **Security & trust-boundary audit** — repo hygiene (secrets/PII in tree + history), API/GUI auth surfaces, installer trust model, network exposure | Threat model changes completely when the repo and install surface go public; history scrubbing is irreversible after publication | **Done — Fourth-Pass Review below** |
+| 2 | **Fresh-install reality check** — clean-VM walkthrough of README Quick Start + DEPLOYMENT.md (clone → configure → first Telegram message), including the launchd/Docker paths | Docs have never been executed by a non-author on a non-author machine; first-run failure is the #1 cause of abandoned OSS evaluations. (Passing observation from pass 4: the launchd plist in DEPLOYMENT.md references `dist/core/src/main.js`, which does not match the actual build layout — likely one of several stale spots.) | Open |
+| 3 | **Privacy / data-flow statement** — document exactly what leaves the machine (Anthropic API receives transcripts/prompts on standard tier; n8n webhooks; nothing else) and under which settings | "Local-first" is the pitch; users will ask precisely this. Complements the existing secret-redaction proposal (code half) in open-items | Open |
+| 4 | **Backup/restore drill** — rehearse a full restore: markdown tree + `chat-state.db` + YAML indexes + vault symlinks; document ordering/consistency assumptions | BackupService exists but restore has never been exercised; recovery claims are untested | Open |
+| 5 | **Long-horizon resource audit** — project `data/` growth over years (transcripts, photos, `change-log.jsonl`, regression cache, SQLite WAL); define retention policies beyond P5's opt-in session prune | System is designed to run indefinitely; unbounded growth is a slow failure | Open |
+| 6 | **Dependency / supply-chain pass** — `pnpm audit`, outdated majors, pinning policy, lockfile hygiene | Routine, but becomes public-facing hygiene the moment other households run this lockfile | Open |
+
+Already covered elsewhere: test-suite quality (staged review queued in `docs/test-review-roadmap.md`); GUI accessibility (partially, M7 + Batch 2); user-facing docs accuracy (USER_GUIDE) folds naturally into area 2.
+
+---
+---
+
+# Fourth-Pass Review (2026-07-06): Security & Trust-Boundary Audit
+
+Audit of area #1 from the roadmap above, performed against the `pas-security-posture` checklist plus the open-source threat model (public repo; strangers running instances; strangers publishing apps). Method: verified the documented posture claims against code, swept the working tree and full git history (1,241 commits) for secrets and personal data, and reviewed the four externally-reachable surfaces (Telegram webhook, GUI, REST API, app installer). No code changed.
+
+**Headline:** the implemented security engineering is genuinely strong — every posture claim I tested held up (see "Verified strong" below). The open-source risks are not in the auth code; they are (a) personal data already in tracked files and history, (b) an install-time UX that implies a containment boundary the runtime doesn't have, and (c) a deployment doc that publishes the GUI to the internet as a side effect of webhook setup.
+
+## Repo hygiene (pre-publication — irreversible once public)
+
+### SEC-1. Operator PII is in tracked files and throughout git history
+The good news first, because it's the part that usually goes wrong: `data/`, `.env`, and `config/pas.yaml` are correctly gitignored, contain the only real credentials, and — verified across all 1,241 commits — **were never committed**. `.env.example` and `pas.yaml.example` are placeholder-only. No API-token-shaped strings (`sk-ant-*`, Telegram bot-token pattern) exist anywhere in history.
+
+What is tracked: the operator's real Telegram user ID (`8187111554`) appears in **8 files at HEAD** — 4 test files (`auth-set-password.test.ts`, `migration-backup.test.ts`, `invite-name-validation.test.ts`, `user-manager.test.ts`) and 4 spec/plan docs (2026-03-31 food H3, 2026-04-08 invite design, both 2026-05-18 identity docs) — and consequently in a large fraction of history. Real first/last names appear in several docs and tests. A Telegram user ID is a low-sensitivity identifier (it enables spam/lookup correlation, not account access), but in a public repo it durably and searchably links the operator's real identity to this deployment, and the spec docs carry real household context around it.
+
+**Fix (decide before publication):**
+1. *Tree scrub (cheap, do regardless):* replace the real ID with a fixture ID in the 4 tests and 4 docs; sweep `docs/superpowers/` for household/family specifics (the food specs were written from real household requirements).
+2. *History (decision):* either publish a **fresh-history public repo** from the scrubbed tree (recommended — simplest, loses public history but the private repo keeps it), or `git filter-repo` the existing history (invasive, breaks all clones/PR references), or accept the ID in history as low-sensitivity (defensible, but combine with 1 so it at least leaves HEAD). Fresh-history also moots any *future* discovery of something else in the 1,241 commits.
+
+### SEC-2. No secret-scanning gate
+Nothing prevents the *next* commit from including a token — protection today is convention plus the gitignore. One incident after the repo is public means key rotation + history surgery under time pressure.
+
+**Fix:** add gitleaks (or equivalent) to the existing pre-push hook chain (`.claude/hooks/` already runs Biome there, so the pattern exists) and as a CI job before publication.
+
+## Trust model & install surface
+
+### SEC-3. The install permission summary implies enforcement that doesn't exist
+`pnpm install-app` prints an Android-style grant screen — "Services: …, Data access: …, External APIs: …" (`core/src/cli/install-app.ts:63-93`) — then asks "Proceed with installation?". But apps run **in-process**: regardless of declarations, an installed app can read `process.env` (bot token, Anthropic key, `GUI_AUTH_TOKEN`), use `node:fs` against the entire data directory, and exfiltrate over unrestricted network I/O. The declared-services model is real *defense in depth for honest apps* (undeclared services are `undefined`; `ScopedDataStore` blocks traversal for code that uses it), and `CREATING_AN_APP.md:1230` states the trust model honestly — but the one place a user makes the actual trust decision shows a permission list with **no trust warning at all**. For the current install base (you) this is fine; for open source it's the difference between informed and misled consent.
+
+**Fix:** add a plain-language warning to the CLI confirm step ("This app will run with the same access as PAS itself — including your bot token, API keys, and all household data. The list above is what it *declares*, not a sandbox. Only install from authors you trust."); mirror it in the "Sharing Your App" / README install sections. Cheap, and it makes the honest docs stance visible at the moment of decision.
+
+### SEC-4. The static analyzer stops accidents, not adversaries — calibrate expectations before a community exists
+`static-analyzer.ts` regex-scans import/require specifiers for 6 banned modules (LLM SDKs, `child_process`). It does not model dynamic construction (`import(['node:child','process'].join('_'))`), `eval`, or `new Function`, and it doesn't restrict `fs`/network at all — by design, and the docs say so. Two calibration points for the OSS roadmap: (a) the **container isolation** proposal in `docs/open-items.md` currently triggers on "community forms and multi-tenant security requirements harden" — that trigger should move earlier, to *"before publicizing `install-app` as a way to run third-party apps"*, because the first community app arrives before a community forms; (b) meanwhile, SEC-3's honest warning is the mitigation. Don't invest in strengthening the regex — it cannot win, and implying it can is worse than saying it can't.
+
+## Network exposure
+
+### SEC-5. The documented Cloudflare tunnel publishes the GUI and API to the internet
+`DEPLOYMENT.md:189-198` routes the tunnel ingress to the **whole service** (`service: http://localhost:3000`) — so following the webhook setup verbatim also exposes `/gui` (a public login page for your household) and `/api/*` to the internet, without the doc mentioning it. The surfaces are not naked (password auth + per-user/per-IP login limits + CSRF + secure cookies + timing-safe compares all verified), but internet-facing-by-default should be a documented choice, not a side effect.
+
+**Fix (docs-only):** show a path-scoped ingress in DEPLOYMENT.md (route only `/webhook/*` through the tunnel; keep GUI/API LAN-only) as the default, with the full-service ingress as an explicit opt-in paired with a recommendation for Cloudflare Access in front of `/gui`. One YAML block plus two sentences.
+
+## Verified strong (for the record)
+
+Claims from the security posture tested against code and confirmed — future audits can skip these: **API auth** (`core/src/api/auth.ts`): timing-safe legacy-token compare, IP rate limit *before* auth, legacy path disabled when `API_TOKEN` empty, per-user `pas_*` keys verified via scrypt with user/household **rehydrated from live services at verify time** (revoked/removed users fail closed). **GUI auth** (`core/src/gui/auth.ts`): signed cookie `{userId, sessionVersion, issuedAt}`, sessionVersion invalidation, sliding 24h session, `httpOnly` + `sameSite: strict` + production `secure` flags on all set/clear paths, per-userId and per-IP login limiters, timing-safe comparisons, legacy `GUI_AUTH_TOKEN` gated to exactly-one-admin installs. **Telegram webhook**: `X-Telegram-Bot-Api-Secret-Token` always enforced — secret comes from env or is derived from the bot token (`compose-runtime.ts:1619`, `bootstrap.ts:43`), timing-safe. **Callback queries** (`compose-runtime.ts:1438+`): registration guard before any dispatch, app-toggle re-check on verification callbacks, nonces on session-control confirmations, buttons are DM-scoped so cross-user tapping isn't reachable. **Path handling**: `SAFE_SEGMENT` + resolve-within + null-byte rejection in `data-store/paths.ts`. **Secrets layout**: 0600 key files, scrypt hashing, `pas_<keyId>_<secret>` format never sent to LLMs.
+
+## Recommended sequencing
+
+1. **Now (docs + config, no code):** SEC-5 deployment-doc ingress fix; SEC-1 tree scrub of the 8 files.
+2. **Before the repo goes public (blocking):** SEC-1 history decision (fresh-history repo recommended); SEC-2 secret-scan gate; SEC-3 CLI trust warning (one string + test).
+3. **Before promoting third-party app installs (can be post-launch):** SEC-4 container-isolation trigger re-scope in open-items.
+4. Then proceed down the roadmap: area 2 (fresh-install check) naturally validates the SEC-5 doc fix.
