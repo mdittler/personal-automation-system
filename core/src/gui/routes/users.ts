@@ -13,6 +13,7 @@ import type { UserManager } from '../../services/user-manager/index.js';
 import type { UserMutationService } from '../../services/user-manager/user-mutation-service.js';
 import type { SpaceDefinition } from '../../types/spaces.js';
 import type { RegisteredUser } from '../../types/users.js';
+import { sendErrorFragment } from '../utils/error-fragment.js';
 
 export interface UserRoutesOptions {
 	userManager: UserManager;
@@ -65,12 +66,12 @@ export function registerUserRoutes(server: FastifyInstance, options: UserRoutesO
 			const { userId } = request.params as { userId: string };
 
 			if (!/^\d+$/.test(userId)) {
-				return reply.status(400).type('text/html').send('Invalid user ID format');
+				return sendErrorFragment(reply, 400, "That user ID isn't valid.");
 			}
 
 			const user = userManager.getUser(userId);
 			if (!user) {
-				return reply.status(404).type('text/html').send('User not found');
+				return sendErrorFragment(reply, 404, "That user couldn't be found.");
 			}
 
 			const body = request.body as Record<string, string>;
@@ -91,7 +92,7 @@ export function registerUserRoutes(server: FastifyInstance, options: UserRoutesO
 			// Re-fetch user after mutation
 			const updatedUser = userManager.getUser(userId);
 			if (!updatedUser) {
-				return reply.status(404).type('text/html').send('User not found');
+				return sendErrorFragment(reply, 404, "That user couldn't be found.");
 			}
 
 			const spaces = spaceService.listSpaces();
@@ -110,12 +111,12 @@ export function registerUserRoutes(server: FastifyInstance, options: UserRoutesO
 			const { userId } = request.params as { userId: string };
 
 			if (!/^\d+$/.test(userId)) {
-				return reply.status(400).type('text/html').send('Invalid user ID format');
+				return sendErrorFragment(reply, 400, "That user ID isn't valid.");
 			}
 
 			const user = userManager.getUser(userId);
 			if (!user) {
-				return reply.status(404).type('text/html').send('User not found');
+				return sendErrorFragment(reply, 404, "That user couldn't be found.");
 			}
 
 			const body = request.body as Record<string, string>;
@@ -143,16 +144,13 @@ export function registerUserRoutes(server: FastifyInstance, options: UserRoutesO
 			const { userId } = request.params as { userId: string };
 
 			if (!/^\d+$/.test(userId)) {
-				return reply.status(400).type('text/html').send('Invalid user ID format');
+				return sendErrorFragment(reply, 400, "That user ID isn't valid.");
 			}
 
 			const result = await userMutationService.removeUser(userId);
 
 			if (result.error) {
-				return reply
-					.status(400)
-					.type('text/html')
-					.send(`<p style="color:var(--pico-del-color)">${escapeHtml(result.error)}</p>`);
+				return sendErrorFragment(reply, 400, result.error);
 			}
 
 			logger.info({ userId }, 'User removed via GUI');

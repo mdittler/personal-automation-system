@@ -14,6 +14,7 @@ import type { AppToggleStore } from '../../services/app-toggle/index.js';
 import { AppConfigServiceImpl } from '../../services/config/app-config-service.js';
 import type { SystemConfig } from '../../types/config.js';
 import type { ManifestUserConfig } from '../../types/manifest.js';
+import { sendErrorFragment } from '../utils/error-fragment.js';
 
 export interface AppsOptions {
 	registry: AppRegistry;
@@ -110,20 +111,20 @@ export function registerAppsRoutes(server: FastifyInstance, options: AppsOptions
 
 		// Format validation (defense-in-depth against injection)
 		if (!/^[a-z0-9-]+$/.test(appId)) {
-			return reply.status(400).type('text/html').send('Invalid app ID format');
+			return sendErrorFragment(reply, 400, "That app ID isn't valid.");
 		}
 		if (!/^[a-zA-Z0-9_-]+$/.test(userId)) {
-			return reply.status(400).type('text/html').send('Invalid user ID format');
+			return sendErrorFragment(reply, 400, "That user ID isn't valid.");
 		}
 
 		// Validate appId exists in registry
 		if (!registry.getApp(appId)) {
-			return reply.status(404).type('text/html').send('App not found');
+			return sendErrorFragment(reply, 404, "That app couldn't be found.");
 		}
 
 		// Validate userId exists in config
 		if (!config.users.some((u) => u.id === userId)) {
-			return reply.status(400).type('text/html').send('User not found');
+			return sendErrorFragment(reply, 400, "That user couldn't be found.");
 		}
 
 		const newState = enabled !== 'true'; // Toggle: if currently true, set false

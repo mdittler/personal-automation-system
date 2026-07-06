@@ -645,7 +645,8 @@ describe('Direct POST /reset for dangerous key → 403 (REQ-SETTINGS-034)', () =
 			payload: { _csrf: csrfToken },
 		});
 		expect(res.statusCode).toBe(403);
-		expect(res.body).toContain('confirm flow');
+		expect(res.body).toContain('pas-error-card');
+		expect(res.body).toContain('This setting requires confirmation to reset.');
 	});
 });
 

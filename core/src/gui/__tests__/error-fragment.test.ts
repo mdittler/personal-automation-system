@@ -24,6 +24,8 @@ import Fastify from 'fastify';
 import pino from 'pino';
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AppRegistry, RegisteredApp } from '../../services/app-registry/index.js';
+import { AppToggleStore } from '../../services/app-toggle/index.js';
 import {
 	SYSTEM_KEY_RUNTIME_PATH,
 	SYSTEM_SETTING_DEFS,
@@ -34,10 +36,14 @@ import type { HouseholdService } from '../../services/household/index.js';
 import { buildSettingsRegistry } from '../../services/settings/build-registry.js';
 import { SettingsWriter } from '../../services/settings/settings-writer.js';
 import type { UserManager } from '../../services/user-manager/index.js';
+import type { UserMutationService } from '../../services/user-manager/user-mutation-service.js';
 import type { SystemConfig } from '../../types/config.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
+import { registerAppsRoutes } from '../routes/apps.js';
+import { registerDataRoutes } from '../routes/data.js';
 import { registerSettingsRoutes } from '../routes/settings.js';
+import { registerUserRoutes } from '../routes/users.js';
 import { registerViewLocals } from '../view-locals.js';
 
 const AUTH_TOKEN = 'tok';
@@ -67,7 +73,9 @@ function makeConfig(): SystemConfig {
 		api: { token: '' },
 		n8n: { dispatchUrl: '' },
 		routing: { verification: { enabled: true, upperBound: 0.7 } },
-		users: [],
+		users: [
+			{ id: 'admin1', name: 'AdminUser', isAdmin: true, enabledApps: ['*'], sharedScopes: [] },
+		],
 		webhooks: [],
 		backup: { enabled: false, path: '/tmp/backups', schedule: '0 3 * * *', retentionCount: 7 },
 		chat: {
@@ -135,6 +143,24 @@ async function buildApp() {
 			id === 'hh-1' ? { id: 'hh-1', adminUserIds: [TEST_USER_ID] } : null,
 	};
 
+	// Minimal fixtures for data.ts / apps.ts / users.ts route registration —
+	// only enough to reach the validation-failure branches under test.
+	const appRegistry = {
+		getAll: () => [] as RegisteredApp[],
+		getApp: () => undefined,
+		getLoadedAppIds: () => [] as string[],
+	} as unknown as AppRegistry;
+	const appToggle = new AppToggleStore({
+		dataDir: tempDir,
+		logger: mockLogger as unknown as Logger,
+	});
+	const userMutationService = {
+		updateUserApps: vi.fn().mockResolvedValue(undefined),
+		updateUserSharedScopes: vi.fn().mockResolvedValue(undefined),
+		removeUser: vi.fn().mockResolvedValue(undefined),
+	} as unknown as UserMutationService;
+	const spaceServiceStub = { listSpaces: () => [] };
+
 	const app = Fastify({ logger: false });
 	await app.register(fastifyCookie, { secret: AUTH_TOKEN });
 	const eta = new Eta();
@@ -162,6 +188,22 @@ async function buildApp() {
 				logger,
 				systemConfigWriter,
 				systemConfig: config as SystemConfig,
+			});
+			registerDataRoutes(gui, { config: config as SystemConfig, dataDir: tempDir, logger });
+			registerAppsRoutes(gui, {
+				registry: appRegistry,
+				config: config as SystemConfig,
+				appToggle,
+				dataDir: tempDir,
+				logger,
+			});
+			registerUserRoutes(gui, {
+				userManager: userManager as unknown as UserManager,
+				userMutationService,
+				registry: appRegistry,
+				// biome-ignore lint/suspicious/noExplicitAny: minimal test stub, not the full SpaceService surface
+				spaceService: spaceServiceStub as any,
+				logger,
 			});
 		},
 		{ prefix: '/gui' },
@@ -233,6 +275,62 @@ describe('styled htmx error fragment (I5)', () => {
 		expect(res.headers['content-type']).toContain('text/html');
 		expect(res.body).toContain('pas-error-card');
 		// No raw technical error text or stack traces reach the user.
+		expect(res.body).not.toMatch(/Error:|at .*\.ts:\d+/);
+	});
+
+	it('renders a styled error card for a denied data.ts browse request (audit I5 sweep)', async () => {
+		const { allCookies } = await login(app);
+		// Missing scope query param — data.ts's /data/browse handler rejects
+		// before any household/space checks run.
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/data/browse',
+			cookies: allCookies,
+			headers: { 'hx-request': 'true' },
+		});
+
+		expect(res.statusCode).toBe(400);
+		expect(res.headers['content-type']).toContain('text/html');
+		expect(res.body).toContain('pas-error-card');
+		expect(res.body).toContain('A scope is required to browse data.');
+		expect(res.body).not.toMatch(/Error:|at .*\.ts:\d+/);
+	});
+
+	it('renders a styled error card for an apps.ts toggle failure (audit I5 sweep)', async () => {
+		const { allCookies, csrfToken } = await login(app);
+		// Invalid appId format — rejected by apps.ts's defense-in-depth regex
+		// before the registry lookup runs.
+		const res = await app.inject({
+			method: 'POST',
+			url: '/gui/apps/Not_Valid!/toggle',
+			cookies: allCookies,
+			headers: { 'hx-request': 'true' },
+			payload: { _csrf: csrfToken, userId: 'admin1', enabled: 'false' },
+		});
+
+		expect(res.statusCode).toBe(400);
+		expect(res.headers['content-type']).toContain('text/html');
+		expect(res.body).toContain('pas-error-card');
+		expect(res.body).toContain('That app ID isn&#39;t valid.');
+		expect(res.body).not.toMatch(/Error:|at .*\.ts:\d+/);
+	});
+
+	it('renders a styled error card for a users.ts mutation failure (audit I5 sweep)', async () => {
+		const { allCookies, csrfToken } = await login(app);
+		// Non-numeric userId — rejected by users.ts's SAFE_ID-equivalent regex
+		// before the userManager lookup runs.
+		const res = await app.inject({
+			method: 'POST',
+			url: '/gui/users/not-numeric/apps',
+			cookies: allCookies,
+			headers: { 'hx-request': 'true' },
+			payload: { _csrf: csrfToken },
+		});
+
+		expect(res.statusCode).toBe(400);
+		expect(res.headers['content-type']).toContain('text/html');
+		expect(res.body).toContain('pas-error-card');
+		expect(res.body).toContain('That user ID isn&#39;t valid.');
 		expect(res.body).not.toMatch(/Error:|at .*\.ts:\d+/);
 	});
 });

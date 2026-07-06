@@ -364,7 +364,8 @@ describe('Space GUI Routes', () => {
 			const res = await authenticatedPost('/gui/spaces/family/members/add', {});
 
 			expect(res.statusCode).toBe(400);
-			expect(res.body).toContain('Missing user ID');
+			expect(res.body).toContain('pas-error-card');
+			expect(res.body).toContain('A user is required to add a member.');
 		});
 
 		it('returns validation error from service', async () => {
@@ -409,7 +410,8 @@ describe('Space GUI Routes', () => {
 			const res = await authenticatedPost('/gui/spaces/family/members/remove', {});
 
 			expect(res.statusCode).toBe(400);
-			expect(res.body).toContain('Missing user ID');
+			expect(res.body).toContain('pas-error-card');
+			expect(res.body).toContain('A user is required to remove a member.');
 		});
 
 		it('returns validation error from service', async () => {

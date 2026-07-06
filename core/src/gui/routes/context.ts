@@ -15,6 +15,7 @@ import type { ContextStoreServiceImpl } from '../../services/context-store/index
 import { requestContext } from '../../services/context/request-context.js';
 import type { HouseholdService } from '../../services/household/index.js';
 import type { SystemConfig } from '../../types/config.js';
+import { sendErrorFragment } from '../utils/error-fragment.js';
 
 export interface ContextRoutesOptions {
 	contextStore: ContextStoreServiceImpl;
@@ -67,7 +68,7 @@ export function registerContextRoutes(
 		async (request, reply) => {
 			const { userId } = request.params;
 			if (!SAFE_ID.test(userId)) {
-				return reply.status(400).type('text/html').send('Invalid user ID');
+				return sendErrorFragment(reply, 400, "That user ID isn't valid.");
 			}
 
 			const entries = await requestContext.run(buildCtx(userId), () =>
@@ -120,7 +121,7 @@ export function registerContextRoutes(
 			const { userId } = request.params;
 			const key = (request.query as { key?: string }).key ?? '';
 			if (!SAFE_ID.test(userId)) {
-				return reply.status(400).type('text/html').send('Invalid user ID');
+				return sendErrorFragment(reply, 400, "That user ID isn't valid.");
 			}
 
 			const csrfToken = (request as unknown as Record<string, unknown>).csrfToken as string;

@@ -137,7 +137,8 @@ describe('GET /gui/data/browse — household routing', () => {
 		});
 
 		expect(res.statusCode).toBe(400);
-		expect(res.body).toContain('householdId');
+		expect(res.body).toContain('pas-error-card');
+		expect(res.body).toContain('A household is required for shared data.');
 	});
 
 	it('scope=shared&householdId=hh-a → files from households/hh-a/shared', async () => {

@@ -27,6 +27,7 @@ import type { MessageRateTracker } from '../../services/metrics/message-rate-tra
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { LLMSafeguardsConfig } from '../../types/config.js';
 import type { ModelRef, ModelTier } from '../../types/llm.js';
+import { sendErrorFragment } from '../utils/error-fragment.js';
 
 export interface LlmUsageOptions {
 	llm: LLMServiceImpl;
@@ -396,19 +397,24 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 		const { tier, provider, model } = request.body;
 
 		if (!tier || typeof tier !== 'string' || !VALID_TIERS.has(tier)) {
-			return reply.status(400).send('Invalid tier. Must be fast, standard, or reasoning.');
+			return sendErrorFragment(
+				reply,
+				400,
+				"That tier isn't valid.",
+				'Choose fast, standard, or reasoning.',
+			);
 		}
 
 		if (!provider || typeof provider !== 'string' || !PROVIDER_ID_PATTERN.test(provider.trim())) {
-			return reply.status(400).send('Invalid provider ID');
+			return sendErrorFragment(reply, 400, "That provider isn't valid.");
 		}
 
 		if (!model || typeof model !== 'string' || !MODEL_ID_PATTERN.test(model.trim())) {
-			return reply.status(400).send('Invalid model ID');
+			return sendErrorFragment(reply, 400, "That model isn't valid.");
 		}
 
 		if (!providerRegistry.has(provider.trim())) {
-			return reply.status(400).send('Unknown provider');
+			return sendErrorFragment(reply, 400, "That provider isn't recognized.");
 		}
 
 		const ref: ModelRef = { provider: provider.trim(), model: model.trim() };
@@ -439,7 +445,7 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 
 		if (standardModel && typeof standardModel === 'string' && standardModel.trim()) {
 			if (!MODEL_ID_PATTERN.test(standardModel.trim())) {
-				return reply.status(400).send('Invalid model ID');
+				return sendErrorFragment(reply, 400, "That model isn't valid.");
 			}
 			await modelSelector.setStandardModel(standardModel.trim());
 			logger.info({ standardModel: standardModel.trim() }, 'Standard model updated via GUI');
@@ -447,7 +453,7 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 
 		if (fastModel && typeof fastModel === 'string' && fastModel.trim()) {
 			if (!MODEL_ID_PATTERN.test(fastModel.trim())) {
-				return reply.status(400).send('Invalid model ID');
+				return sendErrorFragment(reply, 400, "That model isn't valid.");
 			}
 			await modelSelector.setFastModel(fastModel.trim());
 			logger.info({ fastModel: fastModel.trim() }, 'Fast model updated via GUI');

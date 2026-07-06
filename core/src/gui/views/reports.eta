@@ -15,7 +15,7 @@
         <th>Schedule</th>
         <th>Next Run</th>
         <th>Sections</th>
-        <th>LLM</th>
+        <th>AI summary</th>
         <th>Enabled</th>
         <th>Actions</th>
       </tr>

@@ -690,7 +690,8 @@ describe('LLM Usage Routes', () => {
 			});
 
 			expect(res.statusCode).toBe(400);
-			expect(res.body).toContain('Invalid tier');
+			expect(res.body).toContain('pas-error-card');
+			expect(res.body).toContain('That tier isn&#39;t valid.');
 		});
 
 		it('rejects missing tier with 400', async () => {
@@ -716,7 +717,8 @@ describe('LLM Usage Routes', () => {
 			});
 
 			expect(res.statusCode).toBe(400);
-			expect(res.body).toContain('Invalid provider');
+			expect(res.body).toContain('pas-error-card');
+			expect(res.body).toContain('That provider isn&#39;t valid.');
 		});
 
 		it('rejects invalid model pattern with 400', async () => {
@@ -732,7 +734,8 @@ describe('LLM Usage Routes', () => {
 			});
 
 			expect(res.statusCode).toBe(400);
-			expect(res.body).toContain('Invalid model');
+			expect(res.body).toContain('pas-error-card');
+			expect(res.body).toContain('That model isn&#39;t valid.');
 		});
 
 		it('rejects unknown provider with 400', async () => {
@@ -748,7 +751,8 @@ describe('LLM Usage Routes', () => {
 			});
 
 			expect(res.statusCode).toBe(400);
-			expect(res.body).toContain('Unknown provider');
+			expect(res.body).toContain('pas-error-card');
+			expect(res.body).toContain('That provider isn&#39;t recognized.');
 		});
 	});
 
