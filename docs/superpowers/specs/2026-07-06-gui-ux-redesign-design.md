@@ -66,8 +66,8 @@ Steps:
 1. **What to watch / what to include** — data selection by friendly names sourced from FileIndexService (app + file descriptions), never raw paths. Reports: pick section types with plain descriptions (changes / app data / context / custom).
 2. **When** — schedule presets ("Every morning at 7", "Weekly on Sunday", "Every hour", "When data changes" for event-triggered alerts) that generate the cron string; a live "Next run: …" preview computed by the same cron parser the scheduler uses. Raw cron editing under an "Advanced" disclosure.
 3. **Condition** (alerts only) — two modes:
-   - *Build a rule*: structured builder (field / comparison / value) mapping to deterministic condition expressions.
-   - *Describe it in your own words*: free text mapping to the fuzzy/LLM condition type.
+   - *Build a rule*: structured picker over the engine's actual deterministic grammar (six patterns: is empty / is not empty / contains "…" / doesn't contain "…" / has more than N lines / has fewer than N lines), rendered in plain language. No new grammar is invented; the picker emits exactly the expression strings `evaluateDeterministic` recognizes.
+   - *Describe it in your own words*: free text mapping to the fuzzy/LLM condition type. Judgment-style conditions ("anything expiring within 2 days") belong here, and the mode card says so.
 4. **What happens** — alert actions as picker cards with plain names ("Send me a Telegram message", "Run a report", "Call a webhook", "Write to a file", "Play a sound", "Dispatch a message"); template variables (`{data}`, `{summary}`, `{alert_name}`, `{date}`) offered as insert buttons with one-line plain-language explanations; cooldown as a plain field ("Don't repeat this alert for … hours") with a sensible default. Reports: delivery + optional AI summary (tier picker with plain labels, prompt under Advanced).
 5. **Review** — a generated human-readable sentence describing the automation ("Every morning at 7, check Pantry items; if any item expires within 2 days, send you a Telegram message"). The same sentence renders on the list pages as the item's description line.
 
