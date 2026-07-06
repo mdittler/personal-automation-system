@@ -3618,6 +3618,154 @@ Codex Round 2 review of the executed branch is queued separately (the user's "si
 
 ---
 
+# Planned Phases — Pre-Open-Source Audit Remediation (2026-07-06)
+
+> **Status: PLANNED, not yet implemented.** These are forward-looking phase definitions, not completed-work records like the sections above. They are derived from the nine-pass audit in `docs/superpowers/plans/2026-06-11-ux-review-findings-and-fix-plan.md`; every finding cited below was confirmed against code (passes 4–9 during the 2026-07-06 audit sessions; the anchor findings of passes 1–3 re-verified 2026-07-06). Per-item actionables live in `docs/open-items.md`.
+>
+> **Before implementing any phase here:** invoke `superpowers:writing-plans` to produce the detailed task-by-task plan under `docs/superpowers/plans/`, route it through Codex review, then execute subagent-driven per `feedback_always_subagent_execution`. Each phase's **Doc footprint** lists the URS / open-items / CLAUDE.md updates that are part of its definition of done.
+
+The audit surfaced ~45 confirmed findings across six areas. They group into seven planned phases plus the already-queued **UX Hardening Phase** (below). Ordering reflects the audit's cross-cutting priority: the highest-leverage items across the whole series are **INST-1** (fresh-install boot crash), **SEC-1** (PII scrub + history decision), **DEP-1/DEP-2** (dependency refresh + CI), and **BKP-1** (enable backups) — distributed across PP-1, PP-2, PP-3, and PP-5.
+
+**Publication gating:** PP-1, PP-2, and PP-3 should complete **before the repo goes public** (SEC-1's history decision is irreversible once published). PP-4 through PP-7 and the UX Hardening Phase can land before or after launch.
+
+---
+
+## PP-1 — Fresh-Install Correctness (INST-1..INST-8)
+
+**Goal:** A clean `git clone` follows the README Quick Start and DEPLOYMENT.md and reaches a working first Telegram message, on every supported run mode (dev, Docker, native), without hitting a crash or a doc dead-end.
+
+**Findings closed** (Fifth-Pass Review, plus SEC-5 from the Fourth-Pass): INST-1 fresh-install boot crash (reproduced); INST-2 non-existent native entrypoint + missing GUI-asset copy in `pnpm build`; INST-3 webhook URL missing `/webhook/telegram` path; INST-4 Docker+Cloudflare path consumes a dead env var; INST-5 compose hard-couples Ollama + ships it empty; INST-6 wrong GUI URL; INST-7 pnpm-version + `GUI_AUTH_TOKEN` doc drift; INST-8 Windows `prepare`-hook fragility; SEC-5 the documented Cloudflare tunnel routes the whole service (GUI + API) to the internet as a side effect of webhook setup.
+
+**Scope / batches:**
+1. *The bug (code + test, do first):* fix the fresh-install branch of `core/src/services/household/migration.ts:194-202` to perform the same bootstrap as the migration path — create `data/system/households.yaml` with the `default` household (admins from config) and rewrite `pas.yaml` to add `household_id: default` to each user — then add `household_id: default` to `config/pas.yaml.example` and the DEPLOYMENT.md minimal config. Add a first-boot integration test that boots `composeRuntime` from `pas.yaml.example` + an empty data dir (the test that would have caught INST-1).
+2. *Native build (code):* add a GUI-asset copy step to the `@pas/core` build so `gui/views`, `gui/public`, and the schema JSON land in `core/dist` (today only the Dockerfile hand-copies them), or explicitly declare native-production unsupported and make launchd wrap `pnpm dev`.
+3. *Docs batch (DEPLOYMENT.md + OPERATIONS.md, pairs with SEC-5 and RES-7/BKP-2):* correct the entrypoint references to `node core/dist/bootstrap.js` (+ stale `personal-assistant` plist path), the webhook URL, the GUI URL, and the pnpm-version / `GUI_AUTH_TOKEN` framing.
+4. *Docker + tunnel (pairs with BKP-6):* profile-gate the `ollama` service, drop the unconditional `OLLAMA_URL` override, add a model-pull step, and either add a `cloudflared` service that consumes `CLOUDFLARE_TUNNEL_TOKEN` or rewrite the README tunnel section to the `cloudflared tunnel run` flow and delete the dead env var from `.env.example` + config schema. Also fix SEC-5: document a path-scoped tunnel ingress (route only `/webhook/*` by default; keep GUI/API LAN-only) as the default, with full-service exposure as an explicit opt-in paired with a Cloudflare Access recommendation in front of `/gui`.
+5. *Minor:* guard `prepare` so `pnpm install` doesn't fail on Windows without bash.
+
+**Sequencing:** Batch 1 first — it is the single most important pre-publication fix (every evaluator hits it). A true clean-VM run (fresh user account, no author dotfiles) is a worthwhile one-hour follow-up after batches 1–3, since the audit traced code, not machine state.
+
+**Doc footprint:** URS entries for the migration-bootstrap fix (REQ-CONFIG / REQ-HOUSEHOLD family) + traceability matrix; DEPLOYMENT.md, OPERATIONS.md, README, `.env.example`, `pas.yaml.example` edits; close the INST-1..8 entry in `docs/open-items.md`; one-line CLAUDE.md status bullet on completion.
+
+---
+
+## PP-2 — Repo Publication Gate (SEC-1, SEC-2, DOC-2, + CI)
+
+**Goal:** Make the repository legally and hygienically safe to publish — no operator PII at HEAD or (per the chosen strategy) in history, a secret-scanning gate that blocks the next accidental token, open-source table-stakes files, and a CI that runs the quality gates a fork/PR contributor won't have locally.
+
+**Findings closed:** SEC-1 operator PII in tracked files + history (Fourth-Pass); SEC-2 no secret-scanning gate; DOC-2 no LICENSE / CONTRIBUTING.md / SECURITY.md (Third-Pass Part A); DEP-2 no CI (Ninth-Pass — the workflow file is created here because the secret-scan job rides in it).
+
+**Scope / batches:**
+1. *Tree scrub (do regardless of history decision):* replace the operator's real Telegram ID (`8187111554`) with a fixture ID in the 4 tests + 4 spec/plan docs identified in SEC-1; sweep `docs/superpowers/` for real household/family specifics.
+2. *History decision (operator, blocking, irreversible):* choose fresh-history public repo (recommended), `git filter-repo`, or accept-ID-in-history — see SEC-1's analysis. This is the one gate that cannot be undone after publication.
+3. *Secret-scan gate (code):* add gitleaks (or equivalent) to the existing `.claude/hooks/` pre-push chain and as a CI job.
+4. *Table-stakes files:* LICENSE (upstream influences are all Apache-2.0/MIT — no copyleft constraint), CONTRIBUTING.md (distilling the build/test/lint + URS + zero-failing-tests + Biome-zero-errors workflow that currently lives only in CLAUDE.md/skills), SECURITY.md (in-process app trust model + a vulnerability-reporting contact).
+5. *CI workflow:* one GitHub Actions workflow — frozen-lockfile install, build, lint, `vitest run`, `pnpm audit --prod --audit-level=high` (soft gate), plus the gitleaks job from batch 3.
+
+**Sequencing:** Batches 1, 3, 4, 5 are independent and can proceed now; batch 2 is the publication-blocking operator decision. This phase and PP-3 together clear the path to a public repo.
+
+**Doc footprint:** LICENSE / CONTRIBUTING.md / SECURITY.md at repo root; `.github/workflows/` CI file; close the SEC-1/SEC-2 and DOC-2 open-items entries; CLAUDE.md status bullet; if fresh-history is chosen, a note in DEPLOYMENT.md/README about where full history lives.
+
+---
+
+## PP-3 — Dependency & Supply-Chain Refresh (DEP-1, DEP-3..DEP-5)
+
+**Goal:** Clear the accumulated advisory backlog with in-range updates, then add the automation that prevents it from silently re-accumulating after publication.
+
+**Findings closed** (Ninth-Pass Review): DEP-1 35 known vulns (2 critical / 13 high / 19 moderate / 1 low) mostly fixable in-range; DEP-3 no `minimumReleaseAge`, no Renovate/Dependabot; DEP-4 major-version backlog; DEP-5 dev/prod boundary blurred by tsx-as-runtime (resolves when PP-1 batch 2 lands). (DEP-2 CI is delivered in PP-2.)
+
+**Scope / batches:**
+1. *In-range sweep (code):* `pnpm update -r`; separately bump `@google/genai` to 2.x (or add a `pnpm.overrides` pin) to clear the protobufjs critical; run the full suite + `pnpm build`; confirm `pnpm audit` is clean. This clears the fastify body-validation-bypass (high, on the HTTP server), both `@fastify/static` GUI-surface moderates, the `fast-uri`/`ws`/`yaml` issues, and the vitest critical.
+2. *Fresh-package protection:* set pnpm `minimumReleaseAge` (4–7 days) in `pnpm-workspace.yaml`.
+3. *Update automation:* add a Renovate (or Dependabot) config — grouped weekly PRs, majors separated — validated by the PP-2 CI.
+4. *Majors ledger (scheduled, not urgent):* record the major backlog (the Ninth-Pass table is the ledger); schedule `@anthropic-ai/sdk` 0.78→0.110 and `@google/genai` 1→2 first (SDK is 32 minors behind — model IDs/pricing/features accrue there), then `zod` 4 / `better-sqlite3` 12 / `@fastify/view` 12 / `emittery` 2 and the dev toolchain (`vitest` 4, Biome 2, TypeScript 6) as standalone sessions.
+
+**Sequencing:** Batch 1 pre-publication (de-risks the README the moment it's public); batches 2–3 same week; batch 4 scheduled post-launch. Requires PP-2's CI for batch 3 to be meaningful.
+
+**Doc footprint:** lockfile + manifest changes; `pnpm-workspace.yaml`; Renovate config; close the DEP-1..5 open-items entry; CLAUDE.md status bullet; the majors ledger stays in open-items as an ongoing tracker.
+
+---
+
+## PP-4 — Privacy & Trust Transparency (PRIV-1..4, SEC-3, SEC-4)
+
+**Goal:** Make the "local-first" claim honest and legible — a written data-flow statement, an install-time trust warning that matches the real (unsandboxed) app model, and cleanup of config surfaces that imply flows which don't exist.
+
+**Findings closed:** PRIV-1 no user-facing data-flow statement; PRIV-2 tier auto-assignment silently changes which vendor receives conversation text; PRIV-3 data files can carry secrets into prompts (code half = the existing secret-redaction proposal); PRIV-4 three config-template integrations with zero consuming code (Sixth-Pass); SEC-3 install permission summary implies enforcement that doesn't exist; SEC-4 static-analyzer expectation calibration (Fourth-Pass).
+
+**Scope / batches:**
+1. *Data-flow statement (docs):* publish `docs/PRIVACY.md` from the verified data-flow map in the Sixth-Pass Review (Telegram always; cloud LLM provider when configured — including that anything stored can be recalled into prompts; the alert `webhook` action's up-to-1MB raw-file flow; the fully-local recipe; Telegram as the one unavoidable cloud dependency). Link it from the README local-first pitch. Fold in PRIV-2's provider-terms explanation.
+2. *Template cleanup (code):* remove or mark "reserved — not yet implemented" the `GOOGLE_CALENDAR_*` / `OPENWEATHERMAP_API_KEY` / `food.usda_fdc_api_key` entries in `.env.example` / `pas.yaml.example` (and drop the USDA mention from CLAUDE.md if removed).
+3. *Install trust warning (code):* add a plain-language warning to the `pnpm install-app` confirm step (`core/src/cli/install-app.ts`) — apps run with the same access as PAS itself (bot token, API keys, all household data); the declared-services list is not a sandbox — and mirror it in the README/CREATING_AN_APP install sections.
+4. *Optional (code, cheap):* log the resolved tier→provider map at startup (PRIV-2) so a config change that reroutes conversation data is visible in the boot log. Move the container-isolation open-items trigger earlier per SEC-4 (before `install-app` is publicized) — a documentation/tracking change, not code.
+
+**Sequencing:** Batches 1–2 are one docs+cleanup session. Batch 3 pairs naturally with PP-6 (app-developer ecosystem). PRIV-3's code half stays as the separate secret-redaction proposal in open-items.
+
+**Doc footprint:** `docs/PRIVACY.md`; README + CREATING_AN_APP edits; `.env.example` / `pas.yaml.example` / CLAUDE.md template cleanup; URS entry for the install-warning + startup-log changes; close PRIV-1..4 / SEC-3 open-items entries; re-scope the SEC-4 container-isolation trigger in open-items.
+
+---
+
+## PP-5 — Data Lifecycle: Backup, Restore & Retention (BKP-1..6, RES-1..7)
+
+**Goal:** Ensure the system's data survives a failure and doesn't rot over years of continuous operation — backups actually enabled and restorable, and the append-forever stores rotated so read-cost and backup-size stay bounded.
+
+**Findings closed:** BKP-1 backups off in production; BKP-2 restore doc incomplete; BKP-3 `chat-index-rebuild` `--data`/`--db` footgun; BKP-4 WAL/GNU-tar consistency + backup-job auto-disable; BKP-5 no guard against `backup.path` inside `dataDir`; BKP-6 busybox-tar unverified (Seventh-Pass); RES-1 unrotated production `pas.log` inside backup scope; RES-2/RES-5 `llm-usage.md` + `change-log.jsonl` append-forever and read whole; RES-3 report/alert history one-file-per-run; RES-4 telemetry logs no rotation; RES-6 regression cache never evicts; RES-7 retention posture undocumented (Eighth-Pass).
+
+**Scope / batches:**
+1. *Enable + document (operator + docs, do first):* add the `backup:` block to the live `config/pas.yaml` (BKP-1; consider default-on for the OSS release); complete the OPERATIONS.md restore procedure — correct filename pattern, staging mkdir, a "what's NOT in the archive" list (`.env`, codebase, third-party apps in `apps/`), the post-restore `pnpm chat-index-rebuild` step, and the vault-symlink self-heal note (BKP-2); add the "Data growth & retention" section from the Eighth-Pass inventory table (RES-7). Pairs with the PP-1 batch-3 docs session.
+2. *Log rotation (code, highest RES leverage):* rotate `data/system/logs/pas.log` (e.g. `pino-roll`, size/date + keep-count) or move logs out of `data/` — it's the wildcard growth store and it poisons every backup (RES-1).
+3. *Append-forever rotation (code, one pattern):* monthly rotation for `llm-usage.md` (RES-2) and `change-log.jsonl` (RES-5) via the model-journal `YYYY-MM` pattern; a shared size-triggered rotate-to-archive helper for the three telemetry logs (RES-4).
+4. *Robustness (code):* derive `chat-index-rebuild`'s `--db` default from `--data` or warn on mismatched roots (BKP-3); exempt `system-backup` from the job-failure auto-disable + document the WAL/tar consistency assumptions (BKP-4); reject/warn when `backup.path` resolves inside `dataDir` (BKP-5).
+5. *Post-launch / verify-once:* report/alert history keep-last-N + optional monthly digest (RES-3); regression-cache age sweep or GUI clear button (RES-6); busybox-tar multi-`-C` verification in the Alpine container, folded into PP-1 batch 4 (BKP-6).
+
+**Sequencing:** Batch 1 now (BKP-1 is four lines of YAML and the restore claim is currently untested). Batches 2–4 are one small pre-open-source code batch. Batch 5 is post-launch. Re-measure the Eighth-Pass inventory table after a year of multi-user operation.
+
+**Doc footprint:** `config/pas.yaml` (live); OPERATIONS.md restore + retention sections; URS entries for the rotation + rebuild-flag + backup-path-guard changes; close BKP-1..6 and RES-1..7 open-items entries; CLAUDE.md status bullet.
+
+---
+
+## PP-6 — App-Developer Ecosystem Readiness (DOC-1, DOC-3, DOC-5..10)
+
+**Goal:** Make the third-party app path — the one that matters for an infrastructure-first open-source pitch — actually work end-to-end, and keep the developer docs from drifting.
+
+**Findings closed** (Third-Pass Part A): DOC-1 `@pas/core` unpublished so the standalone path's first step is impossible; DOC-3 install loop untested + CLI/docs misstate it; DOC-5 `user_config.category` enum hard-codes app names; DOC-6 no out-of-tree example app; DOC-7 no doc-drift guard; DOC-8 `splitTelegramMessage` not exported; DOC-9 `subscribes[].handler` documented two ways; DOC-10 README doesn't route the app-developer audience. (DOC-2 is in PP-2; DOC-4 `/notes` stale example folds in here as a trivial fix.)
+
+**Scope / batches:**
+1. *Publish decision (operator + docs):* DOC-1 — either publish `@pas/core` to npm/GitHub Packages with a committed `exports` contract, or declare fork-and-clone the only supported path and rewrite the "Standalone app repo" section accordingly.
+2. *Install loop (code + test):* fix the two misleading CLI lines in `install-app.ts`; document the real post-install contract (`pnpm install && pnpm build`, restart; decide + state the `dist/` commit-vs-build convention) in "Sharing Your App"; add the end-to-end install smoke test (scaffold → install into a scratch checkout → build → boot → assert a routed message).
+3. *Doc fixes (docs):* DOC-4 `/notes`→`/listnotes` in `MANIFEST_REFERENCE.md` + `CREATING_AN_APP.md`; DOC-8 export `splitTelegramMessage` (e.g. `@pas/core/utils/telegram-format`) and replace the hand-rolled snippet; DOC-9 pick the file-path `handler` convention and align examples; DOC-10 add an above-the-fold app-developer pointer to the README.
+4. *Schema loosening (code, cheaper before external manifests exist):* DOC-5 — replace the `user_config.category` enum with a pattern-validated string (or auto-namespace by appId), GUI grouping unknown categories under the app display name.
+5. *Drift guards (code, mirrors the W1 doc-coverage gate):* DOC-6 create an out-of-tree `pas-example-app` (echo-scope: one command, one intent, one data write, one test) that doubles as the install-smoke fixture; DOC-7 add gates asserting the fenced minimal manifest validates against the JSON Schema, the service-ID table matches the schema enum, and scaffold output passes `build && test`.
+
+**Sequencing:** DOC-4/DOC-9 are trivial and can land in any session now. DOC-1/DOC-5 need operator/design decisions before the phase is fully planned. The example app (batch 5) unblocks the smoke test (batch 2) and proves the whole path.
+
+**Doc footprint:** `CREATING_AN_APP.md`, `MANIFEST_REFERENCE.md`, README edits; `core/package.json` exports; `app-manifest.schema.json`; new `pas-example-app` repo; URS entries for the export + schema + smoke-test changes; close DOC-1/DOC-3/DOC-5..10 open-items entries; CLAUDE.md status bullet.
+
+---
+
+## PP-7 — Latency & Local-LLM Serving (L1..L7)
+
+**Goal:** Reduce response latency without trading away routing/answer quality — take the free wins now, and pursue the quality-gated ones only if regression evidence is green and the chatbot-primary T-track remains distant.
+
+**Findings closed** (Third-Pass Part B): L1 no Ollama `keep_alive` (cold-reload after idle — the likely "sometimes slow"); L2 recall + PAS classifiers run sequentially though independent; L3 one global fast-tier knob for consumers with different accuracy needs; L4 local prefix-caching left on the table; L5 route verification is a cloud round-trip in the hot path; L6 perceived-latency levers (typing indicator = UX I2, streaming = Hermes P7) already specced; L7 the T-track collapses the classifier chain.
+
+**Scope / batches:**
+1. *Free wins (code, zero quality impact):* L1 — pass `keep_alive: -1`/long duration in the Ollama request options as a `pas.yaml` knob (verify first with `ollama ps` after 6 idle minutes); L2 — run `runRecallPipeline` and `classifyPASMessage` in `Promise.all` at `handle-message.ts:187-206` (confirm the serving layer executes them concurrently — pairs with batch 2).
+2. *Serving (ops, zero quality impact):* L4 — serve the fast-tier model via the existing llama.cpp provider (persistent slots, prefix caching, `--parallel`) instead of Ollama; integration + install doc already exist. Makes L2's parallelism real.
+3. *Perception (cross-ref):* L6 — prioritize the typing indicator (UX Hardening Batch 1 / I2) and pull streaming-via-edit-message (Hermes P7 carry-forward) forward to just after UX Hardening.
+4. *Measurement-gated (only if T-track distant):* L5 — measure verification frequency (the verification logger already records it) and test whether the local model can verify its own grey zone at bucket parity; L3 — per-purpose model overrides for non-routing classifiers, each override citing a green regression run (overlaps the cascading-models proposal). Both L3 and L5 target components T6b deletes — pursue only with green evidence and a distant T-track.
+
+**Sequencing:** Batches 1–2 now (free). Batch 3 rides UX Hardening. Batch 4 is explicitly gated on regression evidence and T-track distance per L7 — do not invest in components scheduled for deletion without both.
+
+**Doc footprint:** `pas.yaml` knob docs; `INSTALL_LLAMA_CPP.md` cross-ref; URS entries for the `keep_alive` + parallelization changes; regression evidence links for any batch-4 override; close/annotate the L1/L2/L4 open-items entry; CLAUDE.md status bullet.
+
+---
+
+## UX Hardening Phase (already queued — passes 1–2)
+
+The first two audit passes (C1–C2, I1–I10, M1–M7, B1–B3, O1–O3, D1–D2, N1–N2, S1) are **already a Confirmed Phase** in `docs/open-items.md` with full batch structure (Batches 1–3 by surface, plus proposed Batches 4–5 for onboarding and notification hygiene, plus design-first follow-ons for O2-layer-3 household unification, N1 quiet-hours/vacation, and D2 sessions GUI). Not re-specified here to avoid duplication. Cross-phase notes from the audit: `setMyCommands` (D1) folds into Batch 1 alongside the `sendChatAction` typing indicator (I2/L6); O2-layer-3 (food household ← platform household) should be sequenced before the chatbot-primary T5.food.* migration; L6 streaming should follow immediately after this phase.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
