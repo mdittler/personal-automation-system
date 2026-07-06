@@ -404,7 +404,7 @@ Remaining audit areas, ordered by priority against the open-source goal. Areas 1
 |---|---|---|---|
 | 1 | **Security & trust-boundary audit** — repo hygiene (secrets/PII in tree + history), API/GUI auth surfaces, installer trust model, network exposure | Threat model changes completely when the repo and install surface go public; history scrubbing is irreversible after publication | **Done — Fourth-Pass Review below** |
 | 2 | **Fresh-install reality check** — clean-VM walkthrough of README Quick Start + DEPLOYMENT.md (clone → configure → first Telegram message), including the launchd/Docker paths | Docs have never been executed by a non-author on a non-author machine; first-run failure is the #1 cause of abandoned OSS evaluations. (Passing observation from pass 4: the launchd plist in DEPLOYMENT.md references `dist/core/src/main.js`, which does not match the actual build layout — likely one of several stale spots.) | **Done — Fifth-Pass Review below** |
-| 3 | **Privacy / data-flow statement** — document exactly what leaves the machine (Anthropic API receives transcripts/prompts on standard tier; n8n webhooks; nothing else) and under which settings | "Local-first" is the pitch; users will ask precisely this. Complements the existing secret-redaction proposal (code half) in open-items | Open |
+| 3 | **Privacy / data-flow statement** — document exactly what leaves the machine (Anthropic API receives transcripts/prompts on standard tier; n8n webhooks; nothing else) and under which settings | "Local-first" is the pitch; users will ask precisely this. Complements the existing secret-redaction proposal (code half) in open-items | **Done — Sixth-Pass Review below** |
 | 4 | **Backup/restore drill** — rehearse a full restore: markdown tree + `chat-state.db` + YAML indexes + vault symlinks; document ordering/consistency assumptions | BackupService exists but restore has never been exercised; recovery claims are untested | Open |
 | 5 | **Long-horizon resource audit** — project `data/` growth over years (transcripts, photos, `change-log.jsonl`, regression cache, SQLite WAL); define retention policies beyond P5's opt-in session prune | System is designed to run indefinitely; unbounded growth is a slow failure | Open |
 | 6 | **Dependency / supply-chain pass** — `pnpm audit`, outdated majors, pinning policy, lockfile hygiene | Routine, but becomes public-facing hygiene the moment other households run this lockfile | Open |
@@ -529,3 +529,62 @@ Steps executed or traced that hold up — future audits can skip these. **Quick 
 3. **Before publicizing the Docker path:** INST-2 build asset-copy step (or explicit "Docker/dev only" stance); INST-4 tunnel decision (add cloudflared service vs rewrite section); INST-5 compose decoupling + model-pull step.
 4. **Opportunistic:** INST-8 Windows prepare guard.
 5. A true clean-VM run (fresh macOS/Linux user account, no author dotfiles) remains worth one hour after INST-1..3 land — this pass traced code, not machine state, so PATH/permissions/corepack surprises are still unprobed.
+
+---
+---
+
+# Sixth-Pass Review (2026-07-06): Privacy / Data-Flow Audit
+
+Audit of area #3 from the roadmap. Method: swept every outbound network call site in `core/` and `apps/` — all `fetch()` callers, all HTTP-capable SDK imports (`@anthropic-ai/sdk`, `@google/genai`, `openai`, grammY), all subprocess spawns — and verified the payload contents at each site; then checked all user-facing docs for an existing privacy statement. No code changed.
+
+**Headline:** the local-first claim holds up in code. The **only hardcoded external endpoint in the entire codebase is `api.telegram.org`**; there is no telemetry, no update checks, no analytics, and every other outbound flow is gated on explicit configuration. The gaps are documentation-shaped: nothing user-facing says what *does* leave the machine (PRIV-1 — the deliverable this audit was scoped to produce the content for), the tier→provider auto-assignment can silently change *which vendor* receives conversation text (PRIV-2), and the config templates advertise three integrations that have no consuming code at all (PRIV-4).
+
+## The verified data-flow map
+
+This is the content for the user-facing statement (PRIV-1). Every line was traced to its call site.
+
+**Always on (inherent to a Telegram bot):**
+- **Telegram Bot API** — every message, photo, and button interaction transits Telegram's servers, both directions (grammY; photo bytes are fetched back from `api.telegram.org/file/bot<token>/…`, `core/src/services/telegram/message-adapter.ts:66-67`). There is no PAS without this flow.
+
+**When a cloud LLM provider is configured (the Quick Start default is Anthropic):**
+- **Every chatbot turn** sends the assembled prompt to the standard-tier provider: the six-layer context — durable memory snapshot, app/system context, recalled data-file excerpts, recalled session excerpts, up to 20 turns of live history — plus the user's message. This is the largest and most sensitive flow: *anything stored in PAS data files can surface in a prompt via recall*.
+- **Fast-tier classifiers** (routing intent, recall classification, session control, multi-intent segmentation, route verification) send the user's message text — and, for recall, candidate transcript excerpts — on nearly every free-text message.
+- **Photos**: routing classification uses *caption text only* (`core/src/services/router/photo-classifier.ts:5`), but the handling app then sends the **image bytes** as a base64 vision request (receipts, cookbook pages, fridge/pantry photos → `anthropic-provider.ts:59-63` multimodal path).
+- **Alerts & reports**: fuzzy (LLM) alert conditions and LLM summaries send the *contents of the watched data files* to the provider (`alert-executor.ts` `generateSummary(rawData…)`).
+- **Regression suite** (explicit `pnpm test:regression` runs only): fixture data, including receipt fixture images, to the models under test.
+- **Admin GUI model pages**: Anthropic `models.list` (`model-catalog.ts:134`) — metadata only, no user data.
+
+**Only when explicitly configured (all default-off):**
+- **Outbound webhooks** (`webhooks:` in pas.yaml): metadata-only payloads — event name, timestamp, IDs/paths/counts, **no file contents** (`webhooks/index.ts:102-106`; emission sites verified: `data:changed` carries the data *path*, `alert:fired`/`report:completed` carry IDs and counts). Note the path itself can reveal user id / app / filename.
+- **n8n dispatch** (`n8n.dispatch_url`): `{type, id, action}` only (`n8n/index.ts:19-23`).
+- **Alert `webhook` action**: the exception to "metadata only" — posts up to **1MB of the watched file's raw contents** (`{data}` template, `alert-executor.ts:212-222`) to the operator-configured URL. Deliberate and operator-authored, but the statement must name it.
+- **LAN-local by nature**: Ollama / llama.cpp (prompt content stays on the local network), Chromecast casting (`cast.py`), n8n when self-hosted. The GUI dashboard's only outbound fetch is a health ping to the configured `OLLAMA_URL` (`dashboard.ts:57`).
+
+**Never leaves the machine:** canonical markdown/YAML data, transcripts, SQLite/FTS indexes, cost tracking, model journal, shadow-classifier telemetry, logs, Piper TTS synthesis, ffmpeg transcoding.
+
+**Fully-local mode is real:** with no cloud keys and `OLLAMA_URL` (or a llama-cpp provider) set, all LLM traffic stays on-LAN — the config loader explicitly supports this ("No LLM providers available" error lists the local options). Telegram remains the one unavoidable cloud dependency.
+
+## Findings
+
+### PRIV-1. No user-facing data-flow statement exists — the map above is the missing content
+"Local-first" is the first line of the README and appears throughout the docs, but no README section, USER_GUIDE, DEPLOYMENT, or OPERATIONS text says what leaves the machine and when — the question every privacy-conscious evaluator of a "local-first" system asks first. **Fix (docs-only):** publish the map above as `docs/PRIVACY.md` (or a README "What leaves your machine" section), including the fully-local recipe and the Telegram caveat. This is the documentation half of the existing secret-redaction proposal in open-items; the statement should plainly say *"anything you store in PAS can be recalled into LLM prompts"* until the code half ships.
+
+### PRIV-2. Tier auto-assignment silently changes which vendor receives conversation text
+`pickFastTier` prefers Google > OpenAI > Anthropic (`core/src/services/config/index.ts`): merely adding `GOOGLE_AI_API_KEY` to `.env` reroutes every fast-tier call — user messages and recalled transcript excerpts — to Google, with no notice to the operator. Provider data-use policies differ materially (training-use terms vary by vendor and tier of service); which key you add determines whose terms govern your household's conversation fragments. **Fix:** the statement must explain that the tier→provider mapping decides who sees the text and link each provider's data-use terms; additionally, log the resolved tier→provider map at startup so a config change that silently reroutes data is at least visible in the boot log.
+
+### PRIV-3. Data files can carry secrets into prompts (cross-ref, code half already filed)
+The recalled-data fence, alert summaries, and report sections all move data-file contents into LLM prompts. Users who paste an API key or password into a note will ship it to their LLM provider. The **secret redaction pass** proposal already tracked in open-items is the code fix; until it ships, PRIV-1's statement is the mitigation (say it, don't imply it can't happen).
+
+### PRIV-4. Config templates advertise three integrations with zero consuming code
+`.env.example` documents `GOOGLE_CALENDAR_CLIENT_ID/SECRET/REFRESH_TOKEN` and `OPENWEATHERMAP_API_KEY`; `pas.yaml.example` documents `food.usda_fdc_api_key` ("quick-meal macro cross-check"). **No code reads any of them**: no manifest declares `external_apis`, nothing calls `services.secrets.get`, and no USDA/weather/calendar client exists in `core/` or `apps/`. Good for privacy, bad for auditability — an evaluator tracing these flows finds dead ends, and the data-flow statement can't honestly be exhaustive while the templates imply flows that don't exist. **Fix:** remove them from the templates (or mark "reserved — not yet implemented"), and drop the USDA mention from CLAUDE.md's pas.yaml description if removed.
+
+## Verified strong (for the record)
+
+No telemetry, crash reporting, update checks, or analytics anywhere in `core/` or `apps/`. Single hardcoded external host (`api.telegram.org`). Webhook and n8n payloads are metadata-only by construction, HMAC-signed when a secret is set, rate-limited per URL, `http(s)`-scheme-validated. All derived stores (SQLite, cost cache, telemetry logs) are local files under `data/`. Per-user API keys (`pas_*`) are never included in LLM prompts (verified in the fourth pass). The `services.secrets` indirection means apps never read `process.env` for external keys *through the sanctioned path* (the in-process caveat from SEC-3 still applies to malicious apps).
+
+## Recommended sequencing
+
+1. **Now (docs-only):** PRIV-1 — write `docs/PRIVACY.md` from the map above; link it from README's local-first pitch. Fold in PRIV-2's provider-terms explanation and the fully-local recipe. One writing session, no code.
+2. **Same session:** PRIV-4 template cleanup (delete or annotate the three dead integration surfaces).
+3. **Small code follow-up (optional but cheap):** PRIV-2's startup log line for the resolved tier→provider map.
+4. **Unchanged:** PRIV-3's code half stays as the existing secret-redaction proposal in open-items.
