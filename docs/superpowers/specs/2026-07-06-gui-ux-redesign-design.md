@@ -113,6 +113,8 @@ Steps:
 
 **Charts implementation:** Chart.js UMD build vendored at `core/src/gui/public/chart.umd.min.js` (matches existing vendored-asset pattern; version + provenance documented in `core/src/gui/public/README.md`). Charts read small JSON endpoints under `/gui/api/metrics/*` — server-computed, permission-scoped (user/household), unit-tested. Chart layer is presentation-only.
 
+**Charts must be trivially editable by Claude** (operator requirement, 2026-07-06): every chart is a declarative descriptor (id, title, page, metrics endpoint, chart type, series mapping, height) in a single registry module (`core/src/gui/charts/registry.ts`). Templates render chart slots by iterating the registry for their page; one shared vendored helper (`pas-charts.js`) reads the descriptor attributes and instantiates Chart.js. Adding, revising, or removing a chart touches exactly one registry entry (plus, for a brand-new data need, one metrics endpoint) — never template markup or client JS. A how-to doc (`docs/GUI_CHARTS.md`) records the recipe, and a registry contract test verifies every descriptor points at a registered endpoint and a supported chart type.
+
 **Voice:** sentence case, verb-first buttons, no raw exception strings, errors say what happened + what to do, empty states invite rather than apologize.
 
 **Responsive requirements** (every redesigned or new page — the system will be shared and the audience's devices are unknown):
