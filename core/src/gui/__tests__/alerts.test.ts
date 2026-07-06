@@ -235,7 +235,9 @@ describe('Alert GUI Routes', () => {
 			const res = await authenticatedGet('/gui/alerts');
 			// Raw cron removed; human-readable schedule shown
 			expect(res.body).toContain('06:00 PM');
-			expect(res.body).toContain('deterministic');
+			// Raw enum value humanized (audit M3) — no raw "deterministic" on screen
+			expect(res.body).toContain('Exact rule');
+			expect(res.body).not.toContain('>deterministic<');
 		});
 	});
 

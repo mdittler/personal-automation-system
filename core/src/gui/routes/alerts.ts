@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { isDeliveryVisible } from '../../gui/guards/resolve-viewer-scope.js';
+import { humanizeLabel } from '../../gui/utils/humanize.js';
 import type { AlertService } from '../../services/alerts/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import {
@@ -94,7 +95,7 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 						: describeCron(schedule),
 					nextRun: nextRun ? formatDateTime(nextRun, timezone) : null,
 					nextRunRelative: nextRun ? formatRelativeTime(nextRun, now) : null,
-					conditionType: a.condition?.type ?? 'unknown',
+					conditionType: humanizeLabel(a.condition?.type ?? 'unknown'),
 					conditionExpr: a.condition?.expression ?? '',
 					actionCount: a.actions?.length ?? 0,
 					cooldown: a.cooldown,
