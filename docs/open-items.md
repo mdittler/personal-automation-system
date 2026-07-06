@@ -288,6 +288,7 @@ Feature work identified in phase specs but deferred.
 
 Ideas that are not yet approved. Each has a stated trigger condition.
 
+- **Member self-service report/alert creation (2026-07-06)** — The GUI UX Redesign keeps report/alert creation admin-only (operator decision during the Codex plan review); members get read-only views of automations delivered to them. Member self-service would need a dedicated authorization design: creation scoped to the member's own data sources, dangerous action types (`write_data`, `dispatch_message`, `webhook`) restricted or admin-approved, and guard/URS updates. Trigger: a household member asks to create their own report or alert.
 - **Fitness/Health app** — Subjective signals (energy, mood, wearables) belong in a dedicated app. Food's `HealthDailyMetricsPayload` intentionally omits these; a future fitness app should emit `health:daily-metrics` events.
 - **Full Telegram data access audit** — Each new app phase should verify read + correct NL intents for all stored data. Several food stores still lack this (price store, receipt items, health metrics).
 - **App registry/marketplace** — Static JSON index + GUI browse page. Trigger: 10+ apps exist.

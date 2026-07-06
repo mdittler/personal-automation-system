@@ -34,7 +34,7 @@ Sidebar regroups into plain-language sections. URLs unchanged; admin-only items 
 | Section | Items (route) | Visibility |
 |---|---|---|
 | — | Home (`/gui/`) | all |
-| Automations | Reports (`/gui/reports`), Alerts (`/gui/alerts`) | all |
+| Automations | Reports (`/gui/reports`), Alerts (`/gui/alerts`) | all — members read-only (they see reports/alerts delivered to them); **creation and editing are admin-only** (operator decision 2026-07-06, Codex review round: the existing create routes are admin-gated and alert actions like write-file / message-as-user are unsafe for member self-service without a dedicated authorization design) |
 | People and sharing | Household (`/gui/users`, relabeled + extended), Shared spaces (`/gui/spaces`) | Household: all — members get a read-only view (a deliberate change from today's admin-only page); management actions stay admin-gated. Spaces: all |
 | Your data | Files (`/gui/data`), Conversations (`/gui/sessions`, **new**), Activity (`/gui/activity`, **new**, scoped per user) | all |
 | System | Apps (`/gui/apps`), Scheduler (`/gui/scheduler`), AI usage (`/gui/llm`), Backups (`/gui/backups`, **new**), Logs (`/gui/logs`), Regression (`/gui/regression`), Context (`/gui/context`) | admin (AI usage: all, scoped to own usage for members) |
@@ -59,7 +59,7 @@ The removed ops details (uptime, cron jobs, config table, registered-users table
 
 ## 3. Guided creation flows (Reports and Alerts)
 
-Both creation/edit flows become short guided steps: server-rendered htmx fragments, each step a `<form>` POSTing to a validate-and-render-next-step endpoint, carrying prior values as named hidden fields (server round-trip, no client state to lose — this **replaces** the JS-synced hidden-input pattern, fixing audit I8).
+Both creation/edit flows become short guided steps (admin-only, matching the existing creation guards — see §1): server-rendered htmx fragments, each step a `<form>` POSTing to a validate-and-render-next-step endpoint, carrying prior values as named hidden fields (server round-trip, no client state to lose — this **replaces** the JS-synced hidden-input pattern, fixing audit I8).
 
 Steps:
 

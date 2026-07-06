@@ -12,6 +12,30 @@
 
 ---
 
+## Codex review corrections (v2, 2026-07-06 — all applied in-place)
+
+| # | Severity | Finding | Fixed where |
+|---|---|---|---|
+| 1 | Critical | GUI routes are registered in `composeRuntime` (`core/src/compose-runtime.ts:1642-1671`), not bootstrap; `GuiOptions` lacks `fileIndex`/`chatTranscriptIndex`/`inviteService`/backup deps | Grounded-contracts table; File Structure; Tasks 2.4, 5.1, 6.1, 6.3 now thread deps via `GuiOptions` + `composeRuntime`; new routes register only when their deps exist |
+| 2 | Critical | `RuntimeServices.backupService` is always `undefined` (`compose-runtime.ts:215,1788`); BackupService is built later in `main()` for cron only | Task 6.2: the backups route constructs its own BackupService from `backupConfig` when enabled — no dependency on bootstrap ordering |
+| 3 | Critical | `createInvite` throws without `opts.householdId` (`core/src/services/invite/index.ts:133-140`) | Task 5.1: resolve the admin's household via HouseholdService (or explicit picker when multiple) and pass `householdId` |
+| 4 | Critical | Report/alert creation routes are admin-only today; spec showed Reports/Alerts "all", so member wizard submits would 403 | **Operator decision 2026-07-06: creation stays admin-only.** Wizards admin-gated (Tasks 3.3/4.3 + tests); members get read-only scoped list views (new Tasks 3.4/4.4); spec §1/§3 amended |
+| 5 | Important | Alert contract missing `action_llm_summary_{i}`, `action_webhook_include_data_{i}`, `action_wd_mode_{i}` | Grounded-contracts table + Task 4.3 contract enumeration/tests |
+| 6 | Important | Report contract missing `section_label_{i}` + per-section fields (`section_lookback/app_filter/app_id/scope/space_id/user_id/path/key_prefix/text_{i}`) | Grounded-contracts table + Task 3.3 contract enumeration/tests |
+| 7 | Important | Cooldown is a human string (`"4 hours"`), parsed by `parseCooldown` (`cooldown-tracker.ts:20-31`), not a number | Task 4.3 step 4 emits `"<n> hours"` |
+| 8 | Important | `parseUsageMarkdown` is ALREADY exported (`llm-usage.ts:115`) | Task 2.2 reuses it; export step removed |
+| 9 | Important | Usage log has 6/7/8/9-column variants; 9-col includes Household | Grounded-contracts table + Task 2.2 tests include 9-col rows |
+| 10 | Important | `createBackup()` throws on tar failure; returns `''` only on Windows | Task 6.2 wraps in try/catch → `sendErrorFragment` |
+| 11 | Important | Static assets served by `createServer` via `@fastify/static` (`core/src/server/index.ts:49-54`), not `gui/index.ts` | Task 2.1 test uses a fixture with static registered |
+| 12 | Important | No `buildTestServer` in `auth-test-helpers.ts` (only `extractAuthCookie`, `getCookieUserId`) | Task 1.2 (and all test tasks) follow the per-file `buildApp` pattern of `admin-route-guards.test.ts:225-327` |
+| 13 | Important | `FileIndexFilter` has no household/space-membership fields — scoping must be applied manually on returned entries | Task 4.3 data-source picker filters entries by owner + household + space membership itself |
+| 14 | Important | No exportable alert-history "loader" exists; the route reads `data/system/alert-history/{id}/*.md` inline | Task 2.2 step 3 creates a small shared helper that counts history files by day |
+| 15 | Minor | View locals injected only when `request.user` exists; CSRF token only when present | Grounded-contracts table wording fixed |
+| 16 | Minor | Admin guards are a mix of `platformAdminOnly` preHandlers and inline checks | Tasks 3.3/4.3/5.2 guard tests cover both styles |
+| 17 | Minor | Chart.js URL floated within major version | Task 2.1 pins an exact version + SHA256 |
+
+---
+
 ## Context
 
 The GUI works but is organized around system internals (cron strings, enum values, filesystem paths, ops stats). The intended users — household members AND the admin — are nontechnical, and the system will be shared publicly, so unknown users on unknown devices (desktop + phone both first-class) must be able to complete every workflow. A 2026-06-11 UX audit verified 8 GUI-specific defects (I4–I8, M3, M4, M7) queued as "UX Hardening Batch 2"; this phase absorbs them. Four backend capabilities have no UI: conversation transcripts (SQLite FTS index), backups (BackupService), daily change digests (`data/system/daily-diff/`), and time-series LLM cost data (`data/system/llm-usage.md`).
@@ -20,16 +44,18 @@ The GUI works but is organized around system internals (cron strings, enum value
 
 | Contract | Location | Fact |
 |---|---|---|
-| Alert POST fields | `core/src/gui/routes/alerts.ts:390-470` | `name`, `description`, `schedule`, `cooldown`, `delivery` (comma-sep), `trigger_type` (`scheduled`\|`event`), `trigger_event_name`, `condition_type` (`deterministic`\|`fuzzy`), `condition_expression`, numbered `ds_{app_id,scope,space_id,user_id,path}_{i}` (i<20), numbered `action_type_{i}` + per-type config fields (`action_message_{i}`, `action_report_id_{i}`, `action_webhook_url_{i}`, `action_wd_*_{i}`, `action_audio_*_{i}`, `action_dispatch_*_{i}`), `enabled`, `id` |
-| Report POST fields | `core/src/gui/routes/reports.ts:359` area | `name`, `description`, `schedule`, `delivery`, `enabled`, `id`, `llm_enabled`, `llm_prompt`, `llm_tier`, `llm_max_tokens`, numbered `section_type_{i}` + per-type section fields |
+| Alert POST fields | `core/src/gui/routes/alerts.ts:390-470` | `name`, `description`, `schedule`, `cooldown` (**human string** parsed by `parseCooldown`: `"N minutes"`\|`"N hours"`\|`"N days"` — never a bare number), `delivery` (comma-sep), `trigger_type` (`scheduled`\|`event`), `trigger_event_name`, `condition_type` (`deterministic`\|`fuzzy`), `condition_expression`, numbered `ds_{app_id,scope,space_id,user_id,path}_{i}` (i<20), numbered `action_type_{i}` + per-type config fields (`action_message_{i}`, `action_llm_summary_{i}`, `action_report_id_{i}`, `action_webhook_url_{i}`, `action_webhook_include_data_{i}`, `action_wd_{app_id,user_id,path,content,mode}_{i}`, `action_audio_{message,device}_{i}`, `action_dispatch_{text,user_id}_{i}`), `enabled`, `id` |
+| Report POST fields | `core/src/gui/routes/reports.ts:359-399` | `name`, `description`, `schedule`, `delivery`, `enabled`, `id`, `llm_enabled`, `llm_prompt`, `llm_tier`, `llm_max_tokens`, numbered `section_type_{i}` + **`section_label_{i}` (required per section)** + per-section fields `section_{lookback,app_filter,app_id,scope,space_id,user_id,path,key_prefix,text}_{i}` |
 | Deterministic condition grammar | `core/src/services/condition-evaluator/evaluator.ts` `evaluateDeterministic` | EXACTLY: `empty`/`is empty`, `not empty`/`is not empty`, `contains "X"`, `not contains "X"`, `line count > N`, `line count < N`. Anything else logs a warning and returns false. |
 | Cron helpers | `core/src/utils/cron-describe.ts` | `describeCron(expr)`, `getNextRun(expr, tz): Date\|null`, `formatRelativeTime(date)` already exist — reuse, never reimplement. |
-| Cost log | `data/system/llm-usage.md`, parsed by `parseUsageMarkdown` in `core/src/gui/routes/llm-usage.ts` | Markdown table rows: timestamp, provider, model, inputTokens, outputTokens, cost, app, user. |
+| Cost log | `data/system/llm-usage.md`, parsed by `parseUsageMarkdown` (**already exported**, `core/src/gui/routes/llm-usage.ts:115`) | Markdown table rows in 6/7/8/9-column variants; the 9-column form adds Household. Metrics code + tests must handle all variants (see `cost-tracker.test.ts:14-23` for headers). |
 | Transcript index | `core/src/services/chat-transcript-index/chat-transcript-index.ts` | `ChatTranscriptIndex` interface: `searchSessions(InternalSearchFilters)`, `getSessionMeta(id)`, `getMessageCount(id)`. No list-sessions / list-messages methods yet (additive methods needed — additive is allowed; breaking is not). |
-| BackupService | `core/src/services/backup/index.ts` | `createBackup(): Promise<string>` (archive path, `''` on failure), `cleanupOldBackups()`. Constructed in `bootstrap.ts:68-84` ONLY when `config.backup.enabled` — GUI wiring must handle the disabled case. |
+| BackupService | `core/src/services/backup/index.ts` | `createBackup(): Promise<string>` — returns the archive path; **THROWS on tar/empty-archive failure (`:60-82`); returns `''` only on Windows (`:43-47`)**. `cleanupOldBackups()`. Constructed in `bootstrap.ts:68-92` ONLY for the cron path, AFTER GUI registration — the GUI never receives an instance (Task 6.2 builds its own from `backupConfig`). |
 | InviteService | `core/src/services/invite/index.ts:91` | `createInvite(name, createdBy, opts?: {householdId?, role?: 'admin'\|'member'\|'child', initialSpaces?, enabledApps?}): Promise<string>`; `listInvites()`, `cleanup()`. |
 | Change log | `core/src/services/daily-diff/collector.ts` | `collectChanges(logPath, since): Promise<DailyChanges>` groups JSONL entries `byApp[app][user]` — per-user scoping is available. Daily digests at `data/system/daily-diff/*.md`. |
-| View locals | `core/src/gui/view-locals.ts` | Every template gets `it.currentUser`, `it.isPlatformAdmin`, `it.isHouseholdAdmin`, `it.csrfToken`. Registration order: auth → csrf → view-locals → routes. |
+| View locals | `core/src/gui/view-locals.ts:29-49`, `core/src/gui/csrf.ts:133-141` | **Authenticated** rendered routes get `it.currentUser`, `it.isPlatformAdmin`, `it.isHouseholdAdmin`; `it.csrfToken` only when a token exists. Login/static pages get neither. Registration order: auth → csrf → view-locals → routes. |
+| GUI registration + wiring | `core/src/compose-runtime.ts:1642-1671` | `registerGuiRoutes` is called from **composeRuntime**, not bootstrap. New deps (fileIndex `:1008`, transcript index `:1065`, inviteService `:570`) exist in runtime and must be added to `GuiOptions` + threaded there. `RuntimeServices.backupService` is always `undefined` (`:215`, `:1788`) — BackupService is built later in `main()` for cron only; the GUI must never depend on it (Task 6.2 builds its own). |
+| Admin guards | `core/src/gui/guards/require-platform-admin.ts:18-27` + inline checks (e.g. `reports.ts:146-148`, `users.ts:37-40`) | A MIX of `platformAdminOnly` preHandlers and inline checks; guard tests must cover both styles. Report/alert **creation** routes are admin-only today and stay admin-only (operator decision 2026-07-06). |
 | Users page guard | `core/src/gui/routes/users.ts:40` | `/users` is `platformAdminOnly` today; Batch 5 deliberately opens a read-only member view (spec §1). |
 | Sidebar/nav | `core/src/gui/views/layout.eta:50-143` | Static `<li>` list, admin items behind `it.isPlatformAdmin`. |
 
@@ -57,6 +83,7 @@ The GUI works but is organized around system internals (cron strings, enum value
 | `core/src/gui/utils/describe-automation.ts` | `describeReport(def)` / `describeAlert(def)` — the human-readable review sentences. |
 | `core/src/gui/utils/rule-builder.ts` | Deterministic-grammar picker ↔ expression string mapping (exactly the 6 patterns). |
 | `core/src/gui/routes/metrics.ts` | `GET /gui/api/metrics/llm-daily`, `GET /gui/api/metrics/activity-daily` — permission-scoped JSON for charts. |
+| `core/src/gui/utils/alert-history-stats.ts` | Shared helper counting alert-history files (`data/system/alert-history/{id}/*.md`) by day — no exportable loader exists in the alerts route. |
 | `core/src/gui/routes/report-wizard.ts` | Report wizard step engine (GET entry + POST step advance + final submit renders hidden-field contract form). |
 | `core/src/gui/routes/alert-wizard.ts` | Alert wizard step engine. |
 | `core/src/gui/routes/sessions.ts` | Conversations list/search/detail (read-only). |
@@ -86,8 +113,8 @@ The GUI works but is organized around system internals (cron strings, enum value
 | `core/src/gui/routes/dashboard.ts` | Becomes the Home route (attention banners + glance metrics + activity snippet). |
 | `core/src/gui/routes/{reports,alerts}.ts` | Add wizard entry links; list pages render `describeReport/Alert` sentence. **POST contracts untouched.** |
 | `core/src/gui/routes/users.ts` | Household hub: member-visible read-only view; invite flow (admin); guard change is explicit + tested. |
-| `core/src/gui/index.ts` | Register new route modules; thread new deps (`chatTranscriptIndex`, `backup` config/service, `changeLogPath`, `inviteService`). |
-| `core/src/bootstrap.ts` | Pass the new deps into `registerGuiRoutes` (BackupService instance when enabled; `config.backup` always). |
+| `core/src/gui/index.ts` | Register new route modules; extend `GuiOptions` with the new deps (`fileIndex`, `chatTranscriptIndex`, `inviteService`, `householdService`, `backupConfig`, `changeLogPath`). New routes register only when their deps are present. |
+| `core/src/compose-runtime.ts` | Pass the new deps into `registerGuiRoutes` (services already exist in runtime: invite `:570`, fileIndex `:1008`, transcript index `:1065`; `backupConfig` = `config.backup`). **Not bootstrap** — GUI registration happens here. |
 | `core/src/gui/public/README.md` | Chart.js provenance. |
 | `docs/urs.md`, `docs/implementation-phases.md`, `docs/open-items.md`, `CLAUDE.md` | Batch 7 documentation footprint. |
 
@@ -176,7 +203,10 @@ export function humanizeLabel(value: string): string {
 - [ ] **Step 1: Failing test** — a route test that triggers a known htmx-error path (use an existing settings validation failure) and asserts the response is `text/html` containing `class="pas-error-card"`, the plain-language title, and NO raw stack/exception text.
 
 ```ts
-// core/src/gui/__tests__/error-fragment.test.ts — reuse buildTestServer from auth-test-helpers.ts
+// core/src/gui/__tests__/error-fragment.test.ts — build the server with the per-file buildApp
+// pattern from admin-route-guards.test.ts:225-327 (there is NO shared buildTestServer helper;
+// auth-test-helpers.ts exports only extractAuthCookie/getCookieUserId). All test tasks in this
+// plan follow that same pattern.
 it('returns a styled fragment, not plain text, on htmx validation failure', async () => {
 	const res = await server.inject({
 		method: 'POST',
@@ -292,8 +322,8 @@ describe('nav regroup', () => {
 - Create: `core/src/gui/public/chart.umd.min.js`
 - Modify: `core/src/gui/public/README.md`
 
-- [ ] **Step 1:** Download Chart.js v4 UMD (`https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js`), save to `core/src/gui/public/chart.umd.min.js`. Record exact version + source URL + SHA256 in `public/README.md` (match the existing htmx/pico provenance entries).
-- [ ] **Step 2:** Confirm the static-asset route serves it: existing public-asset handling in `gui/index.ts` (same mechanism as `htmx.min.js`). Add a route test asserting `GET /gui/public/chart.umd.min.js` → 200, `content-type` includes `javascript`.
+- [ ] **Step 1:** Pick the latest exact Chart.js 4.x version at implementation time and download with the version **pinned in the URL** (e.g. `https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js` — substitute the chosen version), save to `core/src/gui/public/chart.umd.min.js`. Record exact version + pinned source URL + SHA256 in `public/README.md` (match the existing htmx/pico provenance entries).
+- [ ] **Step 2:** Static assets are served by `createServer` via `@fastify/static` at `/gui/public/` (`core/src/server/index.ts:49-54`) — NOT by `gui/index.ts`. The asset test must build its fixture through `createServer` (or register `@fastify/static` the same way); assert `GET /gui/public/chart.umd.min.js` → 200, `content-type` includes `javascript`.
 - [ ] **Step 3: Commit:** `feat(gui): vendor Chart.js v4 UMD (local-first charts)`
 
 ### Task 2.2: Metrics JSON endpoints
@@ -317,7 +347,7 @@ describe('GET /gui/api/metrics/llm-daily', () => {
 });
 ```
 
-- [ ] **Step 2: Implement.** Reuse `parseUsageMarkdown` — **export it from `llm-usage.ts`** (it is file-local today; exporting is additive). Aggregate rows by `timestamp.slice(0,10)`; scope: `request.user.isPlatformAdmin ? all : rows.filter(r => r.user === request.user.userId)`. Window: last 30 days (`?days=30`, clamp 1–90). Response shape:
+- [ ] **Step 2: Implement.** Reuse `parseUsageMarkdown` — it is **already exported** (`llm-usage.ts:115`); do not duplicate it. Tests MUST seed rows in the 6-, 8-, and 9-column formats (the 9-column form includes Household — headers per `core/src/services/llm/__tests__/cost-tracker.test.ts:14-23`) to prove the aggregation handles all variants. Aggregate rows by `timestamp.slice(0,10)`; scope: `request.user.isPlatformAdmin ? all : rows.filter(r => r.user === request.user.userId)`. Window: last 30 days (`?days=30`, clamp 1–90). Response shape:
 
 ```ts
 interface LlmDailyResponse {
@@ -327,7 +357,7 @@ interface LlmDailyResponse {
 }
 ```
 
-- [ ] **Step 3:** `GET /gui/api/metrics/activity-daily` — per-day message counts from the transcript index (uses `countMessagesByDay` added in Task 2.3 — implement 2.3 first if convenient, order within the batch is 2.3 → 2.2 acceptable) + per-day alert firings (parse alert-history data the same way the existing `alert-history` route does — reuse its loader function, exporting it if file-local). Same scoping rules. Same test categories (auth, member scope, admin, empty). Response shape (keys MUST match the Task 2.5 registry series keys):
+- [ ] **Step 3:** `GET /gui/api/metrics/activity-daily` — per-day message counts from the transcript index (uses `countMessagesByDay` added in Task 2.3 — implement 2.3 first if convenient, order within the batch is 2.3 → 2.2 acceptable) + per-day alert firings (there is NO exportable loader — the existing route reads `data/system/alert-history/{alertId}/*.md` inline at `alerts.ts:305-329,367-375`; create a small shared helper `core/src/gui/utils/alert-history-stats.ts` that counts history files by day, and leave the existing route untouched). Same scoping rules. Same test categories (auth, member scope, admin, empty). Response shape (keys MUST match the Task 2.5 registry series keys):
 
 ```ts
 interface ActivityDailyResponse {
@@ -360,7 +390,7 @@ countMessagesByDay(db, { userId: 'a', sinceIso })
 ### Task 2.4: Home route + template
 
 **Files:**
-- Modify: `core/src/gui/routes/dashboard.ts` (rename internals to Home; route stays `/gui/`), `core/src/gui/index.ts` + `core/src/bootstrap.ts` (thread `config.backup`, optional BackupService, CostTracker, transcript index)
+- Modify: `core/src/gui/routes/dashboard.ts` (rename internals to Home; route stays `/gui/`), `core/src/gui/index.ts` + `core/src/compose-runtime.ts` (extend `GuiOptions` and thread `backupConfig` = `config.backup`, CostTracker, transcript index — GUI registration lives in composeRuntime, NOT bootstrap; no BackupService instance is available or needed here)
 - Create: `core/src/gui/views/home.eta`; Delete: `core/src/gui/views/dashboard.eta` (after tests cut over)
 - Test: rewrite `core/src/gui/__tests__/routes.test.ts` dashboard assertions → `home.test.ts`
 
@@ -376,7 +406,7 @@ describe('GET /gui/ (home)', () => {
 });
 ```
 
-- [ ] **Step 2: Implement route assembly.** Attention banners (each independently try/caught — a failing probe renders no banner, never a 500): backup disabled/stale (stat newest archive in `config.backup.path` when enabled), provider disconnected (reuse the existing `ollamaStatus` probe already in `dashboard.ts`), spend vs household cap (CostTracker `getMonthlyHouseholdCost` vs cap from config — reuse llm-usage.ts's approach), failed apps (registry load errors — reuse apps route's source). Glance: month cost from usage log (member-scoped), messages this week via `countMessagesByDay`, active alerts via AlertService list (member-scoped), next report via ReportService list + `getNextRun`. Activity snippet: `collectChanges(join(dataDir,'system','change-log.jsonl'), sevenDaysAgo)` → last 5 entries, humanized ("pantry.md updated" → app + file basename, no full paths). **Re-home the removed ops content:** config table → `/gui/config` (exists), users table → `/gui/users`, uptime/cron → `/gui/scheduler` (add a small uptime line there).
+- [ ] **Step 2: Implement route assembly.** Attention banners (each independently try/caught — a failing probe renders no banner, never a 500): backup disabled/stale (from `backupConfig`; when enabled, stat the newest archive in `backupConfig.path` directly — no BackupService instance exists at GUI-registration time), provider disconnected (reuse the existing `ollamaStatus` probe already in `dashboard.ts`), spend vs household cap (CostTracker `getMonthlyHouseholdCost` vs cap from config — reuse llm-usage.ts's approach), failed apps (registry load errors — reuse apps route's source). Glance: month cost from usage log (member-scoped), messages this week via `countMessagesByDay`, active alerts via AlertService list (member-scoped), next report via ReportService list + `getNextRun`. Activity snippet: `collectChanges(join(dataDir,'system','change-log.jsonl'), sevenDaysAgo)` → last 5 entries, humanized ("pantry.md updated" → app + file basename, no full paths). **Re-home the removed ops content:** config table → `/gui/config` (exists), users table → `/gui/users`, uptime/cron → `/gui/scheduler` (add a small uptime line there).
 - [ ] **Step 3: Template `home.eta`:** three zones; the charts zone renders registry slots only (Task 2.5): `<% for (const c of it.charts) { %><div data-pas-chart="<%= c.id %>" ...></div><% } %>` — the route passes `charts: chartsForPage('home')`. No per-chart markup or JS in the template. Chart assets load only when `it.charts.length > 0` (layout includes `chart.umd.min.js` + `pas-charts.js` conditionally).
 - [ ] **Step 4: Cut over tests, delete `dashboard.eta`, full suite, lint. Commit:** `feat(gui): three-zone Home replaces ops dashboard`
 
@@ -532,7 +562,11 @@ it('step flow: valid step-1 POST returns step 2 with step-1 values as hidden fie
 it('invalid step POST re-renders the SAME step with values intact and a styled error', async () => {});
 it('review step renders hidden fields matching the existing POST contract', async () => {
 	// walk the wizard to review; parse hidden inputs; expect keys: name, schedule, delivery, enabled,
-	// llm_enabled?, section_type_0, … and values matching what was entered
+	// llm_enabled?, and per section i: section_type_i, section_label_i (REQUIRED — reports.ts:362,399),
+	// plus the type-appropriate section_{lookback,app_filter,app_id,scope,space_id,user_id,path,key_prefix,text}_i
+});
+it('wizard routes are admin-only, both GET and step POSTs (member → 403) — creation is admin-only by operator decision 2026-07-06', async () => {
+	// cover BOTH guard styles: preHandler platformAdminOnly AND inline isPlatformAdmin checks
 });
 it('CONTRACT: submitting the review form creates a report identical to one created via the legacy form fields', async () => {
 	// POST /gui/reports twice: once with wizard-produced fields, once with hand-built legacy fields
@@ -542,11 +576,22 @@ it('requires auth + CSRF on every wizard POST', async () => {});
 it('edit-wizard prefills from an existing definition, including custom cron → Advanced', async () => {});
 ```
 
-- [ ] **Step 2: Implement route + step templates.** Step 1 (what to include): checkbox cards for the four section types (labels via `humanizeLabel`, one-line plain descriptions); per-section config inputs appear inline when checked (no JS state — a `<details>` per card). Step 2 (when): preset radio cards + time/weekday selects; htmx `hx-get="/gui/reports/new/preview"` on change → returns `nextRunPreview` text; Advanced `<details>` with raw cron input. Step 3 (delivery + AI summary): delivery checkboxes; AI summary toggle with tier select (labels via `humanizeLabel`), prompt under Advanced. Step 4 (review): `describeReport` sentence + contract hidden fields + Save. All templates: single-column, ≥44px targets, `<%= %>` escaping everywhere.
+- [ ] **Step 2: Implement route + step templates.** Wizard routes carry the same admin guard as the existing create routes (`reports.ts:94-98,142-148`). Step 1 (what to include): checkbox cards for the four section types (labels via `humanizeLabel`, one-line plain descriptions); each selected section gets a plain-language label input (feeds the REQUIRED `section_label_{i}`, defaulted from the type's humanized name) and its per-type config inputs inline when checked (no JS state — a `<details>` per card). Step 2 (when): preset radio cards + time/weekday selects; htmx `hx-get="/gui/reports/new/preview"` on change → returns `nextRunPreview` text; Advanced `<details>` with raw cron input. Step 3 (delivery + AI summary): delivery checkboxes; AI summary toggle with tier select (labels via `humanizeLabel`), prompt under Advanced. Step 4 (review): `describeReport` sentence + contract hidden fields + Save. All templates: single-column, ≥44px targets, `<%= %>` escaping everywhere.
 - [ ] **Step 3: All tests pass; full suite; lint. Commit:** `feat(gui): guided report wizard submitting the existing contract`
 
+### Task 3.4: Member read-only Reports view
+
+**Context:** creation is admin-only (operator decision 2026-07-06), but the spec's nav shows Reports to all users and Home's member glance references "next scheduled report". **First verify the current list-GET guard** (`reports.ts` — Codex confirmed create/new are admin-gated at `:94-98,142-148`; check whether the list GET is too). If the list is already member-visible, this task is only a template pass; if admin-only, add a member branch.
+
+**Files:**
+- Modify: `core/src/gui/routes/reports.ts` (member branch on list GET), `core/src/gui/views/reports.eta`
+- Test: extend `core/src/gui/__tests__/report-wizard.test.ts` or the existing reports test file
+
+- [ ] **Step 1: Failing tests:** member GET `/gui/reports` → 200 listing ONLY reports whose delivery targets them (verify how delivery encodes recipients before writing the filter — inspect `ReportDefinition.delivery`), rendered read-only: no create button, no edit/delete/run controls, each row shows the `describeReport` sentence; member sees zero mutation affordances and all mutation POSTs remain admin-only (assert 403).
+- [ ] **Step 2: Implement; green, full suite, lint. Commit:** `feat(gui): member read-only reports view`
+
 ### Batch 3 gate
-- [ ] Contract test green (wizard ≡ legacy form). Responsive check of all four steps at 375px. Legacy `report-edit.eta` stays reachable from the list page's "Advanced edit" link (unchanged) — the wizard is the default path.
+- [ ] Contract test green (wizard ≡ legacy form). Wizard admin-gating tests green. Member read-only view green. Responsive check of all four steps at 375px. Legacy `report-edit.eta` stays reachable from the list page's "Advanced edit" link (unchanged) — the wizard is the default admin path.
 
 ---
 
@@ -596,14 +641,18 @@ it('parseExpression returns null for anything else (renders as Advanced)', () =>
 - Modify: `core/src/gui/index.ts`, `core/src/gui/views/alerts.eta` ("Set up an alert" → `/gui/alerts/new`)
 - Test: `core/src/gui/__tests__/alert-wizard.test.ts`
 
-Same engine as Task 3.3. Steps: 1 What to watch (data-source picker from `FileIndexService.getEntries()` filtered to the user's own + shared + member-space scopes — friendly name = app + basename; multiple sources allowed; emits `ds_*_{i}` fields), 2 When (`trigger_type` cards: schedule presets reused from Task 3.1, or "when data changes" → `trigger_type=event` + `trigger_event_name=data:changed` matching what the existing form offers — verify the exact event name(s) the current alert-edit template offers and mirror them), 3 Condition (mode cards → `condition_type`; rule builder from 4.1 or free-text fuzzy; Advanced raw expression), 4 What happens (action picker cards emitting `action_type_{i}` + per-type config fields per the grounded contract; template-variable insert buttons append `{data}`/`{summary}`/`{alert_name}`/`{date}` into the focused textarea — plain JS, progressive enhancement, typing them manually always works; cooldown field "Don't repeat this alert for … hours" → `cooldown` in the contract's expected unit — **verify the unit** in `parseCooldown` before implementing), 5 Review (`describeAlert` + contract hidden fields).
+Same engine as Task 3.3, same admin gating as the existing alert create routes (`alerts.ts:110-113,164-169`). Steps: 1 What to watch (data-source picker from `FileIndexService.getEntries()` — **`FileIndexFilter` has no household/space-membership fields** (`file-index/types.ts:44-55`), so the route must filter the returned entries itself: own scope by `owner === userId`, shared scope, and spaces via SpaceService membership checks; friendly name = app + basename; multiple sources allowed; emits `ds_*_{i}` fields), 2 When (`trigger_type` cards: schedule presets reused from Task 3.1, or "when data changes" → `trigger_type=event` + `trigger_event_name` — mirror the exact event names the current alert-edit template offers), 3 Condition (mode cards → `condition_type`; rule builder from 4.1 or free-text fuzzy; Advanced raw expression), 4 What happens (action picker cards emitting `action_type_{i}` + per-type config fields per the grounded contract INCLUDING `action_llm_summary_{i}`, `action_webhook_include_data_{i}`, `action_wd_mode_{i}`; template-variable insert buttons append `{data}`/`{summary}`/`{alert_name}`/`{date}` into the focused textarea — plain JS, progressive enhancement, typing them manually always works; cooldown UI "Don't repeat this alert for [n] [hours ▾]" MUST emit the human string the contract expects — `cooldown: "4 hours"` (`parseCooldown` accepts `"N minutes"|"N hours"|"N days"`, `cooldown-tracker.ts:20-31`), never a bare number), 5 Review (`describeAlert` + contract hidden fields).
 
-- [ ] **Step 1: Failing tests:** same shape as 3.3 — step flow, value persistence on error, review hidden-field contract enumeration (including numbered `ds_*_0` and `action_*_0`), **the CONTRACT deep-equal test** (wizard-created alert ≡ legacy-form-created alert via AlertService), auth + CSRF, edit-wizard prefill (legacy expression that `parseExpression` can't map → Advanced textarea prefilled, mode preselected correctly), data-source scoping test (member sees only own/shared/space entries — assert a foreign user's file is NOT offered and a forged `ds_user_id_0` for another user is rejected server-side per existing route validation — check what the existing POST handler enforces and mirror it in the wizard's validate step; if the existing handler does NOT enforce it, enforce in the wizard AND note it for the Codex review as a possible pre-existing gap).
+- [ ] **Step 1: Failing tests:** same shape as 3.3 — step flow, value persistence on error, review hidden-field contract enumeration (including numbered `ds_*_0` and `action_*_0` with the Codex-added fields: `action_llm_summary_0`, `action_webhook_include_data_0`, `action_wd_mode_0`, and `cooldown` as a `"N hours"` string), **the CONTRACT deep-equal test** (wizard-created alert ≡ legacy-form-created alert via AlertService), admin-only gating on GET + every step POST (member → 403; cover both preHandler and inline guard styles), CSRF, edit-wizard prefill (legacy expression that `parseExpression` can't map → Advanced textarea prefilled, mode preselected correctly), and a data-source picker organization test (entries grouped by scope with friendly names, never raw paths).
 - [ ] **Step 2: Implement.**
 - [ ] **Step 3: All green, full suite, lint. Commit:** `feat(gui): guided alert wizard submitting the existing contract (retires I8)`
 
+### Task 4.4: Member read-only Alerts view
+
+Mirror of Task 3.4 for `/gui/alerts`: verify the current list-GET guard; member GET lists ONLY alerts whose delivery targets them, read-only (no create/edit/delete/evaluate controls, rows show the `describeAlert` sentence); all mutation POSTs stay admin-only (assert 403). Same test/commit pattern: `feat(gui): member read-only alerts view`
+
 ### Batch 4 gate
-- [ ] Contract tests green for both wizards; legacy `alert-edit.eta` reachable via "Advanced edit"; responsive check all five steps.
+- [ ] Contract tests green for both wizards; wizard admin-gating green; member read-only view green; legacy `alert-edit.eta` reachable via "Advanced edit"; responsive check all five steps.
 
 ---
 
@@ -612,7 +661,7 @@ Same engine as Task 3.3. Steps: 1 What to watch (data-source picker from `FileIn
 ### Task 5.1: Invite flow (admin)
 
 **Files:**
-- Modify: `core/src/gui/routes/users.ts`, `core/src/gui/views/users.eta` (rename view file to `household.eta`), `core/src/gui/index.ts` (thread `inviteService`), `core/src/bootstrap.ts`
+- Modify: `core/src/gui/routes/users.ts`, `core/src/gui/views/users.eta` (rename view file to `household.eta`), `core/src/gui/index.ts` (extend `GuiOptions` with `inviteService` + `householdService`), `core/src/compose-runtime.ts` (thread them — invite exists at `:570`)
 - Test: `core/src/gui/__tests__/household.test.ts`
 
 - [ ] **Step 1: Failing tests:**
@@ -626,7 +675,7 @@ it('member list shows display names, plain roles, and enabled apps as friendly l
 it('pending invites are listed with expiry, and can be revoked (if InviteService supports revoke — verify; if not, show expiry only)', async () => {});
 ```
 
-- [ ] **Step 2: Implement.** `POST /gui/users/invite` → `inviteService.createInvite(name, adminUserId, { role })` → render an instruction card: the code, the exact Telegram message to send (`/start <code>` — **verify the actual redemption command** the router expects before hardcoding wording; check `redeem-and-register` / router `/start` handling), and a "Then set their password below (optional)" pointer to the existing reset-password flow. `listInvites()` renders pending codes. Member cards: name (id in `<small>`, per the 2026-05-18 identity-clarity convention), role via `humanizeLabel`, apps list.
+- [ ] **Step 2: Implement.** `POST /gui/users/invite` → `inviteService.createInvite(name, adminUserId, { householdId, role })` — **`opts.householdId` is REQUIRED; `createInvite` throws without it** (`invite/index.ts:133-140`). Resolve it via HouseholdService: the admin's own household by default; if the system has multiple households, render a household select in the invite form (platform admin only). Add a test asserting the invite is created in the resolved household. Then render an instruction card: the code, the exact Telegram message to send (`/start <code>` — **verify the actual redemption command** the router expects before hardcoding wording; check `redeem-and-register` / router `/start` handling), and a "Then set their password below (optional)" pointer to the existing reset-password flow. `listInvites()` renders pending codes. Member cards: name (id in `<small>`, per the 2026-05-18 identity-clarity convention), role via `humanizeLabel`, apps list.
 - [ ] **Step 3: Green, full suite, lint. Commit:** `feat(gui): guided invite flow in the Household hub`
 
 ### Task 5.2: Member read-only Household view (deliberate guard change)
@@ -666,7 +715,7 @@ it('member sees only users in their own household (seed two households, assert i
 
 **Files:**
 - Create: `core/src/gui/routes/sessions.ts`, `core/src/gui/views/sessions.eta`, `core/src/gui/views/session-detail.eta`
-- Modify: `core/src/gui/index.ts` + `core/src/bootstrap.ts` (thread the transcript index)
+- Modify: `core/src/gui/index.ts` + `core/src/compose-runtime.ts` (thread the transcript index — exists at `:1065`; register the sessions routes only when the index is present)
 - Test: `core/src/gui/__tests__/sessions.test.ts`
 
 - [ ] **Step 1: Failing tests:**
@@ -688,7 +737,7 @@ it('detail view 404s for another user’s session id (no existence leak: same 40
 
 **Files:**
 - Create: `core/src/gui/routes/backups.ts`, `core/src/gui/views/backups.eta`
-- Modify: `core/src/gui/index.ts`, `core/src/bootstrap.ts` (construct BackupService for the GUI even when the cron is disabled? NO — see step 2), `core/src/gui/__tests__/admin-route-guards.test.ts` (add `/gui/backups`)
+- Modify: `core/src/gui/index.ts` + `core/src/compose-runtime.ts` (thread `backupConfig` only — see step 2), `core/src/gui/__tests__/admin-route-guards.test.ts` (add `/gui/backups`)
 - Test: `core/src/gui/__tests__/backups.test.ts`
 
 - [ ] **Step 1: Failing tests:**
@@ -701,14 +750,14 @@ it('POST /gui/backups/run creates a backup via BackupService and reports the arc
 it('backup failure renders a styled error, not a 500', async () => {});
 ```
 
-- [ ] **Step 2: Implement.** Wiring: `bootstrap.ts` currently constructs BackupService only when `config.backup.enabled`. Keep that; pass to the GUI `{ backupConfig: config.backup, backupService: backupService | undefined }`. Disabled page renders the snippet (`backup:\n  enabled: true\n  path: …`, values from the typed config defaults — check `core/src/types/config.ts` for the real field names before writing the snippet) + restart note. Enabled page: `readdir` the backup path for `*.tar.gz` (name/mtime/size via `stat`), freshness = newest mtime vs schedule expectation; `POST /run` → `createBackup()` (it returns `''` on failure → styled error via `sendErrorFragment`). Home banner (Batch 2) already links here.
+- [ ] **Step 2: Implement.** Wiring: the GUI receives ONLY `backupConfig` (= `config.backup`; fields verified against `core/src/types/config.ts:174-184`: `enabled`, `path`, `schedule`, `retentionCount`). **No BackupService instance can be threaded** — bootstrap builds one after GUI registration, cron-only (`bootstrap.ts:68-92`; `RuntimeServices.backupService` is always `undefined`). The backups route constructs its OWN `BackupService` from `backupConfig` + `dataDir`/`configDir` when `enabled` (cheap, stateless constructor; the test seam `_execFileAsync` still works for tests). Disabled page renders the snippet (`backup:\n  enabled: true\n  path: …`) + restart note. Enabled page: `readdir` the backup path for `*.tar.gz` (name/mtime/size via `stat`), freshness = newest mtime vs schedule expectation; `POST /run` → **wrap `createBackup()` in try/catch — it THROWS on tar/empty-archive failure (`backup/index.ts:60-82`) and returns `''` only on Windows** — both paths render a styled error via `sendErrorFragment`. Home banner (Batch 2) already links here.
 - [ ] **Step 3: Green, full suite, lint. Commit:** `feat(gui): backups status page with Back up now (BKP-1 surfacing)`
 
 ### Task 6.3: Activity (`/gui/activity`)
 
 **Files:**
 - Create: `core/src/gui/routes/activity.ts`, `core/src/gui/views/activity.eta`
-- Modify: `core/src/gui/index.ts` (thread `changeLogPath` = `join(dataDir,'system','change-log.jsonl')` — **verify the exact path bootstrap uses for ChangeLog before hardcoding**)
+- Modify: `core/src/gui/index.ts` + `core/src/compose-runtime.ts` (thread `changeLogPath` — grounded: `ChangeLog.getLogPath()` → `data/system/change-log.jsonl` per `core/src/services/data-store/change-log.ts:31-84`; prefer passing `changeLog.getLogPath()` over re-joining the path)
 - Test: `core/src/gui/__tests__/activity.test.ts`
 
 - [ ] **Step 1: Failing tests:** member sees only entries where `entry.user` is them or their shared/space scopes (mirror how `collectChanges` groups `byApp[app][user]`; verify what `user` contains for shared-scope writes and scope accordingly — inspect `ChangeLogEntry` type first); admin sees all; entries humanized (app + basename + verb, no full paths); day-grouped; empty state is an invitation not an apology; escaping test for hostile path strings.
@@ -740,7 +789,7 @@ it('backup failure renders a styled error, not a 500', async () => {});
 
 - [ ] Full batch-by-batch write-up in `docs/implementation-phases.md` (dated section, newest first).
 - [ ] ONE status bullet in CLAUDE.md per the anti-bloat rule; demote the oldest bullet if the list exceeds ~8.
-- [ ] `docs/open-items.md`: mark this phase's Confirmed Phases entry complete/moved; UX Hardening Batch 2 line updated (shipped here); D2 entry closed (shipped); ADD new entries: “Admin cross-user Conversations access (deliberate own-only decision 2026-07-06 — revisit only on operator request)”; any gap found by the Task 4.3 data-source enforcement check.
+- [ ] `docs/open-items.md`: mark this phase's Confirmed Phases entry complete/moved; UX Hardening Batch 2 line updated (shipped here); D2 entry closed (shipped). Already recorded during planning (verify still accurate): “Conversations GUI own-sessions-only” Accepted Risk; “Member self-service report/alert creation” Proposal (admin-only creation decision, 2026-07-06 Codex round).
 
 ### Task 7.3: Final verification
 
@@ -755,4 +804,5 @@ it('backup failure renders a styled error, not a 500', async () => {});
 - **Spec coverage:** §1 nav → Task 1.5; §2 Home → 2.4 (+2.1–2.3); §3 wizards → 3.1–3.3, 4.1–4.3 (cooldown in 4.3 step 4; presets 3.1; grammar fidelity 4.1; review sentence 3.2/4.2; contract tests in 3.3/4.3); §4 Household/spaces/Conversations/Backups/Activity/AI usage → 5.1–5.3, 6.1–6.4; §5 cross-cutting → Batch 1 + per-template rules; §6 correctness → contract tests, guard-test updates, per-batch gates, 7.3; §7 batching → this structure. Responsive → per-batch gates + 7.3.
 - **Placeholders:** Task 3.1 step 2 and 5.1/6.x contain "verify X before implementing" directives — these are deliberate grounding checks against drift (line numbers move), each with a stated fallback, not unresolved design. No TBDs.
 - **Type consistency:** `humanizeLabel`, `sendErrorFragment`, `presetToCron/cronToPresetId/nextRunPreview`, `describeReport/describeAlert`, `buildExpression/parseExpression`, `listSessionsForUser/listMessagesForSession/countMessagesByDay` — names used consistently across tasks.
-- **Known judgment calls surfaced for Codex review:** (a) admin own-only Conversations privacy decision (6.1); (b) member-visible Household guard change (5.2) and possible member AI-usage guard change (6.4); (c) exporting file-local helpers (`parseUsageMarkdown`, fts sanitizer, alert-history loader) instead of duplicating; (d) wizard hidden-field echo pattern vs server-side draft state (chose stateless echo).
+- **Known judgment calls surfaced for Codex review:** (a) admin own-only Conversations privacy decision (6.1); (b) member-visible Household guard change (5.2) and member AI-usage guard change (6.4); (c) wizard hidden-field echo pattern vs server-side draft state (chose stateless echo).
+- **Codex round 1 (v2) applied 2026-07-06:** all 4 Critical, 10 Important, 3 Minor findings fixed in-place — see the corrections table at the top. The one non-mechanical Critical (creation guards) was resolved by operator decision: **creation stays admin-only**; members get read-only Reports/Alerts views (new Tasks 3.4/4.4). Member self-service creation is recorded as a Proposal in `docs/open-items.md`.
