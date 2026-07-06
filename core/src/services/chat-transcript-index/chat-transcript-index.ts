@@ -1,5 +1,15 @@
 import Database from 'better-sqlite3';
 import { buildMatchClause } from './fts-query.js';
+import {
+	type CountMessagesByDayOpts,
+	type DailyMessageCount,
+	type ListSessionsForUserOpts,
+	type SessionListItem,
+	type TranscriptMessage,
+	countMessagesByDay,
+	listMessagesForSession,
+	listSessionsForUser,
+} from './list-queries.js';
 import { withSqliteRetry } from './retry.js';
 import { applyMigrations } from './schema.js';
 import type {
@@ -23,6 +33,12 @@ export interface ChatTranscriptIndex {
 	listExpiredSessions(cutoffIso: string): Promise<Array<{ id: string; user_id: string }>>;
 	/** @internal Test helper — returns the number of messages rows for the given session. */
 	getMessageCount(sessionId: string): Promise<number>;
+	/** Additive (GUI Conversations browser + Home activity metrics): list a user's sessions, most recent first. */
+	listSessionsForUser(opts: ListSessionsForUserOpts): Promise<SessionListItem[]>;
+	/** Additive (GUI Conversations browser): list all messages for a session, oldest first. */
+	listMessagesForSession(sessionId: string): Promise<TranscriptMessage[]>;
+	/** Additive (GUI Home/AI-usage activity charts): per-day message counts, optionally scoped to a user. */
+	countMessagesByDay(opts: CountMessagesByDayOpts): Promise<DailyMessageCount[]>;
 	close(): Promise<void>;
 }
 
@@ -301,6 +317,18 @@ export class ChatTranscriptIndexImpl implements ChatTranscriptIndex {
 			.prepare('SELECT COUNT(*) as cnt FROM messages WHERE session_id = ?')
 			.get(sessionId) as { cnt: number };
 		return row.cnt;
+	}
+
+	async listSessionsForUser(opts: ListSessionsForUserOpts): Promise<SessionListItem[]> {
+		return listSessionsForUser(this.db, opts);
+	}
+
+	async listMessagesForSession(sessionId: string): Promise<TranscriptMessage[]> {
+		return listMessagesForSession(this.db, sessionId);
+	}
+
+	async countMessagesByDay(opts: CountMessagesByDayOpts): Promise<DailyMessageCount[]> {
+		return countMessagesByDay(this.db, opts);
 	}
 
 	async close(): Promise<void> {
