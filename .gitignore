@@ -5,6 +5,7 @@ node_modules/
 dist/
 core/src/**/*.js
 !core/src/gui/public/htmx.min.js
+!core/src/gui/public/chart.umd.min.js
 core/src/**/*.d.ts
 core/src/**/*.js.map
 core/src/**/*.d.ts.map
