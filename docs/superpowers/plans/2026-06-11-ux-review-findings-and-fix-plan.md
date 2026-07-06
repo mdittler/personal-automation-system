@@ -403,7 +403,7 @@ Remaining audit areas, ordered by priority against the open-source goal. Areas 1
 | # | Area | Why | Status |
 |---|---|---|---|
 | 1 | **Security & trust-boundary audit** — repo hygiene (secrets/PII in tree + history), API/GUI auth surfaces, installer trust model, network exposure | Threat model changes completely when the repo and install surface go public; history scrubbing is irreversible after publication | **Done — Fourth-Pass Review below** |
-| 2 | **Fresh-install reality check** — clean-VM walkthrough of README Quick Start + DEPLOYMENT.md (clone → configure → first Telegram message), including the launchd/Docker paths | Docs have never been executed by a non-author on a non-author machine; first-run failure is the #1 cause of abandoned OSS evaluations. (Passing observation from pass 4: the launchd plist in DEPLOYMENT.md references `dist/core/src/main.js`, which does not match the actual build layout — likely one of several stale spots.) | Open |
+| 2 | **Fresh-install reality check** — clean-VM walkthrough of README Quick Start + DEPLOYMENT.md (clone → configure → first Telegram message), including the launchd/Docker paths | Docs have never been executed by a non-author on a non-author machine; first-run failure is the #1 cause of abandoned OSS evaluations. (Passing observation from pass 4: the launchd plist in DEPLOYMENT.md references `dist/core/src/main.js`, which does not match the actual build layout — likely one of several stale spots.) | **Done — Fifth-Pass Review below** |
 | 3 | **Privacy / data-flow statement** — document exactly what leaves the machine (Anthropic API receives transcripts/prompts on standard tier; n8n webhooks; nothing else) and under which settings | "Local-first" is the pitch; users will ask precisely this. Complements the existing secret-redaction proposal (code half) in open-items | Open |
 | 4 | **Backup/restore drill** — rehearse a full restore: markdown tree + `chat-state.db` + YAML indexes + vault symlinks; document ordering/consistency assumptions | BackupService exists but restore has never been exercised; recovery claims are untested | Open |
 | 5 | **Long-horizon resource audit** — project `data/` growth over years (transcripts, photos, `change-log.jsonl`, regression cache, SQLite WAL); define retention policies beyond P5's opt-in session prune | System is designed to run indefinitely; unbounded growth is a slow failure | Open |
@@ -463,3 +463,69 @@ Claims from the security posture tested against code and confirmed — future au
 2. **Before the repo goes public (blocking):** SEC-1 history decision (fresh-history repo recommended); SEC-2 secret-scan gate; SEC-3 CLI trust warning (one string + test).
 3. **Before promoting third-party app installs (can be post-launch):** SEC-4 container-isolation trigger re-scope in open-items.
 4. Then proceed down the roadmap: area 2 (fresh-install check) naturally validates the SEC-5 doc fix.
+
+---
+---
+
+# Fifth-Pass Review (2026-07-06): Fresh-Install Reality Check
+
+Audit of area #2 from the roadmap. Method: traced every step of the README Quick Start and DEPLOYMENT.md (First-Run Checklist, Docker, Cloudflare Tunnel, launchd) against the code that actually executes, and **ran the production three-phase boot sequence against a pristine data directory with the verbatim example config** (scratchpad simulation of `loadSystemConfig` transitional → `runHouseholdMigration` → `loadSystemConfig` strict — the exact sequence in `compose-runtime.ts:281-300`). No code changed.
+
+**Headline:** a fresh install following the Quick Start verbatim **crashes at first boot** — not from a missing prerequisite or a stale doc, but from a real bug: the household migration's fresh-install branch never writes `household_id` into `pas.yaml`, and the strict config load then rejects every user. Every fresh clone since D5a hits this. Beyond that, the native (non-Docker) production path is doubly broken — the documented entrypoint file doesn't exist, and even the correct entrypoint can't serve the GUI because `pnpm build` doesn't copy view assets into `dist`. The dev path (`pnpm dev`) and the Docker path are solid once the config bug is cleared; most remaining findings are doc drift concentrated in DEPLOYMENT.md.
+
+## Blockers
+
+### INST-1. Fresh install crashes at boot with the example config (reproduced)
+`config/pas.yaml.example` (and DEPLOYMENT.md's "Minimal `config/pas.yaml`") define users with no `household_id` — the field appears nowhere in either file. On first boot, the three-phase sequence runs: transitional load flags `migrationNeeded`, `runHouseholdMigration` takes the fresh-install branch (`core/src/services/household/migration.ts:194-202`) which **only writes the marker file** — unlike the legacy-data path, it neither rewrites `pas.yaml` to add `household_id: default` nor creates `data/system/households.yaml`. Phase 3 strict load then throws:
+
+```
+ConfigValidationError: Strict mode: the following users are missing householdId: <id>.
+Run the household migration or load with mode='transitional'.
+```
+
+The suggested remedy is a dead end — the migration already ran and the marker blocks it from ever running again. Reproduced end-to-end with the verbatim example config; also verified that manually adding `household_id: default` gets past strict load, but that leaves `households.yaml` absent, so `HouseholdService` initializes with zero households and every user references a household that doesn't exist (`getHousehold` returns null; several mutation paths throw `Household "default" not found`) — half-configured, untested territory.
+
+**Fix:** make the fresh-install branch do the same bootstrap as the migration path — create `data/system/households.yaml` with the `default` household (admins from config) and rewrite `pas.yaml` to add `household_id: default` to each user — then add `household_id: default` to `pas.yaml.example` and the DEPLOYMENT.md minimal config anyway, with a comment, so the config file and reality match from the start. Add a first-boot integration test that boots from `pas.yaml.example` + empty data dir (this is the test that would have caught it).
+
+### INST-2. The documented native production entrypoint doesn't exist — and native production is broken regardless
+Three docs tell the user to run `node dist/core/src/main.js`: DEPLOYMENT.md:96 (First-Run Checklist step 4), the launchd plist at DEPLOYMENT.md:230 (which also points at a stale repo directory name, `Projects/personal-assistant`), and OPERATIONS.md:121. No `main.js`/`main.ts` exists anywhere; the real compiled entrypoint is `core/dist/bootstrap.js` (what the Dockerfile runs). Worse, fixing the path isn't enough: `pnpm build` (plain `tsc --build`) does **not** emit `gui/views/` or `gui/public/` into `core/dist` — the Dockerfile hand-copies them (`Dockerfile:65-67`) — and `guiDir` resolves relative to the compiled file (`core/src/server/index.ts:28-29`), so a native `node core/dist/bootstrap.js` run points `@fastify/static` and the Eta view root at directories that don't exist. Today the only working run modes are `pnpm dev` (tsx, resolves from `src/`) and Docker.
+
+**Fix:** add an asset-copy step to the core build (views, public; the manifest schema JSON already gets emitted), then correct the three doc references to `node core/dist/bootstrap.js` and fix the plist's repo path. Alternatively, if native-production isn't a supported mode, say so explicitly in DEPLOYMENT.md and make launchd wrap `pnpm dev` (which is what `start-pas.command` already does).
+
+### INST-3. DEPLOYMENT.md's tunnel section sets a webhook URL that 404s every Telegram update
+DEPLOYMENT.md:201 says `WEBHOOK_URL=https://your-subdomain.example.com` — no path. `bootstrap.ts:50` registers that raw value with Telegram via `setWebhook`, but the only inbound route is `POST /webhook/telegram` (`core/src/server/webhook.ts:24`). Result: webhook registered at `/`, every update 404s, the bot is silently dead (and polling is off because `WEBHOOK_URL` is set). README:170 and `.env.example:73` show the correct full URL including `/webhook/telegram`; DEPLOYMENT.md is the odd one out — and it's the doc the SEC-5 rewrite touches, so fix both in the same edit.
+
+### INST-4. README's "Production with Cloudflare Tunnel" path can't work — `CLOUDFLARE_TUNNEL_TOKEN` is consumed by nothing
+README:166-173 instructs: set `WEBHOOK_URL`, set `CLOUDFLARE_TUNNEL_TOKEN` in `.env`, run Docker Compose, "traffic goes through the tunnel." But `docker-compose.yml` has **no cloudflared service**, and the token env var is parsed into config (`core/src/services/config/index.ts:180,268` → `config.cloudflare.tunnelToken`) and then **never read by anything**. Following the section verbatim yields: no ports exposed (by design) + no tunnel process + webhook mode forced = a container Telegram cannot reach. The user must independently know to run `cloudflared` themselves (DEPLOYMENT.md's native flow does this properly — via a credentials file, which doesn't use the token env var either).
+
+**Fix:** either add a `cloudflared` service to `docker-compose.yml` that actually consumes `CLOUDFLARE_TUNNEL_TOKEN` (remotely-managed tunnel, `TUNNEL_TOKEN` env), or rewrite the README section to point at DEPLOYMENT.md's `cloudflared tunnel run` flow and delete the dead env var from `.env.example` and the config schema.
+
+## Important
+
+### INST-5. Docker Compose couples every install to Ollama — and ships it empty
+`docker-compose.yml` gives `core` a hard `depends_on: ollama: service_healthy` and unconditionally overrides `OLLAMA_URL=http://ollama:11434`. Consequences: (a) an Anthropic-only user still downloads the multi-GB Ollama image and waits for its healthcheck before PAS starts; (b) for an Ollama-only user (no cloud keys — the local-first pitch), the fresh `ollama-models` volume contains **no models**, nothing in the Docker path says to run `docker exec pas-ollama ollama pull llama3.2:3b` (only OPERATIONS.md:193's troubleshooting hints at `ollama list`), and the LLM service has no cross-provider fallback — so the first message fails. Mitigating: when a cloud key is present, `pickFastTier` prefers cloud providers, so the empty Ollama is merely dead weight, not a failure.
+
+**Fix:** put `ollama` behind a compose profile (`--profile ollama`), drop the unconditional `OLLAMA_URL` override (respect `.env`), and add a "pull your model" step to the Docker section of README/DEPLOYMENT.
+
+### INST-6. DEPLOYMENT.md sends users to the wrong GUI URL
+First-Run Checklist step 5: "Open the management GUI at `http://localhost:3000`" — all GUI routes are registered under the `/gui` prefix (`core/src/gui/index.ts:346`) and there is no root route or redirect, so `/` returns 404 with no pointer. README:90 says `/gui` correctly. **Fix:** correct the doc; optionally add a one-line `GET /` → `302 /gui` redirect for first-run friendliness (one route, no auth implications).
+
+### INST-7. Prerequisite drift in DEPLOYMENT.md
+DEPLOYMENT.md:6 says "pnpm 9+"; `package.json` declares `engines.pnpm: >=10` and `packageManager: pnpm@10.30.3`, so pnpm 9 fails at `pnpm install` with an engine error. README says 10+ correctly. Same doc also labels `GUI_AUTH_TOKEN` "Legacy" in the env table while the config loader hard-requires it (`core/src/services/config/index.ts:157` — no default), even for installs that will only ever use password login; a fresh installer must generate a token they may never use. Cosmetic mismatch worth resolving in whichever direction is intended (give it a default of empty + keep the exactly-one-admin gate, or keep it required and drop the "Legacy" framing from the table).
+
+## Minor
+
+### INST-8. Windows dev install path likely fails at the `prepare` hook
+`package.json` `prepare` runs `bash .claude/hooks/install-git-hooks.sh` on every `pnpm install`. The script guards gracefully against non-git contexts (`|| exit 0`) but not against **bash not existing** — on a Windows machine without Git Bash on PATH, the lifecycle script fails and `pnpm install` errors out. DEPLOYMENT.md:8 says "Windows is supported for development," and `start-pas.bat` exists for exactly that audience. Unverified on a real Windows box (flagged as likely, not confirmed). **Fix:** wrap `prepare` in a node one-liner that no-ops when bash is unavailable, or document Git Bash as a Windows prerequisite.
+
+## Verified accurate (for the record)
+
+Steps executed or traced that hold up — future audits can skip these. **Quick Start command set:** every script in README's Available Scripts table exists in `package.json` with matching semantics. **Env plumbing:** `.env` is loaded by the config service itself (dotenv — no manual export needed); envalid produces clear missing-var errors naming `TELEGRAM_BOT_TOKEN`/`GUI_AUTH_TOKEN`; `ANTHROPIC_API_KEY` is genuinely optional as README claims, with a helpful "No LLM providers available" error listing all alternatives when nothing is configured. **`.env.example`** documents every variable the config schema reads, with correct defaults (including the full webhook URL with path). **`pas.yaml.example`** parses clean (modulo INST-1's missing `household_id`) and its inline comments match implemented behavior spot-checked (routing verification defaults, regression budget). **Build/dev:** `pnpm dev` works pre-build — the app loader falls back `dist/index.js` → `src/index.ts` (`core/src/services/app-registry/loader.ts:78-82`) and tsx resolves TS; README's build-then-dev ordering is still right since apps import `@pas/core`'s compiled exports. **Health endpoints:** `/health`, `/health/live`, `/health/ready` all exist, matching both the Dockerfile HEALTHCHECK (`/health/ready`) and the compose healthcheck (`/health`). **Docker runtime image:** coherent — correct entrypoint, hand-copied view assets, schema JSON emitted by tsc; compose's "no exposed ports" claim matches the file. **Upgrade-path migration docs:** DEPLOYMENT.md's Household Migration section accurately describes `migration.ts` behavior for installs with existing data (backup-first, marker, `pas.yaml` rewrite — it's only the *fresh* branch that's incomplete). **First-contact UX:** USER_GUIDE's getting-started flow matches the invite/registration implementation. (Cross-ref: README advertises "License: MIT" but the repo has no LICENSE file — already filed as DOC-2.)
+
+## Recommended sequencing
+
+1. **Now (the bug):** INST-1 fresh-install migration fix + example-config `household_id` + first-boot test — this is the single highest-leverage pre-publication item found by any pass so far: it is the first thing every evaluator hits.
+2. **Now (docs-only batch):** INST-2 entrypoint references, INST-3 webhook URL, INST-6 GUI URL, INST-7 prereq drift — one DEPLOYMENT.md/OPERATIONS.md editing session, naturally combined with the SEC-5 ingress rewrite of the same file.
+3. **Before publicizing the Docker path:** INST-2 build asset-copy step (or explicit "Docker/dev only" stance); INST-4 tunnel decision (add cloudflared service vs rewrite section); INST-5 compose decoupling + model-pull step.
+4. **Opportunistic:** INST-8 Windows prepare guard.
+5. A true clean-VM run (fresh macOS/Linux user account, no author dotfiles) remains worth one hour after INST-1..3 land — this pass traced code, not machine state, so PATH/permissions/corepack surprises are still unprobed.

@@ -149,7 +149,7 @@ Spec pointers: deployment-readiness — `docs/superpowers/specs/2026-04-13-deplo
 
 **Open items:** see `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
 
-**Audit findings** (2026-06-11 first pass; 2026-07-06 passes 2–4 + audit roadmap) — UX issues (19 + 11, queued as UX Hardening Batches 1–5), app-developer docs / open-source readiness (DOC-1..10), response latency (L1..7), and security & trust boundary (SEC-1..5); all findings + fix recommendations + the remaining audit roadmap (areas 2–6) at `docs/superpowers/plans/2026-06-11-ux-review-findings-and-fix-plan.md`, with actionables tracked in `docs/open-items.md`.
+**Audit findings** (2026-06-11 first pass; 2026-07-06 passes 2–5 + audit roadmap) — UX issues (19 + 11, queued as UX Hardening Batches 1–5), app-developer docs / open-source readiness (DOC-1..10), response latency (L1..7), security & trust boundary (SEC-1..5), and fresh-install reality check (INST-1..8, incl. a reproduced first-boot crash with the example config); all findings + fix recommendations + the remaining audit roadmap (areas 3–6) at `docs/superpowers/plans/2026-06-11-ux-review-findings-and-fix-plan.md`, with actionables tracked in `docs/open-items.md`.
 
 ### Implementation Status Discipline (anti-bloat rule)
 
