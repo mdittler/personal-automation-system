@@ -11961,6 +11961,425 @@ Default `llama-server` installations are text-only; multimodal projectors must b
 
 ---
 
+### REQ-GUI-UX — GUI UX Redesign for Nontechnical Users (2026-07-06)
+
+**Context.** The management GUI worked but was organized around system internals (raw enum values, cron strings, filesystem paths, ops stats), and a 2026-06-11 UX audit verified 8 GUI-specific defects (I4–I8, M3, M4, M7, queued as "UX Hardening Batch 2"). Both personas — the admin and household members — are nontechnical, and the system is intended to be shared with unknown users on unknown devices (desktop and phone both first-class). This phase reorganizes the GUI around user tasks, absorbs the queued Batch 2 fixes, replaces the report/alert mega-forms with guided step wizards, turns Users into a Household hub with guided invites, and surfaces four backend capabilities that previously had no UI (Conversations, Backups, Activity, AI-usage charts) — with zero backend contract changes. Plan: `docs/superpowers/plans/2026-07-06-gui-ux-redesign.md`. Spec: `docs/superpowers/specs/2026-07-06-gui-ux-redesign-design.md`.
+
+### REQ-GUI-UX-001 — `humanizeLabel` single source for plain-language labels (M3)
+
+`core/src/gui/utils/humanize.ts` exports `humanizeLabel(value)`, the single source mapping system strings (condition types, action types, trigger types, section types) to plain-language labels. Unknown snake_case/kebab-case values fall back to title-cased words rather than leaking a raw enum string into a template. Templates never render raw enum values directly — routes wrap them with `humanizeLabel` before passing to view locals.
+
+**Standard tests:**
+- `humanize.test.ts` > humanizeLabel > maps known system strings to plain language
+- `humanize.test.ts` > humanizeLabel > falls back to title-cased words for unknown snake_case values
+
+**Edge case tests:**
+- `humanize.test.ts` > humanizeLabel > never returns an empty string
+
+---
+
+### REQ-GUI-UX-002 — Styled htmx error fragment guarantee (I5)
+
+Every htmx-reachable route that fails returns a styled `.pas-error-card` HTML fragment via `sendErrorFragment(reply, status, title, hint)`, never raw text or a stack trace. This is swept across settings, data browse, apps toggle, and users mutation failure paths.
+
+**Standard tests:**
+- `error-fragment.test.ts` > styled htmx error fragment (I5) > renders a styled error card instead of a plain-text failure for an htmx request
+
+**Edge case tests:**
+- `error-fragment.test.ts` > styled htmx error fragment (I5) > renders a styled error card for a denied data.ts browse request (audit I5 sweep)
+- `error-fragment.test.ts` > styled htmx error fragment (I5) > renders a styled error card for an apps.ts toggle failure (audit I5 sweep)
+- `error-fragment.test.ts` > styled htmx error fragment (I5) > renders a styled error card for a users.ts mutation failure (audit I5 sweep)
+
+---
+
+### REQ-GUI-UX-003 — Login page explains sign-outs and rate limits (I4, I7)
+
+The login page explains WHY a session ended: `?reason=expired` (session cookie past the 24h window) and `?reason=session-invalidated` (stale `sessionVersion`, e.g. after a password change or restart) each render a plain-language info card. The login rate limiter's response names the real wait window and tells the user to try again, instead of a bare "too many attempts."
+
+**Standard tests:**
+- `login-reasons.test.ts` > Login page sign-out explanations (I4, I7) > (a) an expired session cookie redirects to reason=expired
+- `login-reasons.test.ts` > Login page sign-out explanations (I4, I7) > (b) GET /gui/login?reason=expired explains the session expired
+
+**Edge case tests:**
+- `login-reasons.test.ts` > Login page sign-out explanations (I4, I7) > (c) a stale-sessionVersion cookie redirects to reason=session-invalidated, which explains itself
+- `login-reasons.test.ts` > Login page sign-out explanations (I4, I7) > (d) exceeding the login rate limit names the real wait window and says try again
+
+---
+
+### REQ-GUI-UX-004 — Nav regroup, confirmations, aria-labels (M4, M7)
+
+The sidebar nav is reorganized into task-oriented sections with plain-language labels (Home, Automations, People and sharing, Your data, System) instead of raw route/technology names; System-section items (Apps, Scheduler, Logs, Backups, etc.) are hidden from non-admin members. Destructive actions carry `data-confirm-delete` confirmation text. Icon-only controls and radiogroup scope selectors carry `aria-label`s.
+
+**Standard tests:**
+- `nav-regroup.test.ts` > nav regroup > shows plain-language sections to an admin
+
+**Edge case tests:**
+- `nav-regroup.test.ts` > nav regroup > hides the System section items from a non-admin member
+
+---
+
+### REQ-GUI-HOME — Three-zone Home page + metrics endpoints (2026-07-06)
+
+**Context.** The former dashboard surfaced raw ops internals (config table, uptime, cron strings). It is replaced by a three-zone Home: attention banners (only what needs action), plain-language glance metrics, and registry-driven charts. Two new permission-scoped JSON endpoints feed the charts; the same scoping rule (member sees only their own rows, admin sees an aggregated + per-user/per-household breakdown) is enforced server-side, never via query params.
+
+### REQ-GUI-HOME-001 — Attention banners, independently probed and fail-silent
+
+Home renders zero or more attention banners (backup disabled, spend-vs-household-cap ≥80%) computed from independent try/caught probes — a failing probe renders no banner, never a 500. When nothing needs attention the page shows "All systems normal." Banners reflecting system health (backup, spend-vs-cap) are hidden from non-admin members; members still see their own glance metrics.
+
+**Standard tests:**
+- `home.test.ts` > GET /gui/ (home) > shows a backup warning banner to an admin when backups are disabled
+- `home.test.ts` > GET /gui/ (home) > shows "All systems normal" when nothing needs attention
+- `home.test.ts` > GET /gui/ (home) > shows a spend-vs-cap attention banner to an admin when monthly spend is at or above 80% of the household cap
+
+**Edge case tests:**
+- `home.test.ts` > GET /gui/ (home) > hides system-health banners from members but shows their own glance metrics
+- `home.test.ts` > GET /gui/ (home) > hides the spend-vs-cap banner when monthly spend is below 80% of the household cap
+- `home.test.ts` > GET /gui/ (home) > hides the spend-vs-cap banner from non-admin members
+- `home.test.ts` > GET /gui/ (home) > does not 500 when the cost-cap banner probe fails
+
+---
+
+### REQ-GUI-HOME-002 — Glance metrics, member-scoped by default
+
+Home's glance cards (AI spend this month, messages this week, active alerts, next scheduled report) are member-scoped: each member sees only their own message count and usage-derived spend, never another member's. A missing chat transcript index degrades to a 0-messages glance card, not an error. User-controlled names rendered in the recent-activity snippet are HTML-escaped.
+
+**Standard tests:**
+- `home.test.ts` > GET /gui/ (home) > renders glance cards: AI spend this month, messages this week, active alerts, next report
+
+**Edge case tests:**
+- `home.test.ts` > GET /gui/ (home) > shows only the requesting member's own message count in "Messages this week"
+- `home.test.ts` > GET /gui/ (home) > handles a missing chat transcript index by showing 0 messages, not an error
+- `home.test.ts` > GET /gui/ (home) > escapes user-controlled names in the recent-activity list
+
+---
+
+### REQ-GUI-HOME-003 — Permission-scoped LLM-cost metrics endpoint
+
+`GET /gui/api/metrics/llm-daily` requires authentication; a member receives per-day cost/token totals scoped to their own usage-log rows only, while a platform admin receives an aggregated series with a per-user breakdown. The parser handles the 6-, 8-, and 9-column (household) `llm-usage.md` row formats identically, and a missing usage file yields an empty series rather than an error.
+
+**Standard tests:**
+- `metrics.test.ts` > GET /gui/api/metrics/llm-daily > returns per-day cost/token totals for the requesting member, own rows only
+- `metrics.test.ts` > GET /gui/api/metrics/llm-daily > returns all users aggregated for a platform admin, with per-user breakdown
+- `metrics.test.ts` > GET /gui/api/metrics/llm-daily > handles a 6-column legacy usage log (no provider/user columns)
+
+**Edge case tests:**
+- `metrics.test.ts` > GET /gui/api/metrics/llm-daily > requires auth
+- `metrics.test.ts` > GET /gui/api/metrics/llm-daily > handles a missing usage file with an empty series, not an error
+
+---
+
+### REQ-GUI-HOME-004 — Permission-scoped activity metrics endpoint
+
+`GET /gui/api/metrics/activity-daily` requires authentication; a member receives per-day message + alert-firing counts scoped to their own activity, and never another member's alert firings, while a platform admin receives an aggregated view including all alerts. No activity yields an empty series, not an error.
+
+**Standard tests:**
+- `metrics.test.ts` > GET /gui/api/metrics/activity-daily > returns member-scoped message + alert-firing counts
+- `metrics.test.ts` > GET /gui/api/metrics/activity-daily > returns an aggregated admin view including all alerts
+
+**Edge case tests:**
+- `metrics.test.ts` > GET /gui/api/metrics/activity-daily > requires auth
+- `metrics.test.ts` > GET /gui/api/metrics/activity-daily > does not count another member's alert firings
+- `metrics.test.ts` > GET /gui/api/metrics/activity-daily > handles no activity with an empty series, not an error
+
+---
+
+### REQ-GUI-CHARTS-001 — Additive transcript-index list/count queries
+
+`ChatTranscriptIndex` gains three additive, read-only query methods backing the metrics/activity/session surfaces: `listSessionsForUser` (paginated, DESC by `started_at`, strictly scoped to one user), `listMessagesForSession` (ASC by timestamp), and `countMessagesByDay` (per-day counts, user-scoped or omitted for the admin/aggregate path). No existing method signature changed.
+
+**Standard tests:**
+- `list-queries.test.ts` > ChatTranscriptIndex additive list/count queries > listSessionsForUser > returns only the requesting user's sessions, ordered by started_at DESC
+- `list-queries.test.ts` > ChatTranscriptIndex additive list/count queries > listSessionsForUser > reports the correct messageCount per session
+- `list-queries.test.ts` > ChatTranscriptIndex additive list/count queries > listSessionsForUser > respects limit and offset for pagination
+- `list-queries.test.ts` > ChatTranscriptIndex additive list/count queries > listMessagesForSession > returns messages ordered by timestamp ASC with role/text/timestamp
+- `list-queries.test.ts` > ChatTranscriptIndex additive list/count queries > countMessagesByDay > counts only the given user's messages, grouped by day
+- `list-queries.test.ts` > ChatTranscriptIndex additive list/count queries > countMessagesByDay > aggregates across all users when userId is omitted (admin path)
+
+**Edge case tests:**
+- `list-queries.test.ts` > ChatTranscriptIndex additive list/count queries > listSessionsForUser > never returns another user's sessions
+- `list-queries.test.ts` > ChatTranscriptIndex additive list/count queries > listSessionsForUser > returns an empty array for a user with no sessions
+- `list-queries.test.ts` > ChatTranscriptIndex additive list/count queries > listMessagesForSession > returns an empty array for an unknown session id
+- `list-queries.test.ts` > ChatTranscriptIndex additive list/count queries > countMessagesByDay > excludes messages before sinceIso
+- `list-queries.test.ts` > ChatTranscriptIndex additive list/count queries > countMessagesByDay > returns an empty array when there is nothing in range
+
+---
+
+### REQ-GUI-CHARTS-002 — Declarative chart registry (one-entry editability)
+
+`core/src/gui/charts/registry.ts` is the single file that must be touched to add, revise, or remove a chart: `CHARTS: ChartDescriptor[]` + `chartsForPage(page)`. Every descriptor references a known, real metrics endpoint and a supported Chart.js type; ids are unique. `pas-charts.js` reads `[data-pas-chart]` slot data-attributes emitted from the registry and is never edited per-chart.
+
+**Standard tests:**
+- `registry.test.ts` > chart registry > every descriptor is complete and points at a known endpoint + supported type
+- `registry.test.ts` > chart registry > chartsForPage filters by page
+- `registry.test.ts` > chart registry > adding a descriptor is the only change needed to register a new chart
+
+**Edge case tests:**
+- `registry.test.ts` > chart registry > ids are unique
+- `registry.test.ts` > chart registry > chartsForPage returns an empty array for a page with no charts
+
+---
+
+### REQ-GUI-WIZARD — Report and alert step wizards (Batches 3–4, 2026-07-06)
+
+**Context.** The prior report/alert forms were single mega-forms with raw enum selects and cron-string schedule inputs. Both are replaced by htmx step wizards sharing one engine: each step echoes prior field values as hidden inputs so validation errors never lose entered data, and the final Review step renders hidden fields matching **exactly** the pre-existing POST contract (`core/src/gui/routes/{reports,alerts}.ts`) — the existing create/update handlers are the only writers, so there is zero backend contract change. Creation stays admin-only by operator decision (2026-07-06 Codex plan review); members get read-only scoped views instead (REQ-GUI-WIZARD-006/007).
+
+### REQ-GUI-WIZARD-001 — Schedule presets with real next-run preview
+
+`core/src/gui/utils/schedule-presets.ts` maps four presets (daily, weekly, hourly, weekday mornings) to cron expressions and back (`presetToCron`/`cronToPresetId`), reusing `cron-describe.ts`'s `getNextRun`/`describeCron` for a human next-run preview sentence. A cron that matches no preset renders as Advanced/custom rather than crashing.
+
+**Standard tests:**
+- `schedule-presets.test.ts` > schedule-presets > maps every preset to a valid cron accepted by getNextRun
+- `schedule-presets.test.ts` > schedule-presets > round-trips: cronToPresetId(presetToCron(x)) === x for parameterized presets
+- `schedule-presets.test.ts` > schedule-presets > nextRunPreview renders a human sentence
+- `schedule-presets.test.ts` > schedule-presets > PRESETS has exactly the four documented ids
+
+**Edge case tests:**
+- `schedule-presets.test.ts` > schedule-presets > returns null presetId for a cron that matches no preset (custom)
+- `schedule-presets.test.ts` > schedule-presets > nextRunPreview handles an invalid cron gracefully
+
+---
+
+### REQ-GUI-WIZARD-002 — Rule-builder mapped 1:1 to the deterministic condition grammar
+
+`core/src/gui/utils/rule-builder.ts` exposes exactly six patterns matching `evaluateDeterministic` (`empty`, `not empty`, `contains "X"`, `not contains "X"`, `line count > N`, `line count < N`) via `buildExpression`/`parseExpression`, with no seventh pattern and no drift from the evaluator's grammar. Unrecognized/legacy expressions parse to `null` and render as Advanced free text rather than being silently mis-mapped.
+
+**Standard tests:**
+- `rule-builder.test.ts` > RULE_PATTERNS > has exactly six entries with plain-language labels
+- `rule-builder.test.ts` > buildExpression > emits exactly the six expressions evaluateDeterministic recognizes
+- `rule-builder.test.ts` > buildExpression > round-trips every pattern through parseExpression
+- `rule-builder.test.ts` > parseExpression > parses all six recognized forms
+- `rule-builder.test.ts` > parseExpression > is whitespace/case tolerant like evaluateDeterministic
+
+**Edge case tests:**
+- `rule-builder.test.ts` > buildExpression > rejects unquotable text (embedded double quote) with a friendly error
+- `rule-builder.test.ts` > buildExpression > rejects empty contains/not_contains text
+- `rule-builder.test.ts` > buildExpression > rejects negative or non-integer N for line-count patterns
+- `rule-builder.test.ts` > parseExpression > returns null for anything else (renders as Advanced)
+
+---
+
+### REQ-GUI-WIZARD-003 — Human-readable report/alert description sentences
+
+`core/src/gui/utils/describe-automation.ts` exports `describeReport`/`describeAlert`, deterministic (no LLM) plain-language sentences assembled from a definition + `describeCron` + `humanizeLabel`, rendered on both the admin and member list pages. Both functions return plain text only — escaping is the template's job, never the util's — and degrade gracefully for structurally incomplete definitions (zero sections/actions, invalid schedule, missing condition) instead of throwing.
+
+**Standard tests:**
+- `describe-automation.test.ts` > describeReport > embeds the real describeCron output for the schedule
+- `describe-automation.test.ts` > describeReport > lists section labels
+- `describe-automation.test.ts` > describeReport > mentions the AI summary when llm.enabled is true
+- `describe-automation.test.ts` > describeReport > mentions Telegram delivery
+- `describe-automation.test.ts` > describeAlert > renders a scheduled deterministic alert in plain language
+- `describe-automation.test.ts` > describeAlert > renders an event-triggered fuzzy alert in plain language
+- `describe-automation.test.ts` > describeAlert > renders plain-language deterministic condition phrasing for all six rule-builder patterns
+- `describe-automation.test.ts` > describeAlert > preserves the "Telegram" proper-noun capitalization in action text
+
+**Edge case tests:**
+- `describe-automation.test.ts` > describeReport > omits AI summary language when llm.enabled is false
+- `describe-automation.test.ts` > describeReport > handles a report with zero sections without throwing
+- `describe-automation.test.ts` > describeReport > handles an invalid/empty schedule gracefully
+- `describe-automation.test.ts` > describeReport > returns plain text — no HTML — leaving escaping to the template
+- `describe-automation.test.ts` > describeAlert > uses app id + file basename (no extension, no full path) for data sources
+- `describe-automation.test.ts` > describeAlert > falls back to the raw expression for a legacy/unmappable deterministic expression
+- `describe-automation.test.ts` > describeAlert > omits cooldown language when cooldown is empty
+- `describe-automation.test.ts` > describeAlert > handles zero actions and zero data sources without throwing
+- `describe-automation.test.ts` > describeAlert > returns plain text — no HTML — leaving escaping to the template
+- `describe-automation.test.ts` > describeAlert > does not throw for a structurally-invalid definition missing condition/actions/trigger
+
+---
+
+### REQ-GUI-WIZARD-004 — Report wizard: contract preservation + admin gating + value persistence
+
+The report wizard (`/gui/reports/new`, `/gui/reports/new/step`) is admin-only end to end (both the initial GET and every step POST return 403 for a member), requires auth + CSRF on every step POST, and re-renders the same step with entered values intact plus a styled error on a validation failure rather than discarding progress. The Review step's hidden fields match exactly the pre-existing `POST /gui/reports` contract, verified by a deep-equal CONTRACT test comparing a wizard-submitted report against one created via the legacy form fields. Edit mode prefills from an existing definition, mapping an unrecognized cron to the Advanced field.
+
+**Standard tests:**
+- `report-wizard.test.ts` > GET /gui/reports/new (wizard entry) > renders step 1 for an admin
+- `report-wizard.test.ts` > POST /gui/reports/new/step > valid step-1 POST returns step 2 with step-1 values as hidden fields
+- `report-wizard.test.ts` > Review step contract > review step renders hidden fields matching the existing POST contract
+- `report-wizard.test.ts` > Review step contract > CONTRACT: submitting the review form creates a report identical to one created via the legacy form fields
+- `report-wizard.test.ts` > Review step contract > edit-wizard prefills from an existing definition, including custom cron → Advanced
+
+**Edge case tests:**
+- `report-wizard.test.ts` > GET /gui/reports/new (wizard entry) > returns 403 for a member (creation is admin-only)
+- `report-wizard.test.ts` > GET /gui/reports/new (wizard entry) > member 403 also covers the edit-wizard route
+- `report-wizard.test.ts` > Step-1 re-render hidden-field hygiene (Batch 3 review hardening) > never echoes section_type_i/section_label_i/per-section fields as hidden inputs alongside their visible counterparts
+- `report-wizard.test.ts` > POST /gui/reports/new/step > invalid step POST re-renders the SAME step with values intact and a styled error
+- `report-wizard.test.ts` > POST /gui/reports/new/step > requires auth + CSRF on every wizard POST
+- `report-wizard.test.ts` > POST /gui/reports/new/step > wizard step POSTs are admin-only (member → 403)
+
+---
+
+### REQ-GUI-WIZARD-005 — Alert wizard: full action picker + contract preservation + lossless edit prefill
+
+The alert wizard (`/gui/alerts/new`, `/gui/alerts/new/step`) covers all six action types (`telegram_message`, `run_report`, `webhook`, `write_data`, `audio`, `dispatch_message`) with humanized picker cards, emits cooldown as the human string the contract expects (e.g. `"4 hours"`, never a bare number), and organizes the data-source picker by scope with friendly app+basename names (never raw paths). Same admin-gating, CSRF, and value-persistence-on-error guarantees as the report wizard. The Review step's hidden fields are verified by CONTRACT deep-equal tests (including `webhook`+`include_data` and `write_data`+`mode=write`) against a legacy-form-created alert. Editing an existing alert through the wizard loses nothing — including a 2-action alert's second action — verified by a lossless multi-action-passthrough prefill test.
+
+**Standard tests:**
+- `alert-wizard.test.ts` > GET /gui/alerts/new (wizard entry) > renders step 1 (data source picker) for an admin
+- `alert-wizard.test.ts` > GET /gui/alerts/new (wizard entry) > data-source picker organizes entries by scope with friendly names, never raw paths
+- `alert-wizard.test.ts` > Review step contract > review step renders hidden fields matching the existing POST contract
+- `alert-wizard.test.ts` > Review step contract > CONTRACT: submitting the review form creates an alert identical to one created via the legacy form fields
+- `alert-wizard.test.ts` > Review step contract > cooldown UI emits the human string contract for every unit
+- `alert-wizard.test.ts` > Review step contract > edit-wizard prefills from an existing definition; unmappable legacy expression falls back to Advanced
+- `alert-wizard.test.ts` > Step 4 action picker (Critical 1) > renders all six action-type picker cards with humanized labels
+- `alert-wizard.test.ts` > Six action types end-to-end via AlertService (Critical 2c) > CONTRACT: webhook+include_data alert created via wizard matches legacy form deep-equal
+- `alert-wizard.test.ts` > Six action types end-to-end via AlertService (Critical 2c) > CONTRACT: write_data+mode=write alert created via wizard matches legacy form deep-equal
+- `alert-wizard.test.ts` > Lossless edit prefill (Critical 2) > editing a webhook alert through the wizard and saving preserves the webhook action deep-equal
+- `alert-wizard.test.ts` > Lossless edit prefill (Critical 2) > editing a 2-action alert carries both actions through unchanged (multi-action passthrough notice)
+- `alert-wizard.test.ts` > Collaboration-scope data sources (Minor 2) > includes collaboration-scope FileIndexEntry entries in the data-source picker, grouped under their space
+
+**Edge case tests:**
+- `alert-wizard.test.ts` > GET /gui/alerts/new (wizard entry) > returns 403 for a member (creation is admin-only)
+- `alert-wizard.test.ts` > GET /gui/alerts/new (wizard entry) > member 403 also covers the edit-wizard route
+- `alert-wizard.test.ts` > POST /gui/alerts/new/step > invalid step POST re-renders the SAME step with values intact and a styled error
+- `alert-wizard.test.ts` > POST /gui/alerts/new/step > requires auth + CSRF on every wizard POST
+- `alert-wizard.test.ts` > POST /gui/alerts/new/step > wizard step POSTs are admin-only (member → 403)
+- `alert-wizard.test.ts` > Review step contract > event-triggered alerts emit trigger_type=event + trigger_event_name, no schedule required
+- `alert-wizard.test.ts` > Review step contract > fuzzy condition mode emits condition_type=fuzzy with the own-words expression
+- `alert-wizard.test.ts` > Review step contract > advanced condition mode passes the raw expression through unchanged
+- `alert-wizard.test.ts` > Step 4 action picker (Critical 1) > defaults to telegram_message fields when no action type has been chosen yet
+- `alert-wizard.test.ts` > Step 4 action picker (Critical 1) > changing action type re-renders step 4 with that type's fields (webhook)
+- `alert-wizard.test.ts` > Step 4 action picker (Critical 1) > echoes attacker-supplied values through escapeHtml in attribute contexts
+
+---
+
+### REQ-GUI-WIZARD-006 — Member read-only Reports view
+
+A member's `GET /gui/reports` lists only reports whose delivery targets them, rendered read-only via `describeReport` sentences with no create/edit/toggle/run controls; all mutation POSTs on `/gui/reports/*` remain admin-only (403 for a member). The admin view is unchanged — full create/edit/toggle controls remain.
+
+**Standard tests:**
+- `report-wizard.test.ts` > Member read-only reports view (Task 3.4) > member GET /gui/reports lists only reports whose delivery targets them
+- `report-wizard.test.ts` > Member read-only reports view (Task 3.4) > member view shows describeReport sentences and no create/edit/toggle controls
+- `report-wizard.test.ts` > Member read-only reports view (Task 3.4) > admin view still shows create/edit/toggle controls
+
+**Edge case tests:**
+- `report-wizard.test.ts` > Member read-only reports view (Task 3.4) > member POST mutations on reports remain 403
+
+---
+
+### REQ-GUI-WIZARD-007 — Member read-only Alerts view
+
+A member's `GET /gui/alerts` lists only alerts whose delivery targets them, rendered read-only via `describeAlert` sentences with no create/edit/delete/evaluate controls; all mutation POSTs on `/gui/alerts/*` remain admin-only. The admin view is unchanged.
+
+**Standard tests:**
+- `alert-wizard.test.ts` > Member read-only alerts view (Task 4.4) > member GET /gui/alerts lists only alerts whose delivery targets them
+- `alert-wizard.test.ts` > Member read-only alerts view (Task 4.4) > member view shows describeAlert sentences and no create/edit/toggle/test controls
+- `alert-wizard.test.ts` > Member read-only alerts view (Task 4.4) > admin view still shows create/edit/toggle controls
+
+**Edge case tests:**
+- `alert-wizard.test.ts` > Member read-only alerts view (Task 4.4) > member POST mutations on alerts remain 403
+
+---
+
+### REQ-GUI-HOUSEHOLD — Household & sharing hub (Batch 5, 2026-07-06)
+
+**Context.** `/gui/users` was renamed in spirit to a "Household hub": admins get a guided invite flow that resolves `householdId` via `HouseholdService` (required by `InviteService.createInvite`, which throws without it) instead of a raw form; members get a new deliberate read-only view of their own household. Two-household isolation is explicitly tested since this is an access-control change.
+
+### REQ-GUI-HOUSEHOLD-001 — Guided invite flow with householdId resolution
+
+An admin's `POST /gui/users/invite` resolves the target household via `HouseholdService` (the admin's own household by default; an explicit picker when the system has multiple households) before calling `createInvite`, and renders a copy-paste instruction card with the code and the exact redemption instruction. The route requires platform admin + CSRF, and returns a styled 400 (never an uncaught throw) when the household cannot be resolved. Invite names are HTML-escaped in the rendered instruction card.
+
+**Standard tests:**
+- `household.test.ts` > Household hub — invite flow (admin) > admin can create an invite and sees copy-paste instructions with the code
+- `household.test.ts` > Household hub — invite flow (admin) > member list shows display names, plain roles, and enabled apps as friendly labels
+- `household.test.ts` > Household hub — invite flow (admin) > multi-household invite picker: two households → picker renders, and an explicit householdId routes the invite to the non-default household
+- `household.test.ts` > Household hub — invite flow (admin) > pending invites are listed with expiry (InviteService has no revoke method — expiry only)
+
+**Edge case tests:**
+- `household.test.ts` > Household hub — invite flow (admin) > escapes a hostile invite name in the instruction card
+- `household.test.ts` > Household hub — invite flow (admin) > invite POST requires platform admin + CSRF
+- `household.test.ts` > Household hub — invite flow (admin) > admin with no resolvable household gets a styled 400, not a throw from InviteService
+
+---
+
+### REQ-GUI-HOUSEHOLD-002 — Member read-only Household view (deliberate guard change, household-scoped)
+
+`GET /gui/users` is authenticated-only rather than admin-only: a member gets a read-only view of their own household's members (no invite form, no role controls, no visibility into other households), while all mutation POSTs on `/gui/users/*` remain platform-admin-only. Two-household isolation is explicitly verified — a member in household A never sees household B's members. This intentionally changes prior access-control behavior (`/gui/users` was previously 403 for non-admins) — the updated shared admin-guard test documents the new contract in place of the old 403 assertion.
+
+**Standard tests:**
+- `household.test.ts` > Household hub — member read-only view (Task 5.2, deliberate guard change) > member GET /gui/users → 200 read-only: own household members, no invite form, no role controls, no other households
+- `admin-route-guards.test.ts` > GUI admin route guards > member GET /gui/users → 200 (read-only Household view, not 403)
+
+**Edge case tests:**
+- `household.test.ts` > Household hub — member read-only view (Task 5.2, deliberate guard change) > member POST to any /gui/users mutation → 403
+- `household.test.ts` > Household hub — member read-only view (Task 5.2, deliberate guard change) > member sees only users in their own household (two-household isolation)
+
+---
+
+### REQ-GUI-SURFACE — New GUI surfaces: Conversations, Backups, Activity, AI usage (Batch 6, 2026-07-06)
+
+**Context.** Four backend capabilities had no GUI surface: the SQLite/FTS5 chat transcript index, `BackupService`, the daily change-log digest, and the LLM cost time series. Batch 6 adds one page per capability, each permission-scoped.
+
+### REQ-GUI-SURFACE-001 — Conversations browser is own-sessions-only for everyone, including admins
+
+`/gui/sessions` lists and searches (via FTS) only the requesting user's own session transcripts — deliberately, admins get NO cross-user transcript read, because chat transcripts are personal. This sets the floor higher than the originating D2 open item ("non-admins see only their own"), which would have permitted admin cross-user access. All rendered message content is HTML-escaped, and requesting another user's session id 404s identically to an unknown id (no existence leak).
+
+**Standard tests:**
+- `sessions.test.ts` > Conversations browser (/gui/sessions) > lists only the requesting member's sessions (title, date, turn count)
+- `sessions.test.ts` > Conversations browser (/gui/sessions) > search returns FTS matches scoped to the user
+
+**Edge case tests:**
+- `sessions.test.ts` > Conversations browser (/gui/sessions) > admin also sees ONLY their own sessions (privacy: transcripts are personal)
+- `sessions.test.ts` > Conversations browser (/gui/sessions) > detail view renders messages read-only with all content HTML-escaped
+- `sessions.test.ts` > Conversations browser (/gui/sessions) > detail view 404s for another user's session id (no existence leak: same 404 as unknown id)
+- `sessions.test.ts` > Conversations browser (/gui/sessions) > requires authentication
+
+---
+
+### REQ-GUI-SURFACE-002 — Backups status page (admin), self-built BackupService, disabled-state guidance
+
+`/gui/backups` is admin-only. Because `RuntimeServices.backupService` is always `undefined` at GUI-registration time (bootstrap constructs one later, cron-only), the route builds its own `BackupService` instance from `backupConfig` when backups are enabled. The disabled state shows the exact `pas.yaml` snippet needed to enable backups and no "Back up now" button; the enabled state lists archives newest-first with freshness. `POST /gui/backups/run` requires CSRF and wraps `createBackup()` in try/catch (it throws on tar/empty-archive failure) so a backup failure renders a styled error, never a 500.
+
+**Standard tests:**
+- `backups.test.ts` > Backups (/gui/backups) > disabled state: shows the exact pas.yaml snippet and no Back up now button
+- `backups.test.ts` > Backups (/gui/backups) > enabled state: lists archives (name, size, date) newest first and shows last-backup freshness
+- `backups.test.ts` > Backups (/gui/backups) > POST /gui/backups/run creates a backup via BackupService and reports the archive name; CSRF required
+
+**Edge case tests:**
+- `backups.test.ts` > Backups (/gui/backups) > admin-only (member → 403)
+- `backups.test.ts` > Backups (/gui/backups) > POST /gui/backups/run is also admin-only (member → 403)
+- `backups.test.ts` > Backups (/gui/backups) > backup failure renders a styled error, not a 500
+- `admin-route-guards.test.ts` > GUI admin route guards > returns 403 for member access to %s (`/gui/backups` among the parametrized admin-only routes)
+
+---
+
+### REQ-GUI-SURFACE-003 — Activity feed scoped by household/space membership
+
+`/gui/activity` renders the daily change-log digest grouped by day, humanized (app + basename + verb, never a full path); a member sees only their own entries plus household-shared and their-space entries, never another member's own-scoped entries or another space's; an admin sees everything. The `?days=` query is clamped to 1–30. Hostile path strings in entries are HTML-escaped, and an empty result renders an invitation rather than an apology.
+
+**Standard tests:**
+- `activity.test.ts` > Activity feed (/gui/activity) > member sees only their own entries, household-shared entries, and their space entries
+- `activity.test.ts` > Activity feed (/gui/activity) > admin sees all entries
+- `activity.test.ts` > Activity feed (/gui/activity) > entries are humanized (app + basename + verb, never full paths) and grouped by day
+
+**Edge case tests:**
+- `activity.test.ts` > Activity feed (/gui/activity) > member does NOT see another member's own-scoped entries or another space's entries
+- `activity.test.ts` > Activity feed (/gui/activity) > empty state is an invitation, not an apology
+- `activity.test.ts` > Activity feed (/gui/activity) > escapes hostile path strings
+- `activity.test.ts` > Activity feed (/gui/activity) > clamps ?days= to 1-30
+
+---
+
+### REQ-GUI-SURFACE-004 — AI-usage page: member-scoped view + registry charts (deliberate guard change)
+
+`GET /gui/llm` is no longer admin-only: a member gets a read-only, member-scoped usage view (only their own rows, plain-language per-app spend line, no tier/model tables or mutation controls) while all tier/model mutation POSTs and the live `/gui/llm/metrics` ops partial remain platform-admin-only. The admin view additionally renders the registry-driven chart slots for `chartsForPage('llm')` — no hand-written canvases. This intentionally changes prior access-control behavior (`/gui/llm` was previously 403 for non-admins); the updated shared admin-guard test documents the new contract.
+
+**Standard tests:**
+- `llm-usage.test.ts` > GET /gui/llm — member-scoped view (Batch 6, Task 6.4) > member GET /gui/llm → 200, not 403
+- `llm-usage.test.ts` > GET /gui/llm — member-scoped view (Batch 6, Task 6.4) > member sees ONLY their own usage rows, not another user's
+- `llm-usage.test.ts` > GET /gui/llm — member-scoped view (Batch 6, Task 6.4) > member view renders a plain-language per-app line ("The food app used $X this month")
+- `llm-usage.test.ts` > GET /gui/llm — member-scoped view (Batch 6, Task 6.4) > admin view renders registry chart slots for chartsForPage('llm') — no hand-written canvases
+- `admin-route-guards.test.ts` > GUI admin route guards > member GET /gui/llm → 200 (scoped read-only AI-usage view, not 403)
+
+**Edge case tests:**
+- `llm-usage.test.ts` > GET /gui/llm — member-scoped view (Batch 6, Task 6.4) > member view has no tier-assignment mutation controls, and mutation POSTs stay admin-only
+- `admin-route-guards.test.ts` > GUI admin route guards > member GET /gui/llm/metrics (live ops partial) still 403s — admin-only
+
+---
+
+### REQ-GUI-UX-005 — Responsive layout (single-column stacking, touch targets, no hover-only affordances)
+
+Every redesigned or new page (Home, wizards, Household hub, Conversations, Backups, Activity, AI usage) follows the spec's responsive rules: single-column stacking at phone widths (~375px), interactive targets ≥44px, no hover-only affordances, and responsive charts. This requirement was verified manually per the batch gates in `docs/superpowers/plans/2026-07-06-gui-ux-redesign.md` (each batch gate includes an explicit "responsive check" step) — there is no automated viewport/breakpoint test in the suite as of this writing, so no test citation is given here rather than inventing one. A future phase adding a Playwright/jsdom-viewport check should convert this entry to carry real test citations.
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
@@ -12565,5 +12984,28 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-PROACTIVE-BRIDGE-009 | proactive-send-call-graph.test.ts | 4 | 0 | Implemented |
 | REQ-FOOD-PROACTIVE-BRIDGE-010 | proactive-send-call-graph.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-PROACTIVE-BRIDGE-011 | proactive-send-guard.test.ts | 1 | 1 | Implemented |
+| REQ-GUI-UX-001 | humanize.test.ts | 2 | 1 | Implemented |
+| REQ-GUI-UX-002 | error-fragment.test.ts | 1 | 3 | Implemented |
+| REQ-GUI-UX-003 | login-reasons.test.ts | 2 | 2 | Implemented |
+| REQ-GUI-UX-004 | nav-regroup.test.ts | 1 | 1 | Implemented |
+| REQ-GUI-HOME-001 | home.test.ts | 3 | 4 | Implemented |
+| REQ-GUI-HOME-002 | home.test.ts | 1 | 3 | Implemented |
+| REQ-GUI-HOME-003 | metrics.test.ts | 3 | 2 | Implemented |
+| REQ-GUI-HOME-004 | metrics.test.ts | 2 | 3 | Implemented |
+| REQ-GUI-CHARTS-001 | list-queries.test.ts | 6 | 5 | Implemented |
+| REQ-GUI-CHARTS-002 | registry.test.ts | 3 | 2 | Implemented |
+| REQ-GUI-WIZARD-001 | schedule-presets.test.ts | 4 | 2 | Implemented |
+| REQ-GUI-WIZARD-002 | rule-builder.test.ts | 5 | 4 | Implemented |
+| REQ-GUI-WIZARD-003 | describe-automation.test.ts | 8 | 10 | Implemented |
+| REQ-GUI-WIZARD-004 | report-wizard.test.ts | 5 | 6 | Implemented |
+| REQ-GUI-WIZARD-005 | alert-wizard.test.ts | 12 | 11 | Implemented |
+| REQ-GUI-WIZARD-006 | report-wizard.test.ts | 3 | 1 | Implemented |
+| REQ-GUI-WIZARD-007 | alert-wizard.test.ts | 3 | 1 | Implemented |
+| REQ-GUI-HOUSEHOLD-001 | household.test.ts | 4 | 3 | Implemented |
+| REQ-GUI-HOUSEHOLD-002 | household.test.ts, admin-route-guards.test.ts | 2 | 2 | Implemented |
+| REQ-GUI-SURFACE-001 | sessions.test.ts | 2 | 4 | Implemented |
+| REQ-GUI-SURFACE-002 | backups.test.ts, admin-route-guards.test.ts | 3 | 4 | Implemented |
+| REQ-GUI-SURFACE-003 | activity.test.ts | 3 | 4 | Implemented |
+| REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **403 test files** | **2805** | **2752** | **5557 tests** |
+| **Totals** | **420 test files** | **2888** | **2832** | **5720 tests** |

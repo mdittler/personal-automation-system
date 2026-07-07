@@ -3618,6 +3618,59 @@ Codex Round 2 review of the executed branch is queued separately (the user's "si
 
 ---
 
+## GUI UX Redesign for Nontechnical Users (2026-07-06)
+
+**Goal:** Reorganize the management GUI around user tasks for nontechnical users (both the admin and household-member personas), fold in the eight queued UX Hardening Batch 2 fixes (I4–I8, M3, M4, M7), surface four backend capabilities that had no GUI (Conversations transcripts, Backups, Activity digest, AI-usage time series), and add Chart.js metric charts — with zero backend contract changes and zero failing tests throughout. Spec: `docs/superpowers/specs/2026-07-06-gui-ux-redesign-design.md`. Plan: `docs/superpowers/plans/2026-07-06-gui-ux-redesign.md`.
+
+**Approach:** Seven batches, each an independently shippable vertical slice, executed continuously with a single end-of-phase Codex review per `feedback_batch_execution_cadence.md`. Batch 1 lands shared cross-cutting patterns (labels, styled htmx errors, spinners, login reasons, nav regroup, confirmations, aria). Batch 2 replaces the ops dashboard with a three-zone Home fed by new permission-scoped JSON metrics endpoints and vendored Chart.js, behind a declarative chart registry so future chart edits touch exactly one file. Batches 3–4 replace the report/alert mega-forms with htmx step wizards that submit the **exact existing POST field contracts** (verified by CONTRACT deep-equal tests against the legacy forms) — admin-only creation remained an explicit operator decision from the Codex plan review, so members get read-only scoped views instead. Batch 5 turns Users into a Household hub with a guided invite flow (resolving the required `householdId` via `HouseholdService`) and a deliberate member-read-only household guard change. Batch 6 adds the four new surfaces. Batch 7 (this section) is the documentation footprint.
+
+**Codex plan review (v2, 2026-07-06) — 17 findings, all applied pre-implementation.** The most consequential: (Critical) GUI routes are registered in `composeRuntime`, not `bootstrap` — every new dependency (`fileIndex`, `chatTranscriptIndex`, `inviteService`, `backupConfig`) had to be threaded through `GuiOptions` + `composeRuntime` rather than `bootstrap.ts`; (Critical) `RuntimeServices.backupService` is always `undefined` at GUI-registration time (bootstrap builds one later, cron-only) — the Backups route constructs its own `BackupService` instance from `backupConfig` instead of depending on a threaded instance; (Critical) `InviteService.createInvite` throws without `opts.householdId` — the invite flow resolves the admin's household via `HouseholdService` first; (Critical) the spec originally implied member-created reports/alerts, but creation routes are admin-only today — **operator decision: creation stays admin-only**, members get read-only views instead (this became the new Tasks 3.4/4.4, and the corresponding Proposal entry in `docs/open-items.md`). Important findings corrected the alert/report POST contract enumeration (missing `action_llm_summary_{i}`, `action_webhook_include_data_{i}`, `action_wd_mode_{i}`, `section_label_{i}`), the cooldown field's actual shape (a human string like `"4 hours"`, never a bare number), and the `FileIndexFilter` lacking household/space fields (the alert wizard's data-source picker filters entries itself).
+
+**Batch 1 — Nav regroup + cross-cutting patterns (I4–I7, M3, M4, M7):**
+- **Task 1.1 (`f0a7feb`)** — `humanizeLabel` utility; single source for enum/system-string → plain-language labels.
+- **Task 1.2 (`ae27cb7`, hardened `6803c03`)** — `sendErrorFragment` + styled `.pas-error-card` partial; full sweep across settings/data/apps/users htmx failure paths so no htmx-reachable route ever returns raw text or a stack trace.
+- **Task 1.3 (`54d6c94`)** — Global htmx loading indicators + disabled-submit-during-request behavior in `layout.eta`.
+- **Task 1.4 (`1b0c9cc`)** — Login page explains session-expiry (`?reason=expired`) and stale-sessionVersion (`?reason=session-invalidated`) sign-outs; rate-limit response names the real wait window.
+- **Task 1.5 (`df149d3`)** — Task-oriented sidebar nav regroup (Home / Automations / People and sharing / Your data / System), destructive-action confirmations, aria-label sweep.
+
+**Batch 2 — Home page + metrics endpoints + Chart.js:**
+- **Task 2.1 (`5360786`)** — Vendored Chart.js 4.4.9 UMD (pinned version + SHA-256 recorded in `core/src/gui/public/README.md`).
+- **Task 2.2 (`f774031`)** — `GET /gui/api/metrics/llm-daily` + `GET /gui/api/metrics/activity-daily`, both permission-scoped (member sees own rows only; admin sees an aggregated + per-user/per-household breakdown), handling all 6/8/9-column `llm-usage.md` row variants.
+- **Task 2.3 (`4e63441`)** — Additive `ChatTranscriptIndex` queries: `listSessionsForUser`, `listMessagesForSession`, `countMessagesByDay` — no existing method signature changed.
+- **Task 2.4 (`339402e`, fixed `37b8f4e`)** — Three-zone Home (attention banners, glance metrics, activity snippet) replaces the ops dashboard. The fix commit corrected the home cost-cap banner logic, the "messages this week" card, and an unscoped member alert-firings count in the metrics endpoint.
+- **Task 2.5 (`c931f95`)** — Declarative chart registry (`core/src/gui/charts/registry.ts` + `core/src/gui/public/pas-charts.js` + `docs/GUI_CHARTS.md`) — adding, revising, or removing a chart touches exactly one file.
+
+**Batch 3 — Report wizard:**
+- **Task 3.1 (`32765c8`)** — Schedule presets utility with real next-run preview via `cron-describe.ts`.
+- **Task 3.2 (`ae7df80`)** — `describeReport` human-readable review sentence, rendered on the reports list page.
+- **Task 3.3 (`20927cd`, hardened `7ad5348`)** — Guided report wizard submitting the existing POST contract; the hardening commit fixed a step-1 hidden-field echo bug (section fields were being echoed alongside their visible counterparts) and strengthened the edit-wizard guard test.
+- **Task 3.4 (`d9c2ed6`)** — Member read-only Reports view — creation stays admin-only.
+
+**Batch 4 — Alert wizard:**
+- **Task 4.1 (`d88151d`)** — Rule-builder utility mapped 1:1 to the six `evaluateDeterministic` grammar patterns.
+- **Task 4.2 (`8c88a5c`)** — `describeAlert` human-readable sentence.
+- **Task 4.3 (`61f3336`, fixed `87e8090`)** — Guided alert wizard (retires the I8 lost-form-state pattern). The fix commit was consequential: the wizard originally shipped with only `telegram_message` in its action picker and had an edit-prefill bug that silently dropped a second action on a multi-action alert; both were corrected to the full six-action-type picker with lossless edit prefill (verified by a deep-equal prefill test).
+- **Task 4.4 (`4d5a79d`)** — Member read-only Alerts view.
+
+**Batch 5 — Household & sharing hub:**
+- **Task 5.1 (`7717eec`)** — Guided invite flow: resolves `householdId` via `HouseholdService` before calling `InviteService.createInvite` (which throws without it), renders a copy-paste instruction card.
+- **Task 5.2 (`4000dd6`)** — Member read-only Household view — a **deliberate guard change**: `/gui/users` was previously 403 for non-admins; members now get a household-scoped read-only view, verified by an explicit two-household-isolation test.
+- **Task 5.3 (`41ba722`)** — Plain-language spaces reframe.
+- **Fix commit (`d00f0d9`)** — Batch 5 review follow-ups; hardening commit (`5a67c17`) added XSS-escaping coverage for the invite instruction card.
+
+**Batch 6 — New surfaces:**
+- **Task 6.1 (`df22928`)** — `/gui/sessions` Conversations browser — deliberately **own-sessions-only for everyone, including admins** (chat transcripts are personal), FTS-scoped search, no-existence-leak 404 on another user's session id.
+- **Task 6.2 (`d028aa8`)** — `/gui/backups` (admin) — builds its own `BackupService` instance from `backupConfig` since no threaded instance exists at GUI-registration time; disabled-state `pas.yaml` snippet; `POST /run` wraps `createBackup()` in try/catch (it throws on tar/empty-archive failure).
+- **Task 6.3 (`567a70e`)** — `/gui/activity` change-log digest feed, scoped by household/space membership.
+- **Task 6.4 (`02a353a`)** — AI-usage page: member-scoped read-only view (**another deliberate guard change** — `/gui/llm` was previously 403 for non-admins) + registry-driven charts for the admin view.
+- **Gate commit (`72dfb57`)** — added `/gui/backups` to the shared admin-guard `it.each` parametrized route list.
+
+**Tests:** `pnpm test` — 573 test files, **12395 passed, 3 skipped, 1 todo** (12399 total), zero failures. `pnpm lint` — zero errors (2009 baselined warnings, unchanged policy). `pnpm build` — clean across all five workspace projects (`core`, `apps/echo`, `apps/food`, `apps/notes`, `regression`).
+
+**Files modified or created:** 91 files changed across the full `6c9944f..HEAD` range (11,643 insertions, 486 deletions). Headline new files: `core/src/gui/utils/{humanize,error-fragment,schedule-presets,describe-automation,rule-builder,alert-history-stats}.ts`, `core/src/gui/routes/{metrics,report-wizard,alert-wizard,sessions,backups,activity}.ts`, `core/src/gui/charts/registry.ts` + `core/src/gui/public/pas-charts.js` + `docs/GUI_CHARTS.md`, `core/src/gui/views/home.eta` (replacing `dashboard.eta`), `core/src/gui/views/{report-wizard,alert-wizard,sessions,session-detail,backups,activity}.eta` + their step partials, `core/src/gui/public/chart.umd.min.js` (vendored Chart.js 4.4.9), `core/src/services/chat-transcript-index/list-queries.ts`. Headline modified files: `core/src/gui/views/layout.eta` (nav regroup + loading indicators + toast region), `core/src/gui/views/login.eta` + `core/src/gui/auth.ts` (sign-out reasons), `core/src/gui/routes/{reports,alerts,users,llm-usage}.ts` (wizard entry links, describe-sentences, guard changes), `core/src/gui/index.ts` + `core/src/compose-runtime.ts` (new route registration + `GuiOptions` deps threading), `core/src/services/chat-transcript-index/chat-transcript-index.ts` (additive interface methods). Full test-file list: `core/src/gui/__tests__/{humanize,error-fragment,nav-regroup,login-reasons,home,metrics,report-wizard,alert-wizard,household,sessions,backups,activity}.test.ts`, `core/src/gui/utils/__tests__/{humanize,schedule-presets,describe-automation,rule-builder,alert-history-stats}.test.ts`, `core/src/gui/charts/__tests__/registry.test.ts`, `core/src/services/chat-transcript-index/__tests__/list-queries.test.ts`, plus extensions to `admin-route-guards.test.ts`, `reports.test.ts`, `alerts.test.ts`, `llm-usage.test.ts`. Documentation footprint (Batch 7, this commit): `docs/urs.md` (23 new `REQ-GUI-*` entries + matrix rows + totals), `docs/implementation-phases.md` (this section), `docs/open-items.md` (Confirmed Phase marked implemented; UX Hardening Batch 2 line annotated shipped; D2 conversation-sessions entry marked shipped), `CLAUDE.md` (one new Implementation Status bullet, oldest bullet demoted per the anti-bloat rule).
+
+---
+
 # Planned Phases — Pre-Open-Source Audit Remediation (2026-07-06)
 
 > **Status: PLANNED, not yet implemented.** These are forward-looking phase definitions, not completed-work records like the sections above. They are derived from the nine-pass audit in `docs/superpowers/plans/2026-06-11-ux-review-findings-and-fix-plan.md`; every finding cited below was confirmed against code (passes 4–9 during the 2026-07-06 audit sessions; the anchor findings of passes 1–3 re-verified 2026-07-06). Per-item actionables live in `docs/open-items.md`.
