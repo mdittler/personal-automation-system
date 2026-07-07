@@ -235,6 +235,69 @@ describe('GET /gui/reports/new (wizard entry)', () => {
 		const res = await app.inject({ method: 'GET', url: '/gui/reports/new', cookies });
 		expect(res.statusCode).toBe(403);
 	});
+
+	it('member 403 also covers the edit-wizard route', async () => {
+		await reportService.saveReport({
+			id: 'existing-for-guard',
+			name: 'Existing',
+			enabled: true,
+			schedule: '0 9 * * *',
+			delivery: [ADMIN_USER.id],
+			sections: [{ type: 'custom', label: 'Notes', config: { text: 'x' } }],
+			llm: { enabled: false },
+		});
+		const cookies = await login(MEMBER_USER.id, MEMBER_PASS);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/reports/existing-for-guard/edit-wizard',
+			cookies,
+		});
+		expect(res.statusCode).toBe(403);
+	});
+});
+
+describe('Step-1 re-render hidden-field hygiene (Batch 3 review hardening)', () => {
+	it('never echoes section_type_i/section_label_i/per-section fields as hidden inputs alongside their visible counterparts', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+
+		// Reachable today: submit step 1 with no section checked (triggers the
+		// "pick at least one" error re-render) but with a stray section_label_0
+		// value in the body (e.g. the user typed a label, then unchecked the
+		// box before submitting). Step 1's cards always render section_type_i
+		// and section_label_i as VISIBLE inputs for every card regardless of
+		// checked state — hiddenFields() must exclude those names or the
+		// re-rendered form would carry duplicate-named inputs.
+		const res = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: {
+				_csrf: csrfToken,
+				step: '1',
+				section_label_0: 'Stray label',
+				section_lookback_0: '48',
+			},
+		});
+
+		expect(res.statusCode).toBe(400);
+		expect(res.body).toContain('pas-error-card');
+
+		// Count occurrences of name="section_label_0" and name="section_type_0"
+		// across the WHOLE fragment (visible + hidden) — must be exactly one
+		// each (the visible card input), never two (visible + duplicated hidden).
+		const countOccurrences = (html: string, name: string) =>
+			(html.match(new RegExp(`name="${name}"`, 'g')) ?? []).length;
+		expect(countOccurrences(res.body, 'section_label_0')).toBe(1);
+		expect(countOccurrences(res.body, 'section_type_0')).toBe(1);
+		expect(countOccurrences(res.body, 'section_lookback_0')).toBe(1);
+
+		// And no hidden input at all carries these names.
+		const hidden = extractHiddenFields(res.body);
+		expect(hidden.section_label_0).toBeUndefined();
+		expect(hidden.section_type_0).toBeUndefined();
+		expect(hidden.section_lookback_0).toBeUndefined();
+	});
 });
 
 describe('POST /gui/reports/new/step', () => {

@@ -90,6 +90,34 @@ function countSections(values: Record<string, string>): number {
 	return count;
 }
 
+/**
+ * Field names for step 1's numbered section inputs (`section_type_{i}`,
+ * `section_label_{i}`, and every per-section config field for every section
+ * type). Step 1's cards already render these as VISIBLE inputs (checkbox,
+ * text, textarea) — `hiddenFields()` must exclude them so a validation-error
+ * re-render never emits a `<input type="hidden">` with the same `name` as a
+ * visible field. Querystring parsing would otherwise coalesce the duplicate
+ * names into an array, corrupting the submitted value the next time this
+ * step's form posts (hardening item from the Batch 3 review).
+ */
+function step1SectionFieldNames(): Set<string> {
+	const names = new Set<string>();
+	for (let i = 0; i < MAX_WIZARD_SECTIONS; i++) {
+		names.add(`section_type_${i}`);
+		names.add(`section_label_${i}`);
+		names.add(`section_lookback_${i}`);
+		names.add(`section_app_filter_${i}`);
+		names.add(`section_app_id_${i}`);
+		names.add(`section_scope_${i}`);
+		names.add(`section_space_id_${i}`);
+		names.add(`section_user_id_${i}`);
+		names.add(`section_path_${i}`);
+		names.add(`section_key_prefix_${i}`);
+		names.add(`section_text_${i}`);
+	}
+	return names;
+}
+
 // ---------------------------------------------------------------------------
 // Step body renderers — each returns a trusted HTML string (no layout).
 // ---------------------------------------------------------------------------
@@ -141,7 +169,7 @@ function renderStep1(
 	return `<form hx-post="/gui/reports/new/step" hx-target="#wizard-body" hx-swap="innerHTML" method="post" action="/gui/reports/new/step">
 		<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}" />
 		<input type="hidden" name="step" value="1" />
-		${hiddenFields(values, new Set(['step', '_csrf']))}
+		${hiddenFields(values, new Set(['step', '_csrf', ...step1SectionFieldNames()]))}
 		<h2>What should this report include?</h2>
 		${error ? errorCard(error) : ''}
 		${cards}
