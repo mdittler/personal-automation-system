@@ -12227,6 +12227,9 @@ The report wizard (`/gui/reports/new`, `/gui/reports/new/step`) is admin-only en
 - `report-wizard.test.ts` > POST /gui/reports/new/step > requires auth + CSRF on every wizard POST
 - `report-wizard.test.ts` > POST /gui/reports/new/step > wizard step POSTs are admin-only (member → 403)
 
+**Fixes:**
+- **Final Codex review round (2026-07-06), Important:** submitting a step with two "Send to" recipients selected posted `delivery_user` as a `string[]` (Fastify's JSON body parser preserves repeated keys as arrays), which `hiddenFields()`'s `escapeHtml(v)` 500'd on since it assumed a string. Fixed by a shared `core/src/gui/utils/wizard-body.ts` `normalizeBody()` that consumes `delivery_user` into a computed `delivery` array (comma-joined) and drops it from the echoed body; any other unexpected array value is joined with `", "` rather than dropped. Test: `report-wizard.test.ts` > Review step contract > two-recipient step-3 submission (repeated delivery_user) renders review correctly and produces comma-separated delivery on final submit (Codex final round, Important).
+
 ---
 
 ### REQ-GUI-WIZARD-005 — Alert wizard: full action picker + contract preservation + lossless edit prefill
@@ -12260,6 +12263,9 @@ The alert wizard (`/gui/alerts/new`, `/gui/alerts/new/step`) covers all six acti
 - `alert-wizard.test.ts` > Step 4 action picker (Critical 1) > changing action type re-renders step 4 with that type's fields (webhook)
 - `alert-wizard.test.ts` > Step 4 action picker (Critical 1) > echoes attacker-supplied values through escapeHtml in attribute contexts
 
+**Fixes:**
+- **Final Codex review round (2026-07-06), Important:** the same `delivery_user` array-value bug as REQ-GUI-WIZARD-004 (step 4's "Send to" checkbox group), fixed identically via the shared `normalizeBody()` helper. Test: `alert-wizard.test.ts` > Review step contract > two-recipient step-4 submission (repeated delivery_user) renders review correctly and produces comma-separated delivery on final submit (Codex final round, Important).
+
 ---
 
 ### REQ-GUI-WIZARD-006 — Member read-only Reports view
@@ -12274,6 +12280,9 @@ A member's `GET /gui/reports` lists only reports whose delivery targets them, re
 **Edge case tests:**
 - `report-wizard.test.ts` > Member read-only reports view (Task 3.4) > member POST mutations on reports remain 403
 
+**Fixes:**
+- **Final Codex review round (2026-07-06), Critical:** the delivery-visibility scoping this requirement describes for the list/edit views did not extend to `GET /gui/reports/:id/history` or `/history/:file` — a member could read the run history of a report NOT delivered to them. Fixed by loading the report definition first and reusing the existing `isDeliveryVisible` check before any filesystem access; a non-visible or unknown id both return 404 (not 403), matching the `sessions.ts` anti-enumeration precedent. Tests: `d5b5-auth.test.ts` > D5b-5: reports actor-based authorization > non-admin GET /gui/reports/:id/history for a non-delivered report → 404 (+ the history-file-detail, unknown-id, delivered-200, and admin-200 companion cases in the same describe block).
+
 ---
 
 ### REQ-GUI-WIZARD-007 — Member read-only Alerts view
@@ -12287,6 +12296,9 @@ A member's `GET /gui/alerts` lists only alerts whose delivery targets them, rend
 
 **Edge case tests:**
 - `alert-wizard.test.ts` > Member read-only alerts view (Task 4.4) > member POST mutations on alerts remain 403
+
+**Fixes:**
+- **Final Codex review round (2026-07-06), Critical:** same history-route scoping gap as REQ-GUI-WIZARD-006, for `GET /gui/alerts/:id/history` and `/history/:file`. Fixed identically via the existing `isDeliveryVisible` check + 404-not-403. Tests: `d5b5-auth.test.ts` > D5b-5: alerts actor-based authorization > non-admin GET /gui/alerts/:id/history for a non-delivered alert → 404 (+ companion cases).
 
 ---
 
@@ -13031,10 +13043,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-WIZARD-001 | schedule-presets.test.ts | 4 | 2 | Implemented |
 | REQ-GUI-WIZARD-002 | rule-builder.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-WIZARD-003 | describe-automation.test.ts, reports.test.ts, alerts.test.ts | 10 | 10 | Implemented |
-| REQ-GUI-WIZARD-004 | report-wizard.test.ts | 5 | 6 | Implemented |
-| REQ-GUI-WIZARD-005 | alert-wizard.test.ts | 12 | 11 | Implemented |
-| REQ-GUI-WIZARD-006 | report-wizard.test.ts | 3 | 1 | Implemented |
-| REQ-GUI-WIZARD-007 | alert-wizard.test.ts | 3 | 1 | Implemented |
+| REQ-GUI-WIZARD-004 | report-wizard.test.ts | 6 | 6 | Implemented |
+| REQ-GUI-WIZARD-005 | alert-wizard.test.ts | 13 | 11 | Implemented |
+| REQ-GUI-WIZARD-006 | report-wizard.test.ts, d5b5-auth.test.ts | 3 | 6 | Implemented |
+| REQ-GUI-WIZARD-007 | alert-wizard.test.ts, d5b5-auth.test.ts | 3 | 6 | Implemented |
 | REQ-GUI-HOUSEHOLD-001 | household.test.ts | 4 | 3 | Implemented |
 | REQ-GUI-HOUSEHOLD-002 | household.test.ts, admin-route-guards.test.ts | 2 | 2 | Implemented |
 | REQ-GUI-HOUSEHOLD-003 | d5b5-auth.test.ts | 2 | 0 | Implemented |
