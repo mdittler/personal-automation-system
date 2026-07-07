@@ -173,6 +173,23 @@ describe('Backups (/gui/backups)', () => {
 		expect(res.statusCode).toBe(403);
 	});
 
+	it('POST /gui/backups/run is also admin-only (member → 403)', async () => {
+		app = await buildApp(tempDir, {
+			enabled: true,
+			path: backupPath,
+			schedule: '0 3 * * *',
+			retentionCount: 7,
+		});
+		const cookies = await login(MEMBER_ID, 'member-pass-123');
+		const res = await app.inject({
+			method: 'POST',
+			url: '/gui/backups/run',
+			payload: { _csrf: 'whatever' },
+			cookies,
+		});
+		expect(res.statusCode).toBe(403);
+	});
+
 	it('disabled state: shows the exact pas.yaml snippet and no Back up now button', async () => {
 		app = await buildApp(tempDir, {
 			enabled: false,
