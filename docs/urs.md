@@ -12018,6 +12018,15 @@ The sidebar nav is reorganized into task-oriented sections with plain-language l
 
 ---
 
+### REQ-GUI-UX-005 — Global loading indicators and disabled submits during requests (I6)
+
+`layout.eta` wires global request feedback: on `htmx:beforeRequest` the triggering submit button is disabled and marked `aria-busy`, re-enabled on `htmx:afterRequest`, with a `.pas-spinner` indicator; non-htmx full-page form posts get the same disable-on-submit treatment (after the form serializes). No long action runs without visible feedback.
+
+**Standard tests:**
+- `routes.test.ts` > GET /gui/ (Home) > wires global loading indicators for htmx and full-page form submits (I6)
+
+---
+
 ### REQ-GUI-HOME — Three-zone Home page + metrics endpoints (2026-07-06)
 
 **Context.** The former dashboard surfaced raw ops internals (config table, uptime, cron strings). It is replaced by a three-zone Home: attention banners (only what needs action), plain-language glance metrics, and registry-driven charts. Two new permission-scoped JSON endpoints feed the charts; the same scoping rule (member sees only their own rows, admin sees an aggregated + per-user/per-household breakdown) is enforced server-side, never via query params.
@@ -12072,14 +12081,21 @@ Home's glance cards (AI spend this month, messages this week, active alerts, nex
 
 `GET /gui/api/metrics/activity-daily` requires authentication; a member receives per-day message + alert-firing counts scoped to their own activity, and never another member's alert firings, while a platform admin receives an aggregated view including all alerts. No activity yields an empty series, not an error.
 
+Alert-firing counts come from the shared `core/src/gui/utils/alert-history-stats.ts` helper (`countAlertFiringsByDay`), which counts `data/system/alert-history/{id}/*.md` files by day without touching the existing alerts route.
+
 **Standard tests:**
 - `metrics.test.ts` > GET /gui/api/metrics/activity-daily > returns member-scoped message + alert-firing counts
 - `metrics.test.ts` > GET /gui/api/metrics/activity-daily > returns an aggregated admin view including all alerts
+- `alert-history-stats.test.ts` > countAlertFiringsByDay > counts history files by day across all alert ids
+- `alert-history-stats.test.ts` > countAlertFiringsByDay > scopes to specific alert ids when alertIds is provided
 
 **Edge case tests:**
 - `metrics.test.ts` > GET /gui/api/metrics/activity-daily > requires auth
 - `metrics.test.ts` > GET /gui/api/metrics/activity-daily > does not count another member's alert firings
 - `metrics.test.ts` > GET /gui/api/metrics/activity-daily > handles no activity with an empty series, not an error
+- `alert-history-stats.test.ts` > countAlertFiringsByDay > excludes files dated before sinceIso
+- `alert-history-stats.test.ts` > countAlertFiringsByDay > ignores non-.md files
+- `alert-history-stats.test.ts` > countAlertFiringsByDay > returns an empty array when the alert-history directory does not exist
 
 ---
 
@@ -12108,10 +12124,14 @@ Home's glance cards (AI spend this month, messages this week, active alerts, nex
 
 `core/src/gui/charts/registry.ts` is the single file that must be touched to add, revise, or remove a chart: `CHARTS: ChartDescriptor[]` + `chartsForPage(page)`. Every descriptor references a known, real metrics endpoint and a supported Chart.js type; ids are unique. `pas-charts.js` reads `[data-pas-chart]` slot data-attributes emitted from the registry and is never edited per-chart.
 
+Chart.js 4.4.9 is vendored locally (pinned version + source URL + SHA-256 recorded in `core/src/gui/public/README.md`, matching the htmx/Pico provenance pattern) and served by `createServer`'s static handler — no CDN.
+
 **Standard tests:**
 - `registry.test.ts` > chart registry > every descriptor is complete and points at a known endpoint + supported type
 - `registry.test.ts` > chart registry > chartsForPage filters by page
 - `registry.test.ts` > chart registry > adding a descriptor is the only change needed to register a new chart
+- `server.test.ts` > createServer > serves the vendored Chart.js asset used by GUI metric charts
+- `server.test.ts` > createServer > serves the chart-agnostic slot renderer used by the declarative chart registry
 
 **Edge case tests:**
 - `registry.test.ts` > chart registry > ids are unique
@@ -12171,6 +12191,8 @@ Home's glance cards (AI spend this month, messages this week, active alerts, nex
 - `describe-automation.test.ts` > describeAlert > renders an event-triggered fuzzy alert in plain language
 - `describe-automation.test.ts` > describeAlert > renders plain-language deterministic condition phrasing for all six rule-builder patterns
 - `describe-automation.test.ts` > describeAlert > preserves the "Telegram" proper-noun capitalization in action text
+- `reports.test.ts` > Report GUI Routes > GET /gui/reports > shows a human-readable describeReport sentence per row
+- `alerts.test.ts` > Alert GUI Routes > GET /gui/alerts > renders the describeAlert human-readable sentence (Batch 4, Task 4.2)
 
 **Edge case tests:**
 - `describe-automation.test.ts` > describeReport > omits AI summary language when llm.enabled is false
@@ -12303,6 +12325,16 @@ An admin's `POST /gui/users/invite` resolves the target household via `Household
 
 ---
 
+### REQ-GUI-HOUSEHOLD-003 — Shared-spaces pages use plain-language framing
+
+The spaces pages (`spaces.eta`, `space-edit.eta`) are reframed in plain language: the list page explains what a shared space is ("things you share with others"), each space card shows members and which apps' data it covers, and the create page explains what a shared space does in one line. Presentation-only — no `SpaceService` changes.
+
+**Standard tests:**
+- `d5b5-auth.test.ts` > D5b-5: spaces actor-based authorization > spaces page uses plain-language framing, not the old technical labels
+- `d5b5-auth.test.ts` > D5b-5: spaces actor-based authorization > create-space page explains what a shared space does in one line
+
+---
+
 ### REQ-GUI-SURFACE — New GUI surfaces: Conversations, Backups, Activity, AI usage (Batch 6, 2026-07-06)
 
 **Context.** Four backend capabilities had no GUI surface: the SQLite/FTS5 chat transcript index, `BackupService`, the daily change-log digest, and the LLM cost time series. Batch 6 adds one page per capability, each permission-scoped.
@@ -12374,7 +12406,7 @@ An admin's `POST /gui/users/invite` resolves the target household via `Household
 
 ---
 
-### REQ-GUI-UX-005 — Responsive layout (single-column stacking, touch targets, no hover-only affordances)
+### REQ-GUI-UX-006 — Responsive layout (single-column stacking, touch targets, no hover-only affordances)
 
 Every redesigned or new page (Home, wizards, Household hub, Conversations, Backups, Activity, AI usage) follows the spec's responsive rules: single-column stacking at phone widths (~375px), interactive targets ≥44px, no hover-only affordances, and responsive charts. This requirement was verified manually per the batch gates in `docs/superpowers/plans/2026-07-06-gui-ux-redesign.md` (each batch gate includes an explicit "responsive check" step) — there is no automated viewport/breakpoint test in the suite as of this writing, so no test citation is given here rather than inventing one. A future phase adding a Playwright/jsdom-viewport check should convert this entry to carry real test citations.
 
@@ -12988,24 +13020,27 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-UX-002 | error-fragment.test.ts | 1 | 3 | Implemented |
 | REQ-GUI-UX-003 | login-reasons.test.ts | 2 | 2 | Implemented |
 | REQ-GUI-UX-004 | nav-regroup.test.ts | 1 | 1 | Implemented |
+| REQ-GUI-UX-005 | routes.test.ts | 1 | 0 | Implemented |
+| REQ-GUI-UX-006 | — | — | — | Implemented |
 | REQ-GUI-HOME-001 | home.test.ts | 3 | 4 | Implemented |
 | REQ-GUI-HOME-002 | home.test.ts | 1 | 3 | Implemented |
 | REQ-GUI-HOME-003 | metrics.test.ts | 3 | 2 | Implemented |
-| REQ-GUI-HOME-004 | metrics.test.ts | 2 | 3 | Implemented |
+| REQ-GUI-HOME-004 | metrics.test.ts, alert-history-stats.test.ts | 4 | 6 | Implemented |
 | REQ-GUI-CHARTS-001 | list-queries.test.ts | 6 | 5 | Implemented |
-| REQ-GUI-CHARTS-002 | registry.test.ts | 3 | 2 | Implemented |
+| REQ-GUI-CHARTS-002 | registry.test.ts, server.test.ts | 5 | 2 | Implemented |
 | REQ-GUI-WIZARD-001 | schedule-presets.test.ts | 4 | 2 | Implemented |
 | REQ-GUI-WIZARD-002 | rule-builder.test.ts | 5 | 4 | Implemented |
-| REQ-GUI-WIZARD-003 | describe-automation.test.ts | 8 | 10 | Implemented |
+| REQ-GUI-WIZARD-003 | describe-automation.test.ts, reports.test.ts, alerts.test.ts | 10 | 10 | Implemented |
 | REQ-GUI-WIZARD-004 | report-wizard.test.ts | 5 | 6 | Implemented |
 | REQ-GUI-WIZARD-005 | alert-wizard.test.ts | 12 | 11 | Implemented |
 | REQ-GUI-WIZARD-006 | report-wizard.test.ts | 3 | 1 | Implemented |
 | REQ-GUI-WIZARD-007 | alert-wizard.test.ts | 3 | 1 | Implemented |
 | REQ-GUI-HOUSEHOLD-001 | household.test.ts | 4 | 3 | Implemented |
 | REQ-GUI-HOUSEHOLD-002 | household.test.ts, admin-route-guards.test.ts | 2 | 2 | Implemented |
+| REQ-GUI-HOUSEHOLD-003 | d5b5-auth.test.ts | 2 | 0 | Implemented |
 | REQ-GUI-SURFACE-001 | sessions.test.ts | 2 | 4 | Implemented |
 | REQ-GUI-SURFACE-002 | backups.test.ts, admin-route-guards.test.ts | 3 | 4 | Implemented |
 | REQ-GUI-SURFACE-003 | activity.test.ts | 3 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **420 test files** | **2888** | **2832** | **5720 tests** |
+| **Totals** | **421 test files** | **2897** | **2835** | **5732 tests** |
