@@ -239,6 +239,15 @@ describe('Alert GUI Routes', () => {
 			expect(res.body).toContain('Exact rule');
 			expect(res.body).not.toContain('>deterministic<');
 		});
+
+		it('renders the describeAlert human-readable sentence (Batch 4, Task 4.2)', async () => {
+			await createAlert();
+			const res = await authenticatedGet('/gui/alerts');
+			expect(res.body).toContain('pas-describe-sentence');
+			// createAlert() uses "not empty" + telegram_message + grocery list.md
+			expect(res.body).toMatch(/Grocery list/);
+			expect(res.body).toMatch(/Telegram message/);
+		});
 	});
 
 	// --- New form ---

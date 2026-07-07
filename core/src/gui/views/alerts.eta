@@ -32,6 +32,7 @@
             <% if (alert.description) { %>
               <br><small><%= alert.description %></small>
             <% } %>
+            <br><small class="pas-describe-sentence"><%= alert.descriptionSentence %></small>
           </td>
           <td>
             <code><%= alert.conditionType %></code>

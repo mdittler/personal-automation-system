@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { isDeliveryVisible } from '../../gui/guards/resolve-viewer-scope.js';
+import { describeAlert } from '../../gui/utils/describe-automation.js';
 import { sendErrorFragment } from '../../gui/utils/error-fragment.js';
 import { humanizeLabel } from '../../gui/utils/humanize.js';
 import type { AlertService } from '../../services/alerts/index.js';
@@ -90,6 +91,7 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 					id: a.id,
 					name: a.name ?? a.id,
 					description: a.description,
+					descriptionSentence: describeAlert(a),
 					schedule,
 					humanSchedule: isEvent
 						? `On event: ${a.trigger?.event_name ?? '?'}`
