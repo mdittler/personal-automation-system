@@ -245,6 +245,38 @@ async function authenticatedGetAs(
 	return app.inject({ method: 'GET', url, cookies });
 }
 
+async function authenticatedPostAs(
+	app: Awaited<ReturnType<typeof Fastify>>,
+	userId: string,
+	password: string,
+	url: string,
+	payload: Record<string, unknown>,
+) {
+	const loginRes = await app.inject({
+		method: 'POST',
+		url: '/gui/login',
+		payload: { userId, password },
+	});
+	const loginCookies = collectCookies(loginRes);
+
+	const getRes = await app.inject({
+		method: 'GET',
+		url: '/gui/llm',
+		cookies: loginCookies,
+	});
+	const allCookies = collectCookies(loginRes, getRes);
+
+	const metaMatch = getRes.body.match(/name="csrf-token" content="([^"]+)"/);
+	const csrfToken = metaMatch?.[1] ?? '';
+
+	return app.inject({
+		method: 'POST',
+		url,
+		payload: { ...payload, _csrf: csrfToken },
+		cookies: allCookies,
+	});
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests: parseUsageMarkdown
 // ---------------------------------------------------------------------------
@@ -618,6 +650,81 @@ describe('LLM Usage Routes', () => {
 			expect(res.body).toMatch(/TestUser\s+<small><code>123<\/code><\/small>/);
 			// Unresolvable id (no longer a registered user): falls back to the bare id.
 			expect(res.body).toContain('ghost-999');
+		});
+	});
+
+	// Batch 6, Task 6.4 — DELIBERATE guard change: `/gui/llm` is no longer
+	// admin-only for GET. Members get a scoped, read-only view (own usage
+	// only); tier/model mutation POSTs stay admin-only.
+	describe('GET /gui/llm — member-scoped view (Batch 6, Task 6.4)', () => {
+		it('member GET /gui/llm → 200, not 403', async () => {
+			const built = await buildApp();
+			app = built.app;
+
+			const res = await authenticatedGetAs(app, NON_ADMIN_USER_ID, NON_ADMIN_PASSWORD, '/gui/llm');
+
+			expect(res.statusCode).toBe(200);
+			expect(res.body).not.toContain('Insufficient Privileges');
+		});
+
+		it('member sees ONLY their own usage rows, not another user’s', async () => {
+			const now = new Date().toISOString().slice(0, 10);
+			const usageContent = [
+				`| ${now}T10:00:00Z | anthropic | sonnet | 100 | 50 | 1.10 | echo | ${NON_ADMIN_USER_ID} |`,
+				`| ${now}T11:00:00Z | anthropic | sonnet | 100 | 50 | 2.20 | echo | ${TEST_USER_ID} |`,
+			].join('\n');
+			const built = await buildApp({ usageContent });
+			app = built.app;
+
+			const res = await authenticatedGetAs(app, NON_ADMIN_USER_ID, NON_ADMIN_PASSWORD, '/gui/llm');
+
+			expect(res.statusCode).toBe(200);
+			// Only the member's own $1.10 spend shows, never the other user's $2.20.
+			expect(res.body).toContain('1.10');
+			expect(res.body).not.toContain('2.20');
+		});
+
+		it('member view has no tier-assignment mutation controls, and mutation POSTs stay admin-only', async () => {
+			const built = await buildApp();
+			app = built.app;
+
+			const res = await authenticatedGetAs(app, NON_ADMIN_USER_ID, NON_ADMIN_PASSWORD, '/gui/llm');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).not.toContain('hx-post="/gui/llm/tiers"');
+
+			const postRes = await authenticatedPostAs(
+				app,
+				NON_ADMIN_USER_ID,
+				NON_ADMIN_PASSWORD,
+				'/gui/llm/tiers',
+				{ tier: 'fast', provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+			);
+			expect(postRes.statusCode).toBe(403);
+		});
+
+		it('member view renders a plain-language per-app line ("The food app used $X this month")', async () => {
+			const now = new Date().toISOString().slice(0, 10);
+			const usageContent = [
+				`| ${now}T10:00:00Z | anthropic | sonnet | 100 | 50 | 1.20 | food | ${NON_ADMIN_USER_ID} |`,
+			].join('\n');
+			const built = await buildApp({ usageContent });
+			app = built.app;
+
+			const res = await authenticatedGetAs(app, NON_ADMIN_USER_ID, NON_ADMIN_PASSWORD, '/gui/llm');
+
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toMatch(/food.*used.*\$1\.20.*this month/is);
+		});
+
+		it("admin view renders registry chart slots for chartsForPage('llm') — no hand-written canvases", async () => {
+			const built = await buildApp();
+			app = built.app;
+
+			const res = await authenticatedGet(app, '/gui/llm');
+
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('data-pas-chart="ai-tokens-daily"');
+			expect(res.body).not.toContain('<canvas');
 		});
 	});
 

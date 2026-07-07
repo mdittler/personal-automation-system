@@ -9,6 +9,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import { chartsForPage } from '../../gui/charts/registry.js';
 import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 import { DEFAULT_LLM_SAFEGUARDS } from '../../services/config/defaults.js';
 import type { HouseholdService } from '../../services/household/index.js';
@@ -291,6 +292,73 @@ function isModelRefActive(model: { id: string; provider?: string }, ref: ModelRe
 	return model.id === ref.model && (model.provider ?? '') === ref.provider;
 }
 
+export interface PerAppLine {
+	app: string;
+	monthCost: string;
+}
+
+/**
+ * Build "The <app> app used $X.XX this month" sentences from a member's own
+ * scoped rows, sorted by spend descending.
+ */
+function buildPerAppLines(rows: UsageRow[]): PerAppLine[] {
+	const thisMonth = new Date().toISOString().slice(0, 7);
+	const byApp = new Map<string, number>();
+	for (const row of rows) {
+		if (!row.timestamp.startsWith(thisMonth)) continue;
+		const cost = Number.parseFloat(row.cost) || 0;
+		byApp.set(row.app, Math.round(((byApp.get(row.app) ?? 0) + cost) * 1e6) / 1e6);
+	}
+	return [...byApp.entries()]
+		.map(([app, monthCost]) => ({ app, monthCost: monthCost.toFixed(2) }))
+		.sort((a, b) => Number.parseFloat(b.monthCost) - Number.parseFloat(a.monthCost));
+}
+
+/** Member-scoped, read-only AI-usage view: own rows only, no mutation controls. */
+async function renderMemberView(
+	reply: FastifyReply,
+	content: string,
+	userId: string,
+): Promise<FastifyReply> {
+	if (!content.trim()) {
+		return reply.viewAsync('llm-usage', {
+			title: 'AI usage — PAS',
+			activePage: 'llm',
+			isMember: true,
+			rows: [],
+			perAppLines: [],
+			monthCost: '0.000000',
+			hasData: false,
+			charts: chartsForPage('llm'),
+		}) as unknown as Promise<FastifyReply>;
+	}
+
+	const { rows } = parseUsageMarkdown(content);
+	const ownRows = rows.filter((r) => r.user === userId);
+
+	return reply.viewAsync('llm-usage', {
+		title: 'AI usage — PAS',
+		activePage: 'llm',
+		isMember: true,
+		rows: ownRows,
+		perAppLines: buildPerAppLines(ownRows),
+		monthCost: ownRows.length > 0 ? monthCostForRows(ownRows).toFixed(6) : '0.000000',
+		hasData: ownRows.length > 0,
+		charts: chartsForPage('llm'),
+	}) as unknown as Promise<FastifyReply>;
+}
+
+/** This-month cost total for an already-scoped row set. */
+function monthCostForRows(rows: UsageRow[]): number {
+	const thisMonth = new Date().toISOString().slice(0, 7);
+	let total = 0;
+	for (const row of rows) {
+		if (!row.timestamp.startsWith(thisMonth)) continue;
+		total += Number.parseFloat(row.cost) || 0;
+	}
+	return Math.round(total * 1e6) / 1e6;
+}
+
 export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsageOptions): void {
 	const {
 		llm,
@@ -307,9 +375,22 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 
 	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
 
-	// Main LLM page
-	server.get('/llm', platformAdminOnly, async (_request: FastifyRequest, reply: FastifyReply) => {
+	// Main LLM page. Batch 6, Task 6.4 — DELIBERATE guard change: no longer
+	// admin-only. Members get a scoped, read-only view of their OWN usage
+	// (no tier/model tables, no mutation controls); tier/model mutation POSTs
+	// and the live /llm/metrics partial stay admin-only.
+	server.get('/llm', async (request: FastifyRequest, reply: FastifyReply) => {
+		const actor = request.user;
+		if (!actor) {
+			return reply.status(403).viewAsync('403', { title: '403 Forbidden — PAS' });
+		}
+
 		const content = await llm.costTracker.readUsage();
+
+		if (!actor.isPlatformAdmin) {
+			return renderMemberView(reply, content, actor.userId);
+		}
+
 		const standardRef = modelSelector.getStandardRef();
 		const fastRef = modelSelector.getFastRef();
 		const reasoningRef = modelSelector.getReasoningRef();
@@ -332,10 +413,13 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 			llmSafeguards,
 		);
 
+		const charts = chartsForPage('llm');
+
 		if (!content.trim()) {
 			return reply.viewAsync('llm-usage', {
-				title: 'LLM — PAS',
+				title: 'AI usage — PAS',
 				activePage: 'llm',
+				isMember: false,
 				standardRef,
 				fastRef,
 				reasoningRef,
@@ -350,6 +434,7 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 				hasData: false,
 				activeHouseholds,
 				messagesPerMinute,
+				charts,
 			});
 		}
 
@@ -357,8 +442,9 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 			parseUsageMarkdown(content);
 
 		return reply.viewAsync('llm-usage', {
-			title: 'LLM — PAS',
+			title: 'AI usage — PAS',
 			activePage: 'llm',
+			isMember: false,
 			standardRef,
 			fastRef,
 			reasoningRef,
@@ -373,6 +459,7 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 			hasData: true,
 			activeHouseholds,
 			messagesPerMinute,
+			charts,
 		});
 	});
 

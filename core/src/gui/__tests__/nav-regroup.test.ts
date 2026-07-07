@@ -432,5 +432,8 @@ describe('nav regroup', () => {
 		// every authenticated user (own-scoped), unlike the admin-only System items.
 		expect(res.body).toContain('>Conversations<');
 		expect(res.body).toContain('>Activity<');
+		// Batch 6, Task 6.4: AI usage moved out of the admin-only System group —
+		// members now get a scoped, read-only view of their own usage.
+		expect(res.body).toContain('>AI usage<');
 	});
 });

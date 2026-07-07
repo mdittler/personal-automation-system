@@ -400,7 +400,6 @@ describe('GUI admin route guards', () => {
 		'/gui/scheduler',
 		'/gui/logs',
 		'/gui/config',
-		'/gui/llm',
 		'/gui/context',
 		'/gui/backups',
 	])('returns 403 for member access to %s', async (url) => {
@@ -413,6 +412,36 @@ describe('GUI admin route guards', () => {
 
 		expect(res.statusCode).toBe(403);
 		expect(res.body).toContain('Insufficient Privileges');
+	});
+
+	// Batch 6, Task 6.4 — DELIBERATE guard change: `/gui/llm` (AI usage) is no
+	// longer admin-only for GET. Members get a scoped, read-only view of their
+	// OWN usage (no tier/model tables, no mutation controls); tier/model
+	// mutation POSTs and the live /llm/metrics partial remain platform-admin-only
+	// (see llm-usage.test.ts for the full member-scoping + chart-slot coverage).
+	// This test documents the new contract explicitly — it previously asserted
+	// 403 alongside the admin-only routes above.
+	it('member GET /gui/llm → 200 (scoped read-only AI-usage view, not 403)', async () => {
+		const cookies = await loginAsMember();
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/llm',
+			cookies,
+		});
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).not.toContain('Insufficient Privileges');
+	});
+
+	it('member GET /gui/llm/metrics (live ops partial) still 403s — admin-only', async () => {
+		const cookies = await loginAsMember();
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/llm/metrics',
+			cookies,
+		});
+
+		expect(res.statusCode).toBe(403);
 	});
 
 	// Batch 5, Task 5.2 — DELIBERATE guard change: `/gui/users` (Household hub)
