@@ -141,7 +141,10 @@
 					"name": "food:list-grocery-items",
 					"description": "List the current grocery items for the requesting user or their shared space.",
 					"handler": "tools/list-grocery.js",
-					"parameters": { "type": "object", "properties": { "scope": { "enum": ["user", "shared"] } } },
+					"parameters": {
+						"type": "object",
+						"properties": { "scope": { "enum": ["user", "shared"] } }
+					},
 					"requiresCapabilities": ["data:user", "data:shared"],
 					"riskClass": "read",
 					"agentAllowed": true,
@@ -151,7 +154,11 @@
 					"name": "food:add-grocery-item",
 					"description": "Add an item to the grocery list.",
 					"handler": "tools/add-grocery.js",
-					"parameters": { "type": "object", "required": ["item"], "properties": { "item": { "type": "string" } } },
+					"parameters": {
+						"type": "object",
+						"required": ["item"],
+						"properties": { "item": { "type": "string" } }
+					},
 					"requiresCapabilities": ["data:user"],
 					"riskClass": "write",
 					"agentAllowed": true,
@@ -161,7 +168,11 @@
 					"name": "food:notify-household",
 					"description": "Message every household member that the grocery run is happening.",
 					"handler": "tools/notify.js",
-					"parameters": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } },
+					"parameters": {
+						"type": "object",
+						"required": ["text"],
+						"properties": { "text": { "type": "string" } }
+					},
 					"requiresCapabilities": ["messaging:any-user"],
 					"riskClass": "external-effect",
 					"agentAllowed": false,
