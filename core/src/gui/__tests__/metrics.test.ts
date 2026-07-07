@@ -416,3 +416,137 @@ describe('GET /gui/api/metrics/activity-daily', () => {
 		expect(res.json().days).toEqual([]);
 	});
 });
+
+// Final Codex review round (Important): legacy shared-token admin mode (no
+// per-user auth deps at all — request.user stays undefined for the whole
+// request, see auth.ts's hasPerUserAuth branch) must return unscoped admin
+// data here, not member-scoped (empty/self-only) data.
+describe('legacy shared-token session (no request.user)', () => {
+	let tempDir: string;
+	let app: Awaited<ReturnType<typeof buildLegacyOnlyApp>>;
+
+	async function buildLegacyOnlyApp(dir: string) {
+		const transcriptIndex: Pick<ChatTranscriptIndex, 'countMessagesByDay'> = {
+			countMessagesByDay: async (opts) => {
+				// Only the admin (unscoped, userId undefined) path returns rows —
+				// proves the endpoint took the admin branch rather than scoping to
+				// a (nonexistent) actor.userId.
+				if (opts.userId === undefined) return [{ date: '2026-07-01', count: 7 }];
+				return [];
+			},
+		};
+		// Neither alert is delivered to any real userId — a member-scoped branch
+		// (`delivery.includes(actor?.userId ?? '')`) would filter BOTH out,
+		// since actor is undefined and '' never appears in a real delivery
+		// list. Only the admin (unscoped) branch counts every alert's history.
+		const alertService: Pick<AlertService, 'listAlerts'> = {
+			listAlerts: async () =>
+				[
+					{ id: 'alert-a', delivery: [ADMIN_ID] },
+					{ id: 'alert-b', delivery: [MEMBER_A_ID] },
+				] as unknown as Awaited<ReturnType<AlertService['listAlerts']>>,
+		};
+
+		const legacyApp = Fastify({ logger: false });
+		await legacyApp.register(fastifyCookie, { secret: AUTH_TOKEN });
+		const eta = new Eta();
+		await legacyApp.register(fastifyView, {
+			engine: { eta },
+			root: viewsDir,
+			viewExt: 'eta',
+			layout: 'layout',
+		});
+
+		await legacyApp.register(
+			async (gui) => {
+				await registerAuth(gui, { authToken: AUTH_TOKEN });
+				await registerCsrfProtection(gui);
+				registerMetricsRoutes(gui, {
+					dataDir: dir,
+					chatTranscriptIndex: transcriptIndex as ChatTranscriptIndex,
+					alertService: alertService as AlertService,
+					logger,
+				});
+			},
+			{ prefix: '/gui' },
+		);
+
+		return legacyApp;
+	}
+
+	async function legacyLogin(): Promise<Record<string, string>> {
+		const res = await app.inject({
+			method: 'POST',
+			url: '/gui/login',
+			payload: { token: AUTH_TOKEN },
+		});
+		expect(res.statusCode).toBe(302);
+		return collectCookies(res);
+	}
+
+	beforeEach(async () => {
+		tempDir = await mkdtemp(join(tmpdir(), 'pas-metrics-legacy-'));
+		await mkdir(join(tempDir, 'system'), { recursive: true });
+		app = await buildLegacyOnlyApp(tempDir);
+	});
+
+	afterEach(async () => {
+		await app.close();
+		await rm(tempDir, { recursive: true, force: true });
+	});
+
+	it('llm-daily returns unscoped admin data (perUser breakdown present)', async () => {
+		await writeFile(
+			join(tempDir, 'system', 'llm-usage.md'),
+			[
+				HEADER_8,
+				SEP_8,
+				row8('2026-07-01T09:00:00Z', 'anthropic', 'claude', '0.05', 'food', 'u1'),
+			].join('\n'),
+			'utf-8',
+		);
+		const cookies = await legacyLogin();
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/api/metrics/llm-daily',
+			cookies,
+		});
+
+		expect(res.statusCode).toBe(200);
+		const body = res.json();
+		// perUser is only populated on the admin branch.
+		expect(body.perUser).toBeDefined();
+		expect(body.days[0]?.cost).toBeCloseTo(0.05);
+	});
+
+	it('activity-daily returns unscoped admin message + alert-firing counts (not zeroed by a missing actor.userId)', async () => {
+		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-a'), { recursive: true });
+		await writeFile(
+			join(tempDir, 'system', 'alert-history', 'alert-a', '2026-07-01_09-00-00-000.md'),
+			'fired\n',
+			'utf-8',
+		);
+		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-b'), { recursive: true });
+		await writeFile(
+			join(tempDir, 'system', 'alert-history', 'alert-b', '2026-07-01_09-05-00-000.md'),
+			'fired\n',
+			'utf-8',
+		);
+
+		const cookies = await legacyLogin();
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/api/metrics/activity-daily',
+			cookies,
+		});
+
+		expect(res.statusCode).toBe(200);
+		const body = res.json();
+		const day = body.days.find((d: { date: string }) => d.date === '2026-07-01');
+		expect(day?.messages).toBe(7);
+		// Both alert-a and alert-b counted — a member-scoped branch would only
+		// see alerts whose delivery includes actor.userId, which is undefined
+		// here, so it would count neither.
+		expect(day?.alertFirings).toBe(2);
+	});
+});

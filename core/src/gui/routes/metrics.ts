@@ -17,6 +17,7 @@ import type { Logger } from 'pino';
 import type { AlertService } from '../../services/alerts/index.js';
 import type { ChatTranscriptIndex } from '../../services/chat-transcript-index/index.js';
 import { countAlertFiringsByDay } from '../utils/alert-history-stats.js';
+import { isGuiAdmin } from '../utils/gui-admin.js';
 import { parseUsageMarkdown } from './llm-usage.js';
 
 export interface MetricsRoutesOptions {
@@ -85,7 +86,12 @@ export function registerMetricsRoutes(
 			request: FastifyRequest<{ Querystring: { days?: string } }>,
 		): Promise<LlmDailyResponse> => {
 			const actor = request.user;
-			const isAdmin = Boolean(actor?.isPlatformAdmin);
+			// Legacy shared-token mode (no per-user auth deps at all) leaves
+			// request.user undefined for the whole request — isGuiAdmin treats
+			// that as admin (the existing codebase convention; see its doc
+			// comment), rather than Boolean(actor?.isPlatformAdmin) silently
+			// scoping an unscoped-by-design legacy session down to empty/self-only data.
+			const isAdmin = isGuiAdmin(request);
 			const days = clampDays(request.query.days, DAYS_DEFAULT, DAYS_MAX);
 			const sinceIso = sinceIsoForDays(days);
 			const sinceDate = sinceIso.slice(0, 10);
@@ -154,7 +160,12 @@ export function registerMetricsRoutes(
 			request: FastifyRequest<{ Querystring: { days?: string } }>,
 		): Promise<ActivityDailyResponse> => {
 			const actor = request.user;
-			const isAdmin = Boolean(actor?.isPlatformAdmin);
+			// Legacy shared-token mode (no per-user auth deps at all) leaves
+			// request.user undefined for the whole request — isGuiAdmin treats
+			// that as admin (the existing codebase convention; see its doc
+			// comment), rather than Boolean(actor?.isPlatformAdmin) silently
+			// scoping an unscoped-by-design legacy session down to empty/self-only data.
+			const isAdmin = isGuiAdmin(request);
 			const days = clampDays(request.query.days, ACTIVITY_DAYS_DEFAULT, ACTIVITY_DAYS_MAX);
 			const sinceIso = sinceIsoForDays(days);
 

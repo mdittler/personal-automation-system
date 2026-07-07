@@ -30,6 +30,59 @@ import { registerCsrfProtection } from '../csrf.js';
 import { registerDashboardRoutes } from '../routes/dashboard.js';
 import { registerViewLocals } from '../view-locals.js';
 
+/**
+ * Fully legacy-only auth harness (final Codex review round, Important):
+ * `registerAuth` with ONLY `{ authToken }` — no credentialService/
+ * userManager/householdService — is the mode where `request.user` stays
+ * `undefined` for the entire request (see auth.ts's `hasPerUserAuth`
+ * branch and auth.test.ts's identical harness). There is no per-user model
+ * at all in this mode: the single shared token IS the admin session.
+ */
+async function buildLegacyOnlyApp(tempDir: string) {
+	const config = makeConfig(tempDir);
+	const app = Fastify({ logger: false });
+	await app.register(fastifyCookie, { secret: AUTH_TOKEN });
+	const eta = new Eta();
+	await app.register(fastifyView, {
+		engine: { eta },
+		root: viewsDir,
+		viewExt: 'eta',
+		layout: 'layout',
+	});
+
+	await app.register(
+		async (gui) => {
+			await registerAuth(gui, { authToken: AUTH_TOKEN });
+			await registerCsrfProtection(gui);
+			registerDashboardRoutes(gui, {
+				registry: makeRegistry(),
+				scheduler: makeScheduler(),
+				config,
+				modelSelector: makeModelSelector(),
+				dataDir: tempDir,
+				logger,
+			});
+		},
+		{ prefix: '/gui' },
+	);
+
+	return app;
+}
+
+async function legacyLogin(app: ReturnType<typeof Fastify>): Promise<Record<string, string>> {
+	const res = await app.inject({
+		method: 'POST',
+		url: '/gui/login',
+		payload: { token: AUTH_TOKEN },
+	});
+	expect(res.statusCode).toBe(302);
+	const cookies: Record<string, string> = {};
+	for (const c of res.cookies as Array<{ name: string; value: string }>) {
+		cookies[c.name] = c.value;
+	}
+	return cookies;
+}
+
 const AUTH_TOKEN = 'tok';
 const logger = pino({ level: 'silent' });
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
@@ -447,6 +500,29 @@ describe('GET /gui/ (home)', () => {
 
 		expect(res.statusCode).toBe(200);
 		expect(res.body).not.toMatch(/AI spending is at/i);
+		await app.close();
+	});
+
+	// Final Codex review round (Important): legacy shared-token admin mode
+	// (no per-user auth deps at all — request.user stays undefined for the
+	// whole request) must still get the admin view here, not a member-scoped
+	// empty view. Boolean(actor?.isPlatformAdmin) previously resolved to
+	// false when actor was undefined, silently degrading a legitimate legacy
+	// admin session.
+	it('legacy shared-token session (no request.user) shows admin banners, not an empty member view', async () => {
+		const app = await buildLegacyOnlyApp(tempDir);
+		const cookies = await legacyLogin(app);
+
+		const res = await app.inject({ method: 'GET', url: '/gui/', cookies });
+
+		expect(res.statusCode).toBe(200);
+		// Zone 1 (attention banners) only renders AT ALL when isAdmin is true —
+		// here it surfaces the "not backed up" warning (backups aren't
+		// configured in this harness), proving the admin branch ran rather
+		// than silently rendering nothing for a member-scoped view.
+		expect(res.body).toContain('isn&#39;t being backed up');
+		// Admin-only "Loaded apps" stat card also only renders when isAdmin.
+		expect(res.body).toContain('Loaded apps');
 		await app.close();
 	});
 });

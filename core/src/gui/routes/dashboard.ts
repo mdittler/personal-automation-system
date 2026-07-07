@@ -29,6 +29,7 @@ import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { SchedulerServiceImpl } from '../../services/scheduler/index.js';
 import type { LLMSafeguardsConfig, SystemConfig } from '../../types/config.js';
 import { formatRelativeTime, getNextRun } from '../../utils/cron-describe.js';
+import { isGuiAdmin } from '../utils/gui-admin.js';
 import { parseUsageMarkdown } from './llm-usage.js';
 
 export interface DashboardOptions {
@@ -225,7 +226,12 @@ export function registerDashboardRoutes(server: FastifyInstance, options: Dashbo
 
 	server.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
 		const actor = request.user;
-		const isAdmin = Boolean(actor?.isPlatformAdmin);
+		// Legacy shared-token mode (no per-user auth deps at all) leaves
+		// request.user undefined for the whole request — isGuiAdmin treats that
+		// as admin (the existing codebase convention; see its doc comment),
+		// rather than Boolean(actor?.isPlatformAdmin) silently degrading a
+		// legitimate legacy admin session into an empty member-scoped view.
+		const isAdmin = isGuiAdmin(request);
 
 		// ---- Attention banners (admin-only system health) ----
 		const banners: AttentionBanner[] = [];
