@@ -212,9 +212,20 @@ export async function registerGuiRoutes(
 			// CSRF protection (after auth, before content routes)
 			await registerCsrfProtection(gui);
 
-			// View-locals: inject currentUser into every template render (D5b-3)
+			// View-locals: inject currentUser into every template render (D5b-3).
+			// navFlags mirror the SAME conditions used below to conditionally
+			// register the sessions/activity/backups routes, so layout.eta never
+			// links to a route that isn't actually registered (final Codex review
+			// round, Important).
 			if (userManager) {
-				await registerViewLocals(gui, { userManager });
+				await registerViewLocals(gui, {
+					userManager,
+					navFlags: {
+						sessions: Boolean(options.chatTranscriptIndex),
+						activity: Boolean(options.changeLogPath && options.householdService && spaceService),
+						backups: Boolean(options.backupConfig),
+					},
+				});
 			}
 
 			// Content routes

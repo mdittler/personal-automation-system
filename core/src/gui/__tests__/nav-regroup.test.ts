@@ -53,6 +53,7 @@ import { registerReportRoutes } from '../routes/reports.js';
 import { registerSchedulerRoutes } from '../routes/scheduler.js';
 import { registerSpaceRoutes } from '../routes/spaces.js';
 import { registerUserRoutes } from '../routes/users.js';
+import type { NavFlags } from '../view-locals.js';
 import { registerViewLocals } from '../view-locals.js';
 
 const AUTH_TOKEN = 'test-token';
@@ -244,7 +245,7 @@ function collectCookies(
 	return result;
 }
 
-async function buildApp(tempDir: string) {
+async function buildApp(tempDir: string, navFlags?: Partial<NavFlags>) {
 	const config = createMockConfig(tempDir);
 	const app = Fastify({ logger: false });
 	await app.register(fastifyCookie, { secret: AUTH_TOKEN });
@@ -282,7 +283,7 @@ async function buildApp(tempDir: string) {
 				householdService,
 			});
 			await registerCsrfProtection(gui);
-			await registerViewLocals(gui, { userManager });
+			await registerViewLocals(gui, { userManager, navFlags });
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir: tempDir, logger });
 			registerSchedulerRoutes(gui, {
 				scheduler: makeScheduler(),
@@ -435,5 +436,60 @@ describe('nav regroup', () => {
 		// Batch 6, Task 6.4: AI usage moved out of the admin-only System group —
 		// members now get a scoped, read-only view of their own usage.
 		expect(res.body).toContain('>AI usage<');
+	});
+});
+
+// Final Codex review round (Important): nav links to conditionally-registered
+// routes (/gui/sessions, /gui/activity, /gui/backups) must not render when
+// their backing optional service (chatTranscriptIndex/changeLogPath+
+// householdService+spaceService/backupConfig) wasn't provided at
+// registration time — otherwise clicking them 404s. gui/index.ts computes
+// `navFlags` from the SAME presence checks used to conditionally register
+// those routes and passes them to registerViewLocals; layout.eta gates each
+// nav item on its flag.
+describe('nav availability flags (optional surfaces)', () => {
+	let flagsTempDir: string;
+	let flagsApp: Awaited<ReturnType<typeof Fastify>>;
+
+	afterEach(async () => {
+		await flagsApp.close();
+		await rm(flagsTempDir, { recursive: true, force: true });
+	});
+
+	it('omits Conversations/Activity/Backups nav links when their deps are absent', async () => {
+		flagsTempDir = await mkdtemp(join(tmpdir(), 'pas-nav-flags-off-'));
+		flagsApp = await buildApp(flagsTempDir, { sessions: false, activity: false, backups: false });
+		const loginRes = await flagsApp.inject({
+			method: 'POST',
+			url: '/gui/login',
+			payload: { userId: ADMIN_USER.id, password: ADMIN_PASS },
+		});
+		const cookies = collectCookies(loginRes);
+
+		const res = await flagsApp.inject({ method: 'GET', url: '/gui/reports', cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).not.toContain('>Conversations<');
+		expect(res.body).not.toContain('>Activity<');
+		expect(res.body).not.toContain('>Backups<');
+		expect(res.body).not.toContain('href="/gui/sessions"');
+		expect(res.body).not.toContain('href="/gui/activity"');
+		expect(res.body).not.toContain('href="/gui/backups"');
+	});
+
+	it('shows Conversations/Activity/Backups nav links when their deps are present (default)', async () => {
+		flagsTempDir = await mkdtemp(join(tmpdir(), 'pas-nav-flags-on-'));
+		flagsApp = await buildApp(flagsTempDir, { sessions: true, activity: true, backups: true });
+		const loginRes = await flagsApp.inject({
+			method: 'POST',
+			url: '/gui/login',
+			payload: { userId: ADMIN_USER.id, password: ADMIN_PASS },
+		});
+		const cookies = collectCookies(loginRes);
+
+		const res = await flagsApp.inject({ method: 'GET', url: '/gui/reports', cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('>Conversations<');
+		expect(res.body).toContain('>Activity<');
+		expect(res.body).toContain('>Backups<');
 	});
 });

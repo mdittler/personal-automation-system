@@ -96,18 +96,22 @@
               <span class="nav-label">Files</span>
             </a>
           </li>
+          <% if (!it.navFlags || it.navFlags.sessions) { %>
           <li>
             <a href="/gui/sessions" title="Conversations" <% if (it.activePage === 'sessions') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
               <span class="nav-label">Conversations</span>
             </a>
           </li>
+          <% } %>
+          <% if (!it.navFlags || it.navFlags.activity) { %>
           <li>
             <a href="/gui/activity" title="Activity" <% if (it.activePage === 'activity') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
               <span class="nav-label">Activity</span>
             </a>
           </li>
+          <% } %>
           <li>
             <a href="/gui/llm" title="AI usage" <% if (it.activePage === 'llm') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/><circle cx="12" cy="15" r="2"/></svg>
@@ -147,12 +151,14 @@
               <span class="nav-label">Context</span>
             </a>
           </li>
+          <% if (!it.navFlags || it.navFlags.backups) { %>
           <li>
             <a href="/gui/backups" title="Backups" <% if (it.activePage === 'backups') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
               <span class="nav-label">Backups</span>
             </a>
           </li>
+          <% } %>
           <% } %>
 
           <li class="nav-section-divider"></li>
