@@ -34,7 +34,7 @@ import type { FileIndexEntry, FileIndexService } from '../../services/file-index
 import type { ReportService } from '../../services/reports/index.js';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
-import type { AlertAction, AlertDefinition } from '../../types/alert.js';
+import { ALERT_ID_PATTERN, type AlertAction, type AlertDefinition } from '../../types/alert.js';
 import { escapeHtml } from '../../utils/escape-html.js';
 import { describeAlert } from '../utils/describe-automation.js';
 import { humanizeLabel } from '../utils/humanize.js';
@@ -45,6 +45,7 @@ import {
 	nextRunPreview,
 	presetToCron,
 } from '../utils/schedule-presets.js';
+import { slugifyForId, uniqueSlugForId } from '../utils/slugify-id.js';
 import { normalizeBody } from '../utils/wizard-body.js';
 
 export interface AlertWizardRoutesOptions {
@@ -665,7 +666,10 @@ function renderStep4(
 		<h2>What should happen?</h2>
 		${error ? errorCard(error) : ''}
 		<label>Alert name<input type="text" name="name" value="${escapeHtml(values.name || '')}" required /></label>
-		<label>Alert ID (lowercase, hyphens)<input type="text" name="id" value="${escapeHtml(values.id || '')}" pattern="[a-z][a-z0-9-]*" required /></label>
+		<details>
+			<summary>Custom ID (optional)</summary>
+			<label>Leave blank to generate one automatically from the name<input type="text" name="id" value="${escapeHtml(values.id || '')}" pattern="[a-z][a-z0-9-]*" /></label>
+		</details>
 		<label>Description<input type="text" name="description" value="${escapeHtml(values.description || '')}" /></label>
 		<h3>Send to</h3>
 		${userChecks}
@@ -698,6 +702,7 @@ function renderStep5(values: Record<string, string>, csrfToken: string, timezone
 			<input type="hidden" name="step" value="5" />
 			${hiddenFields(values, new Set(['step', '_csrf']))}
 			<input type="hidden" name="enabled" value="true" />
+			<input type="hidden" name="from" value="wizard" />
 			<button type="submit" style="min-height:44px">Save alert</button>
 		</form>
 	</div>`;
@@ -1056,7 +1061,7 @@ export function registerAlertWizardRoutes(
 				}
 
 				const { body: normalized, delivery } = normalizeBody(body);
-				if (!normalized.name || !normalized.id) {
+				if (!normalized.name) {
 					return reply
 						.status(400)
 						.type('text/html')
@@ -1066,7 +1071,22 @@ export function registerAlertWizardRoutes(
 								getUsers(),
 								await getReports(),
 								csrfToken,
-								'Give this alert a name and an ID.',
+								'Give this alert a name.',
+							),
+						);
+				}
+				const rawId = (normalized.id || '').trim();
+				if (rawId && !ALERT_ID_PATTERN.test(rawId)) {
+					return reply
+						.status(400)
+						.type('text/html')
+						.send(
+							renderStep4(
+								{ ...normalized, delivery: delivery.join(', ') },
+								getUsers(),
+								await getReports(),
+								csrfToken,
+								'The custom ID must start with a lowercase letter and contain only lowercase letters, numbers, and hyphens.',
 							),
 						);
 				}
@@ -1101,7 +1121,12 @@ export function registerAlertWizardRoutes(
 						);
 				}
 				const cooldown = `${cooldownN} ${cooldownUnit}`;
-				const next = { ...normalized, step: '5', delivery: delivery.join(', '), cooldown };
+				const id =
+					rawId ||
+					(await uniqueSlugForId(slugifyForId(normalized.name), (candidate) =>
+						options.alertService.getAlert(candidate),
+					));
+				const next = { ...normalized, step: '5', delivery: delivery.join(', '), cooldown, id };
 				return reply.type('text/html').send(renderStep5(next, csrfToken, timezone));
 			}
 

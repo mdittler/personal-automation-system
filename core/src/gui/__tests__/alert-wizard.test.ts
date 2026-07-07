@@ -559,6 +559,53 @@ describe('Review step contract', () => {
 		expect(normalize(wizardAlert)).toEqual(normalize(legacyAlert));
 	});
 
+	it('B2: wizard save redirects to the alerts LIST page, not the legacy edit form', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { fields } = await walkToReview(cookies, csrfToken);
+
+		const wizardSubmit = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts',
+			cookies,
+			payload: { ...fields, _csrf: csrfToken },
+		});
+		expect(wizardSubmit.statusCode).toBe(302);
+		expect(wizardSubmit.headers.location).toBe('/gui/alerts');
+	});
+
+	it('B2: legacy form save is unchanged — still redirects to the per-alert edit page', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+
+		const legacyPayload: Record<string, string> = {
+			_csrf: csrfToken,
+			id: 'legacy-redirect-alert',
+			name: 'Legacy Redirect Alert',
+			enabled: 'true',
+			schedule: '0 7 * * *',
+			trigger_type: 'scheduled',
+			delivery: ADMIN_USER.id,
+			cooldown: '4 hours',
+			condition_type: 'deterministic',
+			condition_expression: 'contains "expired"',
+			ds_app_id_0: 'food',
+			ds_scope_0: 'user',
+			ds_user_id_0: ADMIN_USER.id,
+			ds_path_0: 'pantry.md',
+			action_type_0: 'telegram_message',
+			action_message_0: 'Check it out: {data}',
+		};
+		const legacySubmit = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts',
+			cookies,
+			payload: legacyPayload,
+		});
+		expect(legacySubmit.statusCode).toBe(302);
+		expect(legacySubmit.headers.location).toBe('/gui/alerts/legacy-redirect-alert/edit');
+	});
+
 	it('event-triggered alerts emit trigger_type=event + trigger_event_name, no schedule required', async () => {
 		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
 		const { cookies, csrfToken } = await getCsrf(loginCookies);
@@ -804,6 +851,191 @@ describe('Review step contract', () => {
 			cookies,
 		});
 		expect(res.statusCode).toBe(403);
+	});
+});
+
+describe('Step 4: alert ID is optional and auto-slugified from the name (B1 live-verification fix)', () => {
+	/** Walk through steps 1–3 and return the rendered STEP 4 form. */
+	async function walkToStep4(cookies: Record<string, string>, csrfToken: string) {
+		const step1 = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/new/step',
+			cookies,
+			payload: {
+				_csrf: csrfToken,
+				step: '1',
+				ds_app_id_0: 'food',
+				ds_scope_0: 'user',
+				ds_user_id_0: ADMIN_USER.id,
+				ds_path_0: 'pantry.md',
+			},
+		});
+		const s1 = extractHiddenFields(step1.body);
+		const step2 = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/new/step',
+			cookies,
+			payload: {
+				...s1,
+				_csrf: csrfToken,
+				trigger_type: 'scheduled',
+				schedule_advanced: '0 7 * * *',
+			},
+		});
+		const s2 = extractHiddenFields(step2.body);
+		const step3 = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/new/step',
+			cookies,
+			payload: {
+				...s2,
+				_csrf: csrfToken,
+				condition_mode: 'rule',
+				rule_pattern: 'contains',
+				rule_text: 'expired',
+			},
+		});
+		return { body: step3.body, fields: extractHiddenFields(step3.body) };
+	}
+
+	it('step 4 renders the ID field as optional (no `required` attribute)', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { body } = await walkToStep4(cookies, csrfToken);
+
+		const idFieldMatch = body.match(/<input[^>]*name="id"[^>]*>/);
+		expect(idFieldMatch).toBeTruthy();
+		expect(idFieldMatch?.[0]).not.toContain('required');
+	});
+
+	it('blank id auto-generates a slug from the alert name', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { fields: s3 } = await walkToStep4(cookies, csrfToken);
+
+		const step4 = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/new/step',
+			cookies,
+			payload: {
+				...s3,
+				_csrf: csrfToken,
+				id: '',
+				name: 'Pantry Check',
+				delivery_user: ADMIN_USER.id,
+				action_type_0: 'telegram_message',
+				action_message_0: 'Check the pantry',
+				cooldown_n: '4',
+				cooldown_unit: 'hours',
+			},
+		});
+		expect(step4.statusCode).toBe(200);
+		const fields = extractHiddenFields(step4.body);
+		expect(fields.id).toBe('pantry-check');
+
+		const finalSubmit = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts',
+			cookies,
+			payload: { ...fields, _csrf: csrfToken },
+		});
+		expect(finalSubmit.statusCode).toBe(302);
+		const saved = await alertService.getAlert('pantry-check');
+		expect(saved).not.toBeNull();
+	});
+
+	it('auto-generated slug gets a collision suffix when the base slug is already taken', async () => {
+		await alertService.saveAlert({
+			id: 'pantry-check',
+			name: 'Existing',
+			enabled: true,
+			schedule: '0 8 * * *',
+			trigger: { type: 'scheduled', schedule: '0 8 * * *' },
+			condition: {
+				type: 'deterministic',
+				expression: 'is empty',
+				data_sources: [{ app_id: 'food', user_id: ADMIN_USER.id, path: 'pantry.md' }],
+			},
+			actions: [{ type: 'telegram_message', config: { message: 'hi' } }],
+			delivery: [ADMIN_USER.id],
+			cooldown: '1 hour',
+		});
+
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { fields: s3 } = await walkToStep4(cookies, csrfToken);
+
+		const step4 = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/new/step',
+			cookies,
+			payload: {
+				...s3,
+				_csrf: csrfToken,
+				id: '',
+				name: 'Pantry Check',
+				delivery_user: ADMIN_USER.id,
+				action_type_0: 'telegram_message',
+				action_message_0: 'Check the pantry',
+				cooldown_n: '4',
+				cooldown_unit: 'hours',
+			},
+		});
+		expect(step4.statusCode).toBe(200);
+		const fields = extractHiddenFields(step4.body);
+		expect(fields.id).toBe('pantry-check-2');
+	});
+
+	it('a hand-typed custom id is still honored (not overridden by the slug)', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { fields: s3 } = await walkToStep4(cookies, csrfToken);
+
+		const step4 = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/new/step',
+			cookies,
+			payload: {
+				...s3,
+				_csrf: csrfToken,
+				id: 'my-custom-alert-id',
+				name: 'Pantry Check',
+				delivery_user: ADMIN_USER.id,
+				action_type_0: 'telegram_message',
+				action_message_0: 'Check the pantry',
+				cooldown_n: '4',
+				cooldown_unit: 'hours',
+			},
+		});
+		expect(step4.statusCode).toBe(200);
+		const fields = extractHiddenFields(step4.body);
+		expect(fields.id).toBe('my-custom-alert-id');
+	});
+
+	it('an invalid hand-typed custom id is rejected server-side with a styled inline error', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { fields: s3 } = await walkToStep4(cookies, csrfToken);
+
+		const step4 = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/new/step',
+			cookies,
+			payload: {
+				...s3,
+				_csrf: csrfToken,
+				id: 'Not Valid!!',
+				name: 'Pantry Check',
+				delivery_user: ADMIN_USER.id,
+				action_type_0: 'telegram_message',
+				action_message_0: 'Check the pantry',
+				cooldown_n: '4',
+				cooldown_unit: 'hours',
+			},
+		});
+		expect(step4.statusCode).toBe(400);
+		expect(step4.body).toContain('pas-error-card');
+		expect(step4.body.toLowerCase()).toMatch(/id/);
 	});
 });
 

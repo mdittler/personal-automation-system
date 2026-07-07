@@ -492,6 +492,47 @@ describe('Review step contract', () => {
 		expect(normalize(wizardReport)).toEqual(normalize(legacyReport));
 	});
 
+	it('B2: wizard save redirects to the reports LIST page, not the legacy edit form', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { fields } = await walkToReview(cookies, csrfToken);
+
+		const wizardSubmit = await app.inject({
+			method: 'POST',
+			url: '/gui/reports',
+			cookies,
+			payload: { ...fields, _csrf: csrfToken },
+		});
+		expect(wizardSubmit.statusCode).toBe(302);
+		expect(wizardSubmit.headers.location).toBe('/gui/reports');
+	});
+
+	it('B2: legacy form save is unchanged — still redirects to the per-report edit page', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+
+		const legacyPayload: Record<string, string> = {
+			_csrf: csrfToken,
+			id: 'legacy-redirect-report',
+			name: 'Legacy Redirect Report',
+			schedule: '0 7 * * *',
+			delivery: ADMIN_USER.id,
+			enabled: 'true',
+			llm_enabled: 'false',
+			section_type_0: 'changes',
+			section_label_0: 'Recent changes',
+			section_lookback_0: '24',
+		};
+		const legacySubmit = await app.inject({
+			method: 'POST',
+			url: '/gui/reports',
+			cookies,
+			payload: legacyPayload,
+		});
+		expect(legacySubmit.statusCode).toBe(302);
+		expect(legacySubmit.headers.location).toBe('/gui/reports/legacy-redirect-report/edit');
+	});
+
 	it('two-recipient step-3 submission (repeated delivery_user) renders review correctly and produces comma-separated delivery on final submit (Codex final round, Important)', async () => {
 		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
 		const { cookies, csrfToken } = await getCsrf(loginCookies);
@@ -576,6 +617,157 @@ describe('Review step contract', () => {
 		expect(res.statusCode).toBe(200);
 		expect(res.body).toContain('Notes');
 		expect(res.body).toContain('*/7 3 * * 2');
+	});
+});
+
+describe('Step 3: report ID is optional and auto-slugified from the name (B1 live-verification fix)', () => {
+	/** Walk through steps 1 and 2 and return the rendered STEP 3 form (the step-2 POST's response body + its hidden fields). */
+	async function walkToStep3(cookies: Record<string, string>, csrfToken: string) {
+		const step1 = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: {
+				_csrf: csrfToken,
+				step: '1',
+				section_type_0: 'changes',
+				section_label_0: 'Recent changes',
+				section_lookback_0: '24',
+			},
+		});
+		const s1 = extractHiddenFields(step1.body);
+		const step2 = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: { ...s1, _csrf: csrfToken, schedule_advanced: '0 7 * * *' },
+		});
+		return { body: step2.body, fields: extractHiddenFields(step2.body) };
+	}
+
+	it('step 3 renders the ID field as optional (no `required` attribute) inside an Advanced disclosure', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { body } = await walkToStep3(cookies, csrfToken);
+
+		const idFieldMatch = body.match(/<input[^>]*name="id"[^>]*>/);
+		expect(idFieldMatch).toBeTruthy();
+		expect(idFieldMatch?.[0]).not.toContain('required');
+		expect(body).toContain('Custom ID (optional)');
+		expect(body).toContain('<details');
+	});
+
+	it('blank id auto-generates a slug from the report name', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { fields: s2 } = await walkToStep3(cookies, csrfToken);
+
+		const step3 = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: {
+				...s2,
+				_csrf: csrfToken,
+				delivery_user: ADMIN_USER.id,
+				llm_enabled: 'false',
+				name: 'Weekly Digest',
+				id: '',
+			},
+		});
+		expect(step3.statusCode).toBe(200);
+		const fields = extractHiddenFields(step3.body);
+		expect(fields.id).toBe('weekly-digest');
+
+		const finalSubmit = await app.inject({
+			method: 'POST',
+			url: '/gui/reports',
+			cookies,
+			payload: { ...fields, _csrf: csrfToken },
+		});
+		expect(finalSubmit.statusCode).toBe(302);
+		const saved = await reportService.getReport('weekly-digest');
+		expect(saved).not.toBeNull();
+		expect(saved?.name).toBe('Weekly Digest');
+	});
+
+	it('auto-generated slug gets a collision suffix when the base slug is already taken', async () => {
+		await reportService.saveReport({
+			id: 'weekly-digest',
+			name: 'Existing',
+			enabled: true,
+			schedule: '0 8 * * *',
+			delivery: [ADMIN_USER.id],
+			sections: [{ type: 'custom', label: 'Notes', config: { text: 'x' } }],
+			llm: { enabled: false },
+		});
+
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { fields: s2 } = await walkToStep3(cookies, csrfToken);
+
+		const step3 = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: {
+				...s2,
+				_csrf: csrfToken,
+				delivery_user: ADMIN_USER.id,
+				llm_enabled: 'false',
+				name: 'Weekly Digest',
+				id: '',
+			},
+		});
+		expect(step3.statusCode).toBe(200);
+		const fields = extractHiddenFields(step3.body);
+		expect(fields.id).toBe('weekly-digest-2');
+	});
+
+	it('a hand-typed custom id is still honored (not overridden by the slug)', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { fields: s2 } = await walkToStep3(cookies, csrfToken);
+
+		const step3 = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: {
+				...s2,
+				_csrf: csrfToken,
+				delivery_user: ADMIN_USER.id,
+				llm_enabled: 'false',
+				name: 'Weekly Digest',
+				id: 'my-custom-id',
+			},
+		});
+		expect(step3.statusCode).toBe(200);
+		const fields = extractHiddenFields(step3.body);
+		expect(fields.id).toBe('my-custom-id');
+	});
+
+	it('an invalid hand-typed custom id is rejected server-side with a styled inline error (not silently blocked)', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const { fields: s2 } = await walkToStep3(cookies, csrfToken);
+
+		const step3 = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: {
+				...s2,
+				_csrf: csrfToken,
+				delivery_user: ADMIN_USER.id,
+				llm_enabled: 'false',
+				name: 'Weekly Digest',
+				id: 'Not Valid!!',
+			},
+		});
+		expect(step3.statusCode).toBe(400);
+		expect(step3.body).toContain('pas-error-card');
+		expect(step3.body.toLowerCase()).toMatch(/id/);
 	});
 });
 

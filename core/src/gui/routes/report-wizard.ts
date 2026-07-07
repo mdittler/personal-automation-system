@@ -30,7 +30,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import type { ReportService } from '../../services/reports/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
-import type { ReportDefinition, SectionType } from '../../types/report.js';
+import { REPORT_ID_PATTERN, type ReportDefinition, type SectionType } from '../../types/report.js';
 import { escapeHtml } from '../../utils/escape-html.js';
 import { describeReport } from '../utils/describe-automation.js';
 import { humanizeLabel } from '../utils/humanize.js';
@@ -40,6 +40,7 @@ import {
 	nextRunPreview,
 	presetToCron,
 } from '../utils/schedule-presets.js';
+import { slugifyForId, uniqueSlugForId } from '../utils/slugify-id.js';
 import { normalizeBody } from '../utils/wizard-body.js';
 
 export interface ReportWizardRoutesOptions {
@@ -253,7 +254,10 @@ function renderStep3(
 		<h2>Who gets it, and should AI summarize it?</h2>
 		${error ? errorCard(error) : ''}
 		<label>Report name<input type="text" name="name" value="${escapeHtml(values.name || '')}" required /></label>
-		<label>Report ID (lowercase, hyphens)<input type="text" name="id" value="${escapeHtml(values.id || '')}" pattern="[a-z][a-z0-9-]*" required /></label>
+		<details>
+			<summary>Custom ID (optional)</summary>
+			<label>Leave blank to generate one automatically from the name<input type="text" name="id" value="${escapeHtml(values.id || '')}" pattern="[a-z][a-z0-9-]*" /></label>
+		</details>
 		<h3>Send to</h3>
 		${userChecks}
 		<label style="display:flex;align-items:center;gap:0.5rem;min-height:44px">
@@ -288,6 +292,7 @@ function renderStep4(values: Record<string, string>, csrfToken: string, timezone
 			<input type="hidden" name="step" value="4" />
 			${hiddenFields(values, new Set(['step', '_csrf']))}
 			<input type="hidden" name="enabled" value="true" />
+			<input type="hidden" name="from" value="wizard" />
 			<button type="submit" style="min-height:44px">Save report</button>
 		</form>
 	</div>`;
@@ -450,7 +455,7 @@ export function registerReportWizardRoutes(
 
 			if (step === 3) {
 				const { body: normalized, delivery } = normalizeBody(body);
-				if (!normalized.name || !normalized.id) {
+				if (!normalized.name) {
 					return reply
 						.status(400)
 						.type('text/html')
@@ -459,7 +464,21 @@ export function registerReportWizardRoutes(
 								{ ...normalized, delivery: delivery.join(', ') },
 								getUsers(),
 								csrfToken,
-								'Give this report a name and an ID.',
+								'Give this report a name.',
+							),
+						);
+				}
+				const rawId = (normalized.id || '').trim();
+				if (rawId && !REPORT_ID_PATTERN.test(rawId)) {
+					return reply
+						.status(400)
+						.type('text/html')
+						.send(
+							renderStep3(
+								{ ...normalized, delivery: delivery.join(', ') },
+								getUsers(),
+								csrfToken,
+								'The custom ID must start with a lowercase letter and contain only lowercase letters, numbers, and hyphens.',
 							),
 						);
 				}
@@ -476,7 +495,12 @@ export function registerReportWizardRoutes(
 							),
 						);
 				}
-				const next = { ...normalized, step: '4', delivery: delivery.join(', ') };
+				const id =
+					rawId ||
+					(await uniqueSlugForId(slugifyForId(normalized.name), (candidate) =>
+						options.reportService.getReport(candidate),
+					));
+				const next = { ...normalized, step: '4', delivery: delivery.join(', '), id };
 				return reply.type('text/html').send(renderStep4(next, csrfToken, timezone));
 			}
 

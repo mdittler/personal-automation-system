@@ -188,6 +188,14 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 				});
 			}
 
+			// Wizard-originated saves (review form carries a hidden from=wizard
+			// field) land on the list page — a nontechnical admin who just walked
+			// through the guided wizard shouldn't be dumped into the legacy raw
+			// edit form. The legacy form has no `from` field, so its redirect is
+			// unchanged.
+			if (body.from === 'wizard') {
+				return reply.redirect('/gui/alerts');
+			}
 			return reply.redirect(`/gui/alerts/${def.id}/edit`);
 		},
 	);
