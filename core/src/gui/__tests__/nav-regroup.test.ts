@@ -4,9 +4,10 @@
  * The sidebar nav is a flat list of unlabeled items. This groups it under
  * plain-language section headers so a nontechnical user can scan it:
  * Home; Automations (Reports, Alerts); People and sharing (Household —
- * still admin-gated this batch, Shared spaces); Your data (Files); System
- * (admin-only: Apps, Scheduler, AI usage, Logs, Regression, Context);
- * Settings + Account for everyone. All existing hrefs are unchanged.
+ * visible to members too as of Batch 5 Task 5.2's read-only view, Shared
+ * spaces); Your data (Files); System (admin-only: Apps, Scheduler, AI usage,
+ * Logs, Regression, Context); Settings + Account for everyone. All existing
+ * hrefs are unchanged.
  *
  * Reuses the buildApp harness from admin-route-guards.test.ts (same
  * per-file buildApp pattern per the task brief).
@@ -106,12 +107,19 @@ function makeUserManager(): UserManager {
 	} as unknown as UserManager;
 }
 
-function makeHouseholdService(): Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'> {
+function makeHouseholdService(): Pick<
+	HouseholdService,
+	'getHouseholdForUser' | 'getHousehold' | 'listHouseholds' | 'getMembers'
+> {
 	return {
 		getHouseholdForUser: vi.fn().mockReturnValue('hh-1'),
 		getHousehold: vi
 			.fn()
 			.mockReturnValue({ id: 'hh-1', name: 'Home', adminUserIds: [ADMIN_USER.id] }),
+		listHouseholds: vi
+			.fn()
+			.mockReturnValue([{ id: 'hh-1', name: 'Home', adminUserIds: [ADMIN_USER.id] }]),
+		getMembers: vi.fn().mockReturnValue(ALL_USERS),
 	};
 }
 
@@ -306,6 +314,7 @@ async function buildApp(tempDir: string) {
 				userMutationService: makeUserMutationService(),
 				registry,
 				spaceService,
+				householdService,
 				logger,
 			});
 			registerContextRoutes(gui, {
@@ -413,8 +422,8 @@ describe('nav regroup', () => {
 		for (const label of ['Apps', 'Scheduler', 'Logs', 'Regression', 'Context', 'Backups']) {
 			expect(res.body).not.toContain(`>${label}<`);
 		}
-		// Household nav item stays admin-gated this batch (a later batch opens
-		// the member view) — the member should not see it yet.
-		expect(res.body).not.toContain('>Household<');
+		// Batch 5, Task 5.2: Household nav item is now visible to members too —
+		// the route opened a read-only, own-household-scoped view for non-admins.
+		expect(res.body).toContain('>Household<');
 	});
 });

@@ -92,12 +92,19 @@ function makeUserManager(): UserManager {
 	} as unknown as UserManager;
 }
 
-function makeHouseholdService(): Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'> {
+function makeHouseholdService(): Pick<
+	HouseholdService,
+	'getHouseholdForUser' | 'getHousehold' | 'listHouseholds' | 'getMembers'
+> {
 	return {
 		getHouseholdForUser: vi.fn().mockReturnValue('hh-1'),
 		getHousehold: vi
 			.fn()
 			.mockReturnValue({ id: 'hh-1', name: 'Home', adminUserIds: [ADMIN_USER.id] }),
+		listHouseholds: vi
+			.fn()
+			.mockReturnValue([{ id: 'hh-1', name: 'Home', adminUserIds: [ADMIN_USER.id] }]),
+		getMembers: vi.fn().mockReturnValue(ALL_USERS),
 	};
 }
 
@@ -291,6 +298,7 @@ async function buildApp(tempDir: string) {
 				userMutationService: makeUserMutationService(),
 				registry,
 				spaceService,
+				householdService,
 				logger,
 			});
 			registerContextRoutes(gui, {
@@ -375,24 +383,38 @@ describe('GUI admin route guards', () => {
 		expect(res.body).toContain('PAS Management');
 	});
 
-	it.each([
-		'/gui/apps',
-		'/gui/scheduler',
-		'/gui/logs',
-		'/gui/config',
-		'/gui/llm',
-		'/gui/users',
-		'/gui/context',
-	])('returns 403 for member access to %s', async (url) => {
+	it.each(['/gui/apps', '/gui/scheduler', '/gui/logs', '/gui/config', '/gui/llm', '/gui/context'])(
+		'returns 403 for member access to %s',
+		async (url) => {
+			const cookies = await loginAsMember();
+			const res = await app.inject({
+				method: 'GET',
+				url,
+				cookies,
+			});
+
+			expect(res.statusCode).toBe(403);
+			expect(res.body).toContain('Insufficient Privileges');
+		},
+	);
+
+	// Batch 5, Task 5.2 — DELIBERATE guard change: `/gui/users` (Household hub)
+	// is no longer admin-only for GET. Members get a read-only, household-scoped
+	// view (no invite form, no mutation controls); all mutation POSTs on
+	// /gui/users/* remain platform-admin-only (see household.test.ts for the
+	// full read-only + two-household-isolation coverage). This test documents
+	// the new contract explicitly — it previously asserted 403 alongside the
+	// admin-only routes above.
+	it('member GET /gui/users → 200 (read-only Household view, not 403)', async () => {
 		const cookies = await loginAsMember();
 		const res = await app.inject({
 			method: 'GET',
-			url,
+			url: '/gui/users',
 			cookies,
 		});
 
-		expect(res.statusCode).toBe(403);
-		expect(res.body).toContain('Insufficient Privileges');
+		expect(res.statusCode).toBe(200);
+		expect(res.body).not.toContain('Insufficient Privileges');
 	});
 
 	it.each([
