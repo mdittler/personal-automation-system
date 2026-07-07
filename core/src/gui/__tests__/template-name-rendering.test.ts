@@ -317,7 +317,9 @@ describe('operator GUI templates surface user.name, not user.id', () => {
 
 	it('alert-edit delivery checkboxes show name as label text, not numeric id', async () => {
 		const cookies = await loginAsAdmin(built.app);
-		const res = await built.app.inject({ method: 'GET', url: '/gui/alerts/new', cookies });
+		// The wizard now owns GET /gui/alerts/new; the legacy alert-edit
+		// template (with its delivery-cb checkboxes) lives at /new/legacy.
+		const res = await built.app.inject({ method: 'GET', url: '/gui/alerts/new/legacy', cookies });
 		expect(res.statusCode).toBe(200);
 		const labels = extractDeliveryCbLabels(res.body);
 		expect(labels.length).toBeGreaterThanOrEqual(1);

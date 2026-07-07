@@ -1,8 +1,11 @@
 <div class="page-header">
   <h1>Alerts</h1>
+  <% if (it.isPlatformAdmin) { %>
   <div class="actions">
-    <a href="/gui/alerts/new" role="button">Create Alert</a>
+    <a href="/gui/alerts/new" role="button">Set up an alert</a>
+    <a href="/gui/alerts/new/legacy" class="outline" role="button">Advanced</a>
   </div>
+  <% } %>
 </div>
 
 <% if (it.alerts.length === 0) { %>

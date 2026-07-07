@@ -250,31 +250,31 @@ describe('Alert GUI Routes', () => {
 		});
 	});
 
-	// --- New form ---
+	// --- New form (legacy/advanced — the wizard now owns GET /gui/alerts/new) ---
 
-	describe('GET /gui/alerts/new', () => {
+	describe('GET /gui/alerts/new/legacy', () => {
 		it('returns 200 with create form', async () => {
-			const res = await authenticatedGet('/gui/alerts/new');
+			const res = await authenticatedGet('/gui/alerts/new/legacy');
 			expect(res.statusCode).toBe(200);
 			expect(res.body).toContain('Create Alert');
 		});
 
 		it('includes user checkboxes for delivery', async () => {
-			const res = await authenticatedGet('/gui/alerts/new');
+			const res = await authenticatedGet('/gui/alerts/new/legacy');
 			expect(res.body).toContain('Test User');
 			expect(res.body).toContain('123456789');
 			expect(res.body).toContain('delivery-cb');
 		});
 
 		it('includes app options for data sources', async () => {
-			const res = await authenticatedGet('/gui/alerts/new');
+			const res = await authenticatedGet('/gui/alerts/new/legacy');
 			expect(res.body).toContain('PAS_APPS');
 			expect(res.body).toContain('"grocery"');
 			expect(res.body).toContain('"notes"');
 		});
 
 		it('includes report options for run_report actions', async () => {
-			const res = await authenticatedGet('/gui/alerts/new');
+			const res = await authenticatedGet('/gui/alerts/new/legacy');
 			expect(res.body).toContain('PAS_REPORTS');
 			expect(res.body).toContain('"daily-summary"');
 		});

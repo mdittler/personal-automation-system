@@ -1669,6 +1669,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		systemConfig: config,
 		loginByNameAllowed,
 		chatTranscriptIndex,
+		fileIndex,
 	});
 
 	// 13b. External Data API (optional)

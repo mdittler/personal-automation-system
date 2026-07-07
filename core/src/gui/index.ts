@@ -18,6 +18,7 @@ import type { ChatTranscriptIndex } from '../services/chat-transcript-index/inde
 import type { SystemConfigWriter } from '../services/config/system-config-writer.js';
 import type { ContextStoreServiceImpl } from '../services/context-store/index.js';
 import type { CredentialService } from '../services/credentials/index.js';
+import type { FileIndexService } from '../services/file-index/index.js';
 import type { HouseholdService } from '../services/household/index.js';
 import type { CostTracker } from '../services/llm/cost-tracker.js';
 import type { LLMServiceImpl } from '../services/llm/index.js';
@@ -36,6 +37,7 @@ import type { AppConfigService, LLMSafeguardsConfig, SystemConfig } from '../typ
 import { describeCron } from '../utils/cron-describe.js';
 import { registerAuth } from './auth.js';
 import { registerCsrfProtection } from './csrf.js';
+import { registerAlertWizardRoutes } from './routes/alert-wizard.js';
 import { registerAlertRoutes } from './routes/alerts.js';
 import { registerApiKeyRoutes } from './routes/api-keys.js';
 import { registerAppsRoutes } from './routes/apps.js';
@@ -115,6 +117,14 @@ export interface GuiOptions {
 	 * activity-daily's message counts are always 0 rather than erroring.
 	 */
 	chatTranscriptIndex?: Pick<ChatTranscriptIndex, 'countMessagesByDay'>;
+	/**
+	 * Batch 4 (GUI UX redesign): file-metadata index, used by the alert
+	 * wizard's step-1 data-source picker (Task 4.3). Optional — when absent,
+	 * the wizard falls back to registering with an empty data-source list
+	 * rather than erroring (fileIndex is not on the critical path for any
+	 * other route).
+	 */
+	fileIndex?: Pick<FileIndexService, 'getEntries'>;
 }
 
 /**
@@ -334,6 +344,17 @@ export async function registerGuiRoutes(
 					reportService,
 					spaceService,
 					n8nDispatchUrl: config.n8n?.dispatchUrl,
+					dataDir,
+					timezone: config.timezone,
+					logger,
+				});
+				// Batch 4: guided alert wizard — same alertService/registry, submits
+				// the existing POST /gui/alerts contract via alerts.ts's own handler.
+				registerAlertWizardRoutes(gui, {
+					alertService,
+					userManager,
+					fileIndex: options.fileIndex,
+					spaceService,
 					dataDir,
 					timezone: config.timezone,
 					logger,

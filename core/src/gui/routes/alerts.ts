@@ -110,8 +110,9 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 		});
 	});
 
-	// --- New form ---
-	server.get('/alerts/new', async (request: FastifyRequest, reply: FastifyReply) => {
+	// --- New form (legacy/advanced — the wizard at GET /alerts/new is the default
+	// admin path; this route stays reachable via the list page's "Advanced" link) ---
+	server.get('/alerts/new/legacy', async (request: FastifyRequest, reply: FastifyReply) => {
 		// D5b-5: only platform-admin can create alerts.
 		if (request.user && !request.user.isPlatformAdmin) {
 			return reply.status(403).viewAsync('403', { title: '403 Forbidden — PAS' });
