@@ -20,6 +20,7 @@ import type { UserManager } from '../../services/user-manager/index.js';
 import type { UserMutationService } from '../../services/user-manager/user-mutation-service.js';
 import type { SpaceDefinition } from '../../types/spaces.js';
 import type { RegisteredUser } from '../../types/users.js';
+import { escapeHtml } from '../../utils/escape-html.js';
 import { sendErrorFragment } from '../utils/error-fragment.js';
 import { humanizeLabel } from '../utils/humanize.js';
 
@@ -40,15 +41,6 @@ export interface UserRoutesOptions {
 	>;
 	/** Required for the invite flow (Task 5.1). Optional for legacy test harnesses. */
 	inviteService?: InviteService;
-}
-
-function escapeHtml(str: string): string {
-	return str
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#39;');
 }
 
 /** Build the friendly app-label list for a user (mirrors the enabledApps → label mapping in users.ts's row builder). */
@@ -198,7 +190,7 @@ export function registerUserRoutes(server: FastifyInstance, options: UserRoutesO
 					<p>Invite created for <strong>${safeName}</strong>.</p>
 					<p>Send this to them in Telegram: <code>/start ${safeCode}</code></p>
 					<p><small>Expires in 24 hours.</small></p>
-					<p><small>Then set their password below (optional) — once they've registered, use <a href="/gui/users">Reset Password</a> on their row.</small></p>
+					<p><small>Then set their password below (optional) — once they've registered, use <a href="/gui/users">Reset password</a> on their row.</small></p>
 				</div>`,
 			);
 		},
@@ -354,7 +346,7 @@ function buildUserRow(
 	// Remove button cell — disabled for sole admin
 	const isSoleAdmin = user.isAdmin && adminCount <= 1;
 	html += '<td>';
-	html += `<a href="/gui/users/${safeId}/reset-password" role="button" class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;font-size:0.8rem">Reset Password</a>`;
+	html += `<a href="/gui/users/${safeId}/reset-password" role="button" class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;font-size:0.8rem">Reset password</a>`;
 	if (isSoleAdmin) {
 		html += `<button class="outline secondary" style="padding:0.25rem 0.5rem;margin:0 0 0 0.35rem;font-size:0.8rem;opacity:0.4;cursor:not-allowed" disabled title="Cannot remove the sole admin">Remove</button>`;
 	} else {

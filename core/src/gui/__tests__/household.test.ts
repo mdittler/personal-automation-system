@@ -279,6 +279,135 @@ describe('Household hub — invite flow (admin)', () => {
 		expect(res.body).toContain('Echo');
 	});
 
+	it('the /apps POST swap row renders sentence-case "Reset password"', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+
+		const res = await app.inject({
+			method: 'POST',
+			url: '/gui/users/222/apps',
+			payload: { app_echo: 'on', _csrf: csrfToken },
+			cookies,
+		});
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('Reset password');
+		expect(res.body).not.toContain('Reset Password');
+	});
+
+	it('multi-household invite picker: two households → picker renders, and an explicit householdId routes the invite to the non-default household', async () => {
+		await householdService.createHousehold('Home C', ADMIN_USER.id, [ADMIN_USER.id]);
+
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+
+		const pageRes = await app.inject({ method: 'GET', url: '/gui/users', cookies });
+		expect(pageRes.statusCode).toBe(200);
+		expect(pageRes.body).toContain('name="householdId"');
+
+		const households = householdService.listHouseholds();
+		const nonDefault = households.find((hh) => hh.id !== 'home-a');
+		expect(nonDefault).toBeDefined();
+
+		const res = await app.inject({
+			method: 'POST',
+			url: '/gui/users/invite',
+			payload: {
+				name: 'Picked Household Person',
+				role: 'member',
+				householdId: nonDefault?.id,
+				_csrf: csrfToken,
+			},
+			cookies,
+		});
+
+		expect(res.statusCode).toBe(200);
+		const invites = await inviteService.listInvites();
+		const created = Object.values(invites).find((inv) => inv.name === 'Picked Household Person');
+		expect(created?.householdId).toBe(nonDefault?.id);
+	});
+
+	it('admin with no resolvable household gets a styled 400, not a throw from InviteService', async () => {
+		// `householdService` is an optional dependency of registerUserRoutes
+		// (legacy test-harness escape hatch). When the route layer doesn't
+		// have it, `resolvedHouseholdId` has nothing to fall back to and the
+		// route must render a styled 400 instead of letting InviteService
+		// throw. Auth still gets a real HouseholdService so login/session
+		// resolution works normally; only the invite route's own dependency
+		// is withheld to exercise this branch (users.ts ~173-179).
+		const noHouseholdDepsApp = Fastify({ logger: false });
+		await noHouseholdDepsApp.register(fastifyCookie, { secret: AUTH_TOKEN });
+		const eta = new Eta();
+		await noHouseholdDepsApp.register(fastifyView, {
+			engine: { eta },
+			root: viewsDir,
+			viewExt: 'eta',
+			layout: 'layout',
+		});
+		await noHouseholdDepsApp.register(
+			async (gui) => {
+				await registerAuth(gui, {
+					authToken: AUTH_TOKEN,
+					credentialService: new CredentialService({ dataDir: tempDir }),
+					userManager,
+					householdService,
+				});
+				await registerCsrfProtection(gui);
+				await registerViewLocals(gui, { userManager });
+				registerUserRoutes(gui, {
+					userManager,
+					userMutationService: makeUserMutationService(),
+					registry: makeRegistry(),
+					spaceService: new SpaceService({
+						dataDir: tempDir,
+						userManager,
+						householdService,
+						logger,
+					}),
+					// householdService intentionally omitted here.
+					inviteService,
+					logger,
+				});
+			},
+			{ prefix: '/gui' },
+		);
+
+		// Reuse the already-persisted admin password from the shared tempDir.
+		const loginRes = await noHouseholdDepsApp.inject({
+			method: 'POST',
+			url: '/gui/login',
+			payload: { userId: ADMIN_USER.id, password: ADMIN_PASS },
+		});
+		expect(loginRes.statusCode).toBe(302);
+		const cookies = collectCookies(loginRes);
+
+		const csrfRes = await noHouseholdDepsApp.inject({
+			method: 'GET',
+			url: '/gui/users',
+			cookies,
+		});
+		expect(csrfRes.statusCode).toBe(200);
+		const allCookies = { ...cookies, ...collectCookies(csrfRes) };
+		const metaMatch = csrfRes.body.match(/name="csrf-token" content="([^"]+)"/);
+		const csrfToken = metaMatch?.[1] ?? '';
+		expect(csrfToken).not.toBe('');
+
+		const res = await noHouseholdDepsApp.inject({
+			method: 'POST',
+			url: '/gui/users/invite',
+			payload: { name: 'Orphan Invite', role: 'member', _csrf: csrfToken },
+			cookies: allCookies,
+		});
+
+		expect(res.statusCode).toBe(400);
+		expect(res.body).toContain('figure out which household');
+		expect(res.body).toContain('pas-error-card');
+		const invites = await inviteService.listInvites();
+		expect(Object.values(invites).some((inv) => inv.name === 'Orphan Invite')).toBe(false);
+
+		await noHouseholdDepsApp.close();
+	});
+
 	it('pending invites are listed with expiry (InviteService has no revoke method — expiry only)', async () => {
 		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
 		const { cookies, csrfToken } = await getCsrf(loginCookies);
@@ -336,6 +465,14 @@ describe('Household hub — member read-only view (Task 5.2, deliberate guard ch
 			cookies,
 		});
 		expect(removeRes.statusCode).toBe(403);
+
+		const groupsRes = await app.inject({
+			method: 'POST',
+			url: '/gui/users/222/groups',
+			payload: { _csrf: csrfToken },
+			cookies,
+		});
+		expect(groupsRes.statusCode).toBe(403);
 
 		const inviteRes = await app.inject({
 			method: 'POST',
