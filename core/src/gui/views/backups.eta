@@ -1,0 +1,55 @@
+<div class="page-header">
+  <h1>Backups</h1>
+</div>
+
+<% if (!it.enabled) { %>
+  <article>
+    <p>Backups aren't turned on yet. A backup is a saved copy of all your data and settings — useful if something ever goes wrong.</p>
+    <p>To turn them on, add this to your <code>pas.yaml</code> and restart the server:</p>
+    <pre><code>backup:
+  enabled: true
+  path: /path/to/backups
+  schedule: "0 3 * * *"
+  retentionCount: 7</code></pre>
+    <p><small>The server needs to restart after changing this setting.</small></p>
+  </article>
+<% } else { %>
+  <p style="color:var(--pico-muted-color);max-width:60ch">
+    Runs automatically on schedule (<code><%= it.schedule %></code>), keeping the most recent <%= it.retentionCount %> copies. You can also back up right now.
+  </p>
+
+  <% if (it.newestBackupAt) { %>
+    <p>Last backup: <strong><%= new Date(it.newestBackupAt).toLocaleString() %></strong></p>
+  <% } else { %>
+    <p class="empty-state">No backups have been made yet.</p>
+  <% } %>
+
+  <form hx-post="/gui/backups/run" hx-target="#backup-result" hx-swap="innerHTML" style="margin-bottom:1.5rem">
+    <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+    <button type="submit">Back up now</button>
+  </form>
+  <div id="backup-result"></div>
+
+  <% if (it.archives && it.archives.length > 0) { %>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Archive</th>
+            <th>Size</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% for (const archive of it.archives) { %>
+            <tr>
+              <td><code><%= archive.name %></code></td>
+              <td><%= (archive.sizeBytes / (1024 * 1024)).toFixed(1) %> MB</td>
+              <td><%= new Date(archive.mtime).toLocaleString() %></td>
+            </tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+<% } %>

@@ -31,6 +31,7 @@ import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerAlertRoutes } from '../routes/alerts.js';
 import { registerAppsRoutes } from '../routes/apps.js';
+import { registerBackupsRoutes } from '../routes/backups.js';
 import { registerConfigRoutes } from '../routes/config.js';
 import { registerContextRoutes } from '../routes/context.js';
 import { registerLlmUsageRoutes } from '../routes/llm-usage.js';
@@ -327,6 +328,17 @@ async function buildApp(tempDir: string) {
 				timezone: config.timezone,
 				logger,
 			});
+			registerBackupsRoutes(gui, {
+				backupConfig: {
+					enabled: false,
+					path: '/tmp/pas-backups',
+					schedule: '0 3 * * *',
+					retentionCount: 7,
+				},
+				dataDir: tempDir,
+				configDir: tempDir,
+				logger,
+			});
 		},
 		{ prefix: '/gui' },
 	);
@@ -383,20 +395,25 @@ describe('GUI admin route guards', () => {
 		expect(res.body).toContain('PAS Management');
 	});
 
-	it.each(['/gui/apps', '/gui/scheduler', '/gui/logs', '/gui/config', '/gui/llm', '/gui/context'])(
-		'returns 403 for member access to %s',
-		async (url) => {
-			const cookies = await loginAsMember();
-			const res = await app.inject({
-				method: 'GET',
-				url,
-				cookies,
-			});
+	it.each([
+		'/gui/apps',
+		'/gui/scheduler',
+		'/gui/logs',
+		'/gui/config',
+		'/gui/llm',
+		'/gui/context',
+		'/gui/backups',
+	])('returns 403 for member access to %s', async (url) => {
+		const cookies = await loginAsMember();
+		const res = await app.inject({
+			method: 'GET',
+			url,
+			cookies,
+		});
 
-			expect(res.statusCode).toBe(403);
-			expect(res.body).toContain('Insufficient Privileges');
-		},
-	);
+		expect(res.statusCode).toBe(403);
+		expect(res.body).toContain('Insufficient Privileges');
+	});
 
 	// Batch 5, Task 5.2 — DELIBERATE guard change: `/gui/users` (Household hub)
 	// is no longer admin-only for GET. Members get a read-only, household-scoped

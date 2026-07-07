@@ -42,6 +42,7 @@ import { registerAlertWizardRoutes } from './routes/alert-wizard.js';
 import { registerAlertRoutes } from './routes/alerts.js';
 import { registerApiKeyRoutes } from './routes/api-keys.js';
 import { registerAppsRoutes } from './routes/apps.js';
+import { registerBackupsRoutes } from './routes/backups.js';
 import { registerConfigRoutes } from './routes/config.js';
 import { registerContextRoutes } from './routes/context.js';
 import { registerCredentialRoutes } from './routes/credentials.js';
@@ -137,6 +138,20 @@ export interface GuiOptions {
 	 * responds with a styled error rather than erroring.
 	 */
 	inviteService?: InviteService;
+	/**
+	 * Batch 6 (GUI UX redesign): scheduled-backup config (= `config.backup`),
+	 * used by the admin-only Backups status page (Task 6.2). The GUI never
+	 * receives a live BackupService instance — bootstrap builds one after GUI
+	 * registration for the cron path only — so the route constructs its own
+	 * from this config + `dataDir`/`configDir` when enabled. Optional — when
+	 * absent, the Backups routes are not registered at all.
+	 */
+	backupConfig?: { enabled: boolean; path: string; schedule: string; retentionCount: number };
+	/**
+	 * Batch 6 (GUI UX redesign): absolute path to the config directory,
+	 * tarred alongside `dataDir` by the Backups page's own BackupService.
+	 */
+	configDir?: string;
 }
 
 /**
@@ -223,6 +238,17 @@ export async function registerGuiRoutes(
 			if (options.chatTranscriptIndex) {
 				registerSessionsRoutes(gui, {
 					chatTranscriptIndex: options.chatTranscriptIndex,
+					logger,
+				});
+			}
+			// Batch 6, Task 6.2: admin-only Backups status page. Registered only
+			// when backupConfig is present; builds its own BackupService per
+			// request rather than depending on bootstrap's cron-only instance.
+			if (options.backupConfig) {
+				registerBackupsRoutes(gui, {
+					backupConfig: options.backupConfig,
+					dataDir,
+					configDir: options.configDir ?? resolve('config'),
 					logger,
 				});
 			}

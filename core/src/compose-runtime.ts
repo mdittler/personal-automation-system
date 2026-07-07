@@ -1671,6 +1671,8 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		chatTranscriptIndex,
 		fileIndex,
 		inviteService,
+		backupConfig: config.backup,
+		configDir: resolve('config'),
 	});
 
 	// 13b. External Data API (optional)
