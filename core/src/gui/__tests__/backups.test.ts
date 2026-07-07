@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CredentialService } from '../../services/credentials/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
+import { describeCron } from '../../utils/cron-describe.js';
 import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerBackupsRoutes } from '../routes/backups.js';
@@ -205,6 +206,22 @@ describe('Backups (/gui/backups)', () => {
 		expect(res.body).toContain('backup:');
 		expect(res.body.toLowerCase()).toContain('restart');
 		expect(res.body).not.toContain('Back up now');
+	});
+
+	it('enabled state: shows a human-readable cron description, not the raw cron expression (C2 fix)', async () => {
+		app = await buildApp(tempDir, {
+			enabled: true,
+			path: backupPath,
+			schedule: '0 3 * * *',
+			retentionCount: 7,
+		});
+		const cookies = await login(ADMIN_ID, 'admin-pass-123');
+		const res = await app.inject({ method: 'GET', url: '/gui/backups', cookies });
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain(describeCron('0 3 * * *'));
+		expect(res.body).not.toContain('( 0 3 * * * )');
+		expect(res.body).not.toContain('<code>0 3 * * *</code>');
 	});
 
 	it('enabled state: lists archives (name, size, date) newest first and shows last-backup freshness', async () => {

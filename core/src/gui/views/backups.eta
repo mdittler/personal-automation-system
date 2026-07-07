@@ -15,7 +15,7 @@
   </article>
 <% } else { %>
   <p style="color:var(--pico-muted-color);max-width:60ch">
-    Runs automatically on schedule (<code><%= it.schedule %></code>), keeping the most recent <%= it.retentionCount %> copies. You can also back up right now.
+    <%= it.scheduleDescription %>, keeping the most recent <%= it.retentionCount %> copies. You can also back up right now.
   </p>
 
   <% if (it.newestBackupAt) { %>

@@ -260,6 +260,22 @@ describe('GET /gui/ (home)', () => {
 		await rm(tempDir, { recursive: true, force: true });
 	});
 
+	it('topbar link labels itself "Home", not "Dashboard" (C3 fix — nav already says Home)', async () => {
+		const app = await buildApp(tempDir);
+		const cookies = await login(app, ADMIN_ID, 'admin-pass-123');
+
+		const res = await app.inject({ method: 'GET', url: '/gui/', cookies });
+
+		expect(res.statusCode).toBe(200);
+		const topbarSection = res.body.slice(
+			res.body.indexOf('pas-topbar-left'),
+			res.body.indexOf('pas-topbar-right'),
+		);
+		expect(topbarSection).not.toMatch(/>\s*Dashboard\s*</);
+		expect(topbarSection).toMatch(/>\s*Home\s*</);
+		await app.close();
+	});
+
 	it('shows a backup warning banner to an admin when backups are disabled', async () => {
 		const app = await buildApp(tempDir, {
 			backup: {
@@ -591,6 +607,49 @@ describe('GET /gui/ (home)', () => {
 		expect(res.body).toContain('isn&#39;t being backed up');
 		// Admin-only "Loaded apps" stat card also only renders when isAdmin.
 		expect(res.body).toContain('Loaded apps');
+		await app.close();
+	});
+});
+
+describe('GET /gui/login (unauthenticated chrome — C5 fix)', () => {
+	let tempDir: string;
+
+	beforeEach(async () => {
+		tempDir = await mkdtemp(join(tmpdir(), 'pas-home-login-'));
+		await mkdir(join(tempDir, 'system'), { recursive: true });
+	});
+
+	afterEach(async () => {
+		await rm(tempDir, { recursive: true, force: true });
+	});
+
+	it('renders neither the sidebar nav nor the Logout button for an unauthenticated visitor', async () => {
+		// Regression: layout.eta always rendered the full app chrome (sidebar
+		// nav + Logout form) regardless of authentication state. On the login
+		// page this is confusing (nav links to pages the visitor can't reach
+		// yet) and the Logout button was the first submit button in the DOM —
+		// a stray Enter keypress in the login form could trigger it via
+		// button-order quirks in some browsers. it.currentUser is unset for an
+		// unauthenticated request (view-locals.ts only sets it when
+		// request.user resolves), so layout.eta must gate both on it.currentUser.
+		const app = await buildApp(tempDir);
+
+		const res = await app.inject({ method: 'GET', url: '/gui/login' });
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).not.toContain('Logout');
+		expect(res.body).not.toContain('nav-section-label');
+		await app.close();
+	});
+
+	it('still renders the brand and theme toggle for an unauthenticated visitor', async () => {
+		const app = await buildApp(tempDir);
+
+		const res = await app.inject({ method: 'GET', url: '/gui/login' });
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('pas-brand');
+		expect(res.body).toContain('theme-toggle');
 		await app.close();
 	});
 });

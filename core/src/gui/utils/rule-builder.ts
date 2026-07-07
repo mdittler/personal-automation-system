@@ -96,12 +96,20 @@ const FEWER_LINES_RE = /^line count\s*<\s*(\d+)$/;
  * value, mirroring `evaluateDeterministic`'s case-insensitive, trimmed
  * matching. Returns `null` for anything that doesn't map 1:1 to one of the
  * six patterns — the wizard renders those as Advanced.
+ *
+ * `evaluateDeterministic` accepts both "empty"/"is empty" and "not
+ * empty"/"is not empty" as synonyms (see its own doc comment, and the
+ * "Not empty" quick-insert button on alert-edit.eta's Advanced expression
+ * field, which inserts the bare "not empty" form). Both bare forms must map
+ * to the same rule-builder pattern as their "is ..." counterparts, or they
+ * fall through to the raw-expression fallback and render the ungrammatical
+ * "if it not empty" (C1 fix).
  */
 export function parseExpression(expression: string): RuleBuilderValue | null {
 	const cond = expression.toLowerCase().trim();
 
-	if (cond === 'is empty') return { pattern: 'is_empty' };
-	if (cond === 'is not empty') return { pattern: 'not_empty' };
+	if (cond === 'is empty' || cond === 'empty') return { pattern: 'is_empty' };
+	if (cond === 'is not empty' || cond === 'not empty') return { pattern: 'not_empty' };
 
 	const notContainsMatch = cond.match(NOT_CONTAINS_RE);
 	if (notContainsMatch) {

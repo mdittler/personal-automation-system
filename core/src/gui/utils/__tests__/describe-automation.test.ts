@@ -147,6 +147,22 @@ describe('describeAlert', () => {
 		expect(withExpr('line count < 3')).toMatch(/fewer than 3 lines/);
 	});
 
+	it('renders proper grammar for the bare "empty"/"not empty" synonyms the evaluator also accepts (C1 fix)', () => {
+		// evaluator.ts recognizes both "empty"/"is empty" and "not empty"/"is not
+		// empty" (see its own doc comment). rule-builder.ts's parseExpression
+		// previously only mapped the "is ..." forms, so a legacy/Advanced alert
+		// using the bare "not empty" fell through to the raw-expression fallback
+		// (`it ${expression}`), producing the ungrammatical "if it not empty".
+		const withExpr = (expression: string) =>
+			describeAlert(
+				baseAlert({ condition: { type: 'deterministic', expression, data_sources: [] } }),
+			);
+		expect(withExpr('empty')).toMatch(/it's empty/);
+		expect(withExpr('not empty')).toMatch(/it has anything in it/);
+		expect(withExpr('empty')).not.toMatch(/it empty/);
+		expect(withExpr('not empty')).not.toMatch(/it not empty/);
+	});
+
 	it('falls back to the raw expression for a legacy/unmappable deterministic expression', () => {
 		const sentence = describeAlert(
 			baseAlert({

@@ -256,6 +256,70 @@ describe('GET /gui/reports/new (wizard entry)', () => {
 	});
 });
 
+describe('Step 2: plain-language time/weekday selects (C6 fix)', () => {
+	async function walkToStep2(cookies: Record<string, string>, csrfToken: string) {
+		const step1 = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: {
+				_csrf: csrfToken,
+				step: '1',
+				section_type_0: 'changes',
+				section_label_0: 'Recent changes',
+				section_lookback_0: '24',
+			},
+		});
+		return step1.body;
+	}
+
+	it('renders a time <select> with 12h labels instead of the "Hour (0-23)" numeric input', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const body = await walkToStep2(cookies, csrfToken);
+
+		expect(body).not.toContain('Hour (0-23)');
+		expect(body).toMatch(/<select[^>]*name="preset_hour"/);
+		expect(body).toContain('7:00 AM');
+		expect(body).toContain('12:00 PM');
+		expect(body).toContain('11:00 PM');
+	});
+
+	it('renders a weekday <select> (Sunday…Saturday) instead of the "Day of week (0=Sun..6=Sat" numeric input', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const body = await walkToStep2(cookies, csrfToken);
+
+		expect(body).not.toContain('Day of week (0=Sun');
+		expect(body).toMatch(/<select[^>]*name="preset_weekday"/);
+		expect(body).toContain('Sunday');
+		expect(body).toContain('Saturday');
+	});
+
+	it('time/weekday selects still submit the same numeric values the cron-mapping contract expects', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+		const s1 = extractHiddenFields(await walkToStep2(cookies, csrfToken));
+
+		const step2 = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: {
+				...s1,
+				_csrf: csrfToken,
+				schedule_preset: 'weekly',
+				preset_hour: '7',
+				preset_minute: '0',
+				preset_weekday: '2',
+			},
+		});
+		expect(step2.statusCode).toBe(200);
+		const s2 = extractHiddenFields(step2.body);
+		expect(s2.schedule).toBe('0 7 * * 2');
+	});
+});
+
 describe('Step-1 re-render hidden-field hygiene (Batch 3 review hardening)', () => {
 	it('never echoes section_type_i/section_label_i/per-section fields as hidden inputs alongside their visible counterparts', async () => {
 		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);

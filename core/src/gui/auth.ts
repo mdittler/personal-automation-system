@@ -165,7 +165,12 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		// form. `reason` is an enum of known values only — never rendered
 		// unescaped, and unknown values render nothing (see login.eta).
 		const query = request.query as Record<string, string | undefined>;
-		return reply.viewAsync('login', { title: 'Login — PAS', error: null, reason: query.reason });
+		return reply.viewAsync('login', {
+			title: 'Login — PAS',
+			error: null,
+			reason: query.reason,
+			isLoginPage: true,
+		});
 	});
 
 	// -------------------------------------------------------------------------
@@ -176,7 +181,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 		const body = request.body as Record<string, string | undefined> | undefined;
 
 		const renderError = (error: string, status = 401) =>
-			reply.status(status).viewAsync('login', { title: 'Login — PAS', error });
+			reply.status(status).viewAsync('login', { title: 'Login — PAS', error, isLoginPage: true });
 
 		// --- Legacy-only fallback (no credentialService/userManager) ---
 		if (!hasPerUserAuth) {
@@ -185,6 +190,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 				return reply.status(429).viewAsync('login', {
 					title: 'Login — PAS',
 					error: rateLimitMessage(loginRateLimiter),
+					isLoginPage: true,
 				});
 			}
 			const submitted = body?.token ?? '';
@@ -214,6 +220,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 				return reply.status(429).viewAsync('login', {
 					title: 'Login — PAS',
 					error: rateLimitMessage(loginRateLimiter),
+					isLoginPage: true,
 				});
 			}
 
@@ -261,6 +268,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 			return reply.status(429).viewAsync('login', {
 				title: 'Login — PAS',
 				error: rateLimitMessage(loginRateLimiter),
+				isLoginPage: true,
 			});
 		}
 
@@ -299,6 +307,7 @@ export async function registerAuth(server: FastifyInstance, options: AuthOptions
 			return reply.status(429).viewAsync('login', {
 				title: 'Login — PAS',
 				error: rateLimitMessage(loginRateLimiter, ' for this account'),
+				isLoginPage: true,
 			});
 		}
 

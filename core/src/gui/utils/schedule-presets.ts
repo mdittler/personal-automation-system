@@ -106,3 +106,31 @@ export function nextRunPreview(cron: string, tz: string): string {
 export function isKnownPresetId(id: string): boolean {
 	return PRESET_IDS.has(id);
 }
+
+/**
+ * 12h clock label for an on-the-hour time (e.g. hour=7 -> "7:00 AM",
+ * hour=13 -> "1:00 PM"). Used by the report/alert wizards' step-2 time
+ * `<select>` (C6 fix — replaces the programmer-speak "Hour (0-23)" numeric
+ * input with a plain-language dropdown; the submitted VALUE stays the same
+ * 0-23 integer the presetToCron contract already expects).
+ */
+export function hourLabel12h(hour: number): string {
+	const period = hour < 12 ? 'AM' : 'PM';
+	const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+	return `${displayHour}:00 ${period}`;
+}
+
+/** Full weekday name for a `preset_weekday` value (0=Sunday..6=Saturday). */
+const WEEKDAY_NAMES = [
+	'Sunday',
+	'Monday',
+	'Tuesday',
+	'Wednesday',
+	'Thursday',
+	'Friday',
+	'Saturday',
+];
+
+export function weekdayLabel(weekday: number): string {
+	return WEEKDAY_NAMES[weekday] ?? '';
+}

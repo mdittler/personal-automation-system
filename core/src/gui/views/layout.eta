@@ -31,8 +31,8 @@
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         PAS
       </a>
-      <a href="/gui/" class="pas-topbar-link <% if (it.activePage === 'dashboard') { %>active<% } %>" title="Dashboard">
-        Dashboard
+      <a href="/gui/" class="pas-topbar-link <% if (it.activePage === 'dashboard') { %>active<% } %>" title="Home">
+        Home
       </a>
       <span class="pas-spinner" id="pas-global-spinner" role="status" aria-label="Loading" aria-hidden="true"></span>
     </div>
@@ -41,16 +41,19 @@
         <span style="font-size:0.85rem;color:var(--pico-muted-color);margin-right:0.5rem"><%= it.currentUser.name %></span>
       <% } %>
       <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode" type="button">&#9790;</button>
+      <% if (!it.isLoginPage) { %>
       <form method="post" action="/gui/logout" style="margin:0">
         <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
         <button type="submit" class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;border-radius:999px;font-size:0.85rem">Logout</button>
       </form>
+      <% } %>
     </div>
   </header>
 
   <!-- App layout: sidebar + content -->
   <div class="pas-app-layout">
-    <!-- Left sidebar -->
+    <!-- Left sidebar (hidden for unauthenticated visitors on the login page) -->
+    <% if (!it.isLoginPage) { %>
     <aside class="pas-sidebar" id="pas-sidebar">
       <nav>
         <ul>
@@ -177,6 +180,7 @@
         </ul>
       </nav>
     </aside>
+    <% } %>
 
     <!-- Sidebar overlay (mobile) -->
     <div class="pas-sidebar-overlay" id="sidebar-overlay"></div>

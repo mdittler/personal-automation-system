@@ -316,6 +316,35 @@ describe('Activity feed (/gui/activity)', () => {
 		expect(res.body.toLowerCase()).toMatch(/updated|changed|wrote|saved/);
 	});
 
+	it('append operations read naturally, not as a dangling "was added to" (C4 fix)', async () => {
+		// Regression: VERB_BY_OPERATION mapped append -> 'added to', and the
+		// template renders "{file} was {verb}" — producing "log.md was added
+		// to", an awkward dangling preposition. Each operation's phrasing must
+		// read as a complete, natural sentence.
+		app = await buildApp(tempDir, {});
+		const now = new Date().toISOString();
+
+		await writeFile(
+			logPath,
+			jsonlLine({
+				timestamp: now,
+				operation: 'append',
+				path: 'data/users/member-a/food/log.md',
+				appId: 'food',
+				userId: MEMBER_A_ID,
+				householdId: HH_ID,
+			}),
+			'utf-8',
+		);
+
+		const cookies = await login(MEMBER_A_ID, 'member-a-pass');
+		const res = await app.inject({ method: 'GET', url: '/gui/activity', cookies });
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).not.toContain('log.md was added to');
+		expect(res.body).toMatch(/log\.md (was updated|had items added)/);
+	});
+
 	it('day header shows the UTC calendar day, not the previous day in server-local time', async () => {
 		// Regression: activity.eta parsed 'YYYY-MM-DD' with `new Date(day.date)`,
 		// which yields midnight UTC. Rendering that with

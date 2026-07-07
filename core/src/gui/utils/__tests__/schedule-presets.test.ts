@@ -7,7 +7,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import { getNextRun } from '../../../utils/cron-describe.js';
-import { PRESETS, cronToPresetId, nextRunPreview, presetToCron } from '../schedule-presets.js';
+import {
+	PRESETS,
+	cronToPresetId,
+	hourLabel12h,
+	nextRunPreview,
+	presetToCron,
+	weekdayLabel,
+} from '../schedule-presets.js';
 
 describe('schedule-presets', () => {
 	it('maps every preset to a valid cron accepted by getNextRun', () => {
@@ -55,5 +62,37 @@ describe('schedule-presets', () => {
 
 	it('PRESETS has exactly the four documented ids', () => {
 		expect(PRESETS.map((p) => p.id)).toEqual(['daily', 'weekly', 'hourly', 'weekdays']);
+	});
+});
+
+describe('hourLabel12h (C6 fix — plain-language time select)', () => {
+	it('renders midnight as 12:00 AM', () => {
+		expect(hourLabel12h(0)).toBe('12:00 AM');
+	});
+
+	it('renders morning hours in AM', () => {
+		expect(hourLabel12h(7)).toBe('7:00 AM');
+		expect(hourLabel12h(11)).toBe('11:00 AM');
+	});
+
+	it('renders noon as 12:00 PM', () => {
+		expect(hourLabel12h(12)).toBe('12:00 PM');
+	});
+
+	it('renders afternoon/evening hours in PM', () => {
+		expect(hourLabel12h(13)).toBe('1:00 PM');
+		expect(hourLabel12h(23)).toBe('11:00 PM');
+	});
+});
+
+describe('weekdayLabel (C6 fix — plain-language weekday select)', () => {
+	it('maps 0-6 to Sunday..Saturday', () => {
+		expect(weekdayLabel(0)).toBe('Sunday');
+		expect(weekdayLabel(1)).toBe('Monday');
+		expect(weekdayLabel(2)).toBe('Tuesday');
+		expect(weekdayLabel(3)).toBe('Wednesday');
+		expect(weekdayLabel(4)).toBe('Thursday');
+		expect(weekdayLabel(5)).toBe('Friday');
+		expect(weekdayLabel(6)).toBe('Saturday');
 	});
 });

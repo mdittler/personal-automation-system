@@ -32,11 +32,18 @@ const DEFAULT_DAYS = 7;
 const MIN_DAYS = 1;
 const MAX_DAYS = 30;
 
+/**
+ * Full "was/had ..." clause per operation — NOT a bare verb — so the
+ * template can render "{file} {verb}" as a complete, natural sentence.
+ * `append` previously mapped to the bare verb "added to", which combined
+ * with the template's fixed "{file} was {verb}" produced the dangling
+ * "log.md was added to" (C4 fix).
+ */
 const VERB_BY_OPERATION: Record<ChangeLogEntry['operation'], string> = {
-	write: 'updated',
-	append: 'added to',
-	archive: 'archived',
-	read: 'viewed',
+	write: 'was updated',
+	append: 'had items added',
+	archive: 'was archived',
+	read: 'was viewed',
 };
 
 interface HumanizedEntry {
@@ -50,7 +57,7 @@ function humanizeEntry(entry: ChangeLogEntry): HumanizedEntry {
 	return {
 		app: entry.appId,
 		file: basename(entry.path),
-		verb: VERB_BY_OPERATION[entry.operation] ?? 'changed',
+		verb: VERB_BY_OPERATION[entry.operation] ?? 'was changed',
 		timestamp: entry.timestamp,
 	};
 }

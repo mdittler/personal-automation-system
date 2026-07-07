@@ -17,6 +17,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 import { BackupService } from '../../services/backup/index.js';
+import { describeCron } from '../../utils/cron-describe.js';
 import { sendErrorFragment } from '../utils/error-fragment.js';
 
 export interface BackupsRoutesOptions {
@@ -88,6 +89,7 @@ export function registerBackupsRoutes(
 					activePage: 'backups',
 					enabled: false,
 					schedule: backupConfig.schedule,
+					scheduleDescription: describeCron(backupConfig.schedule),
 					path: backupConfig.path,
 					retentionCount: backupConfig.retentionCount,
 				});
@@ -101,6 +103,7 @@ export function registerBackupsRoutes(
 				activePage: 'backups',
 				enabled: true,
 				schedule: backupConfig.schedule,
+				scheduleDescription: describeCron(backupConfig.schedule),
 				path: backupConfig.path,
 				retentionCount: backupConfig.retentionCount,
 				archives,

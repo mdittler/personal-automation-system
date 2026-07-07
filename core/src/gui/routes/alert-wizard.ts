@@ -42,8 +42,10 @@ import { RULE_PATTERNS, buildExpression, parseExpression } from '../utils/rule-b
 import {
 	PRESETS,
 	cronToPresetId,
+	hourLabel12h,
 	nextRunPreview,
 	presetToCron,
+	weekdayLabel,
 } from '../utils/schedule-presets.js';
 import { slugifyForId, uniqueSlugForId } from '../utils/slugify-id.js';
 import { normalizeBody } from '../utils/wizard-body.js';
@@ -516,6 +518,17 @@ function renderStep2(values: Record<string, string>, csrfToken: string, error?: 
 	const minute = parsed?.minute ?? 0;
 	const weekday = parsed?.weekday ?? 1;
 
+	const hourOptions = Array.from(
+		{ length: 24 },
+		(_, h) =>
+			`<option value="${h}" ${h === hour ? 'selected' : ''}>${escapeHtml(hourLabel12h(h))}</option>`,
+	).join('');
+	const weekdayOptions = Array.from(
+		{ length: 7 },
+		(_, w) =>
+			`<option value="${w}" ${w === weekday ? 'selected' : ''}>${escapeHtml(weekdayLabel(w))}</option>`,
+	).join('');
+
 	return `<form hx-post="/gui/alerts/new/step" hx-target="#wizard-body" hx-swap="innerHTML" method="post" action="/gui/alerts/new/step">
 		<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}" />
 		<input type="hidden" name="step" value="2" />
@@ -532,9 +545,9 @@ function renderStep2(values: Record<string, string>, csrfToken: string, error?: 
 		</label>
 		<div>
 			${presetCards}
-			<label>Hour (0-23)<input type="number" name="preset_hour" value="${hour}" min="0" max="23" /></label>
-			<label>Minute<input type="number" name="preset_minute" value="${minute}" min="0" max="59" /></label>
-			<label>Day of week (0=Sun..6=Sat, weekly only)<input type="number" name="preset_weekday" value="${weekday}" min="0" max="6" /></label>
+			<label>Time<select name="preset_hour">${hourOptions}</select></label>
+			<input type="hidden" name="preset_minute" value="${minute}" />
+			<label>Day of the week (weekly only)<select name="preset_weekday">${weekdayOptions}</select></label>
 			<details>
 				<summary>Advanced: raw cron schedule</summary>
 				<label>Cron expression<input type="text" name="schedule_advanced" value="${escapeHtml(currentSchedule)}" placeholder="0 7 * * *" /></label>
