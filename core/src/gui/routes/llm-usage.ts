@@ -254,10 +254,29 @@ function buildPerHouseholdRows(
 		llmSafeguards?.defaultHouseholdMonthlyCostCap ??
 		DEFAULT_LLM_SAFEGUARDS.defaultHouseholdMonthlyCostCap;
 
-	// Parse log for call counts per household
+	// Parse log for call counts per household, scoped to the CURRENT month —
+	// parseUsageMarkdown's perHousehold.callCount is all-time, but this row's
+	// monthlyCost comes from costTracker.getMonthlyHouseholdCost (month-scoped),
+	// so the call count must match that same window rather than showing an
+	// all-time total next to a month-scoped cost. Filtering the raw markdown
+	// to this-month data rows (by leading timestamp cell) before aggregating
+	// keeps this in sync with parseUsageMarkdown's own column parsing instead
+	// of duplicating it.
 	const callCounts = new Map<string, number>();
 	if (usageContent.trim()) {
-		const { perHousehold } = parseUsageMarkdown(usageContent);
+		const thisMonth = new Date().toISOString().slice(0, 7);
+		const monthLines = usageContent
+			.trim()
+			.split('\n')
+			.filter((line) => {
+				if (!line.startsWith('|') || line.includes('---') || line.includes('Timestamp')) {
+					return true; // keep non-data lines — parseUsageMarkdown skips them itself
+				}
+				const firstCell = line.split('|')[1]?.trim() ?? '';
+				return firstCell.startsWith(thisMonth);
+			})
+			.join('\n');
+		const { perHousehold } = parseUsageMarkdown(monthLines);
 		for (const h of perHousehold) {
 			callCounts.set(h.householdId, h.callCount);
 		}

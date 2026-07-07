@@ -334,14 +334,18 @@ export function registerDashboardRoutes(server: FastifyInstance, options: Dashbo
 			const scopedEntries = isAdmin
 				? changes.entries
 				: changes.entries.filter((e) => e.userId === actor?.userId);
-			activity = scopedEntries
-				.slice(-5)
-				.reverse()
-				.map((e) => ({
-					app: e.appId,
-					file: e.path.split('/').pop() ?? e.path,
-					verb: e.operation === 'write' || e.operation === 'append' ? 'updated' : e.operation,
-				}));
+			// collectChanges preserves raw JSONL append order (not necessarily
+			// chronological) — sort by timestamp descending BEFORE taking the
+			// most recent 5 so the snippet always leads with the truly newest
+			// entry, regardless of file write order.
+			const sortedEntries = [...scopedEntries].sort((a, b) =>
+				a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0,
+			);
+			activity = sortedEntries.slice(0, 5).map((e) => ({
+				app: e.appId,
+				file: e.path.split('/').pop() ?? e.path,
+				verb: e.operation === 'write' || e.operation === 'append' ? 'updated' : e.operation,
+			}));
 		} catch (error) {
 			logger.warn(
 				{ error: error instanceof Error ? error.message : String(error) },

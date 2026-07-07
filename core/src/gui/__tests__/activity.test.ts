@@ -316,6 +316,35 @@ describe('Activity feed (/gui/activity)', () => {
 		expect(res.body.toLowerCase()).toMatch(/updated|changed|wrote|saved/);
 	});
 
+	it('day header shows the UTC calendar day, not the previous day in server-local time', async () => {
+		// Regression: activity.eta parsed 'YYYY-MM-DD' with `new Date(day.date)`,
+		// which yields midnight UTC. Rendering that with
+		// toLocaleDateString(undefined, ...) uses the SERVER'S local timezone,
+		// so a server west of UTC (or any TZ behind UTC at midnight) renders the
+		// PREVIOUS calendar day. An entry timestamped 2026-07-06T08:00:00Z must
+		// show a "July 6" header regardless of the server's local timezone.
+		app = await buildApp(tempDir, {});
+		await writeFile(
+			logPath,
+			jsonlLine({
+				timestamp: '2026-07-06T08:00:00Z',
+				operation: 'write',
+				path: 'data/users/member-a/food/pantry.md',
+				appId: 'food',
+				userId: MEMBER_A_ID,
+				householdId: HH_ID,
+			}),
+			'utf-8',
+		);
+
+		const cookies = await login(MEMBER_A_ID, 'member-a-pass');
+		const res = await app.inject({ method: 'GET', url: '/gui/activity', cookies });
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('July 6');
+		expect(res.body).not.toContain('July 5');
+	});
+
 	it('empty state is an invitation, not an apology', async () => {
 		app = await buildApp(tempDir, {});
 		const cookies = await login(MEMBER_A_ID, 'member-a-pass');

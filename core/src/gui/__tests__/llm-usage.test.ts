@@ -1277,6 +1277,60 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 		expect(res.body).toContain('25'); // pctOfCap = round(5/20 * 100) = 25
 	});
 
+	// A2 regression: buildPerHouseholdRows sourced callCount from
+	// parseUsageMarkdown(...).perHousehold with NO date filter, while the same
+	// row's monthlyCost comes from costTracker.getMonthlyHouseholdCost (which
+	// IS month-scoped). Seed rows across two months and assert the rendered
+	// "Calls (month)" count reflects only the current month's rows, not all
+	// time.
+	it('Calls (month) column is scoped to the current month, not all-time', async () => {
+		const hs = makeLlmHouseholdService([{ id: 'hh-1', name: 'Alpha' }], {
+			'hh-1': ['user1'],
+		});
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 1.0 };
+
+		const now = new Date();
+		const thisMonth = now.toISOString().slice(0, 7);
+		// A month safely in the past relative to "now" (works whether "now" is
+		// January or not) — two full months back avoids any month-length edge case.
+		const oldDate = new Date(now.getFullYear(), now.getMonth() - 2, 15);
+		const oldMonth = oldDate.toISOString().slice(0, 7);
+
+		const content = [
+			'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |',
+			'|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|',
+			// Two calls THIS month for hh-1
+			`| ${thisMonth}-05T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |`,
+			`| ${thisMonth}-06T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |`,
+			// Three calls from an OLD month for hh-1 — must NOT count toward "Calls (month)"
+			`| ${oldMonth}-01T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |`,
+			`| ${oldMonth}-02T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |`,
+			`| ${oldMonth}-03T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |`,
+		].join('\n');
+
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			usageContent: content,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 20,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.statusCode).toBe(200);
+		// Only the 2 this-month calls should be reflected in the per-household
+		// "Calls (month)" cell, not the all-time total of 5.
+		const start = res.body.indexOf('Per-Household Breakdown');
+		const end = res.body.indexOf('</table>', start);
+		const perHouseholdSection = res.body.slice(start, end);
+		expect(perHouseholdSection).toContain('<td>2</td>');
+		expect(perHouseholdSection).not.toContain('<td>5</td>');
+	});
+
 	// C2
 	it('household with zero calls renders row with cost=0, pct=0, overCap=false', async () => {
 		const hs = makeLlmHouseholdService([{ id: 'hh-zero', name: 'Zero Household' }], {

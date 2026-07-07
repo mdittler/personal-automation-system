@@ -398,6 +398,74 @@ describe('GET /gui/ (home)', () => {
 		await app.close();
 	});
 
+	it('recent-activity snippet shows the truly newest entry first, regardless of raw JSONL append order', async () => {
+		// Regression: collectChanges preserves raw JSONL order (append order in
+		// the file) — it does NOT sort by timestamp. dashboard.ts built the
+		// snippet via `entries.slice(-5).reverse()`, which only reflects
+		// newest-first if the file itself happens to be chronological. Write
+		// the truly newest entry FIRST in the file (as if it were appended out
+		// of order, or as if an older backfill entry landed after it) and
+		// confirm the snippet still leads with the newest by timestamp.
+		const changeLogPath = join(tempDir, 'system', 'change-log.jsonl');
+		const now = Date.now();
+		const entries = [
+			// Newest entry written FIRST in the file.
+			{
+				timestamp: new Date(now).toISOString(),
+				operation: 'write',
+				path: 'newest-file.md',
+				appId: 'food',
+				userId: ADMIN_ID,
+			},
+			// Four older entries written after it, descending in age — this
+			// mimics an out-of-chronological-order file where naive
+			// slice(-5).reverse() would surface a stale entry first.
+			{
+				timestamp: new Date(now - 1000).toISOString(),
+				operation: 'write',
+				path: 'older-1.md',
+				appId: 'food',
+				userId: ADMIN_ID,
+			},
+			{
+				timestamp: new Date(now - 2000).toISOString(),
+				operation: 'write',
+				path: 'older-2.md',
+				appId: 'food',
+				userId: ADMIN_ID,
+			},
+			{
+				timestamp: new Date(now - 3000).toISOString(),
+				operation: 'write',
+				path: 'older-3.md',
+				appId: 'food',
+				userId: ADMIN_ID,
+			},
+			{
+				timestamp: new Date(now - 4000).toISOString(),
+				operation: 'write',
+				path: 'older-4.md',
+				appId: 'food',
+				userId: ADMIN_ID,
+			},
+		];
+		await writeFile(changeLogPath, entries.map((e) => `${JSON.stringify(e)}\n`).join(''), 'utf-8');
+		const app = await buildApp(tempDir);
+		const cookies = await login(app, ADMIN_ID, 'admin-pass-123');
+
+		const res = await app.inject({ method: 'GET', url: '/gui/', cookies });
+
+		expect(res.statusCode).toBe(200);
+		const listStart = res.body.indexOf('Recent activity');
+		const listSection = res.body.slice(listStart, listStart + 2000);
+		const newestPos = listSection.indexOf('newest-file.md');
+		const older1Pos = listSection.indexOf('older-1.md');
+		expect(newestPos).toBeGreaterThan(-1);
+		expect(older1Pos).toBeGreaterThan(-1);
+		expect(newestPos).toBeLessThan(older1Pos);
+		await app.close();
+	});
+
 	it('shows a spend-vs-cap attention banner to an admin when monthly spend is at or above 80% of the household cap', async () => {
 		const costTracker: Pick<CostTracker, 'getMonthlyHouseholdCost'> = {
 			getMonthlyHouseholdCost: (householdId: string) => (householdId === 'hh-1' ? 85 : 0),

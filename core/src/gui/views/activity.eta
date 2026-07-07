@@ -11,7 +11,7 @@
 <% } else { %>
   <% for (const day of it.days) { %>
     <article style="margin-bottom:1rem">
-      <header><strong><%= new Date(day.date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) %></strong></header>
+      <header><strong><%= new Date(`${day.date}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }) %></strong></header>
       <ul style="margin:0.5rem 0 0">
         <% for (const entry of day.entries) { %>
           <li><%= entry.app %>: <%= entry.file %> was <%= entry.verb %></li>
