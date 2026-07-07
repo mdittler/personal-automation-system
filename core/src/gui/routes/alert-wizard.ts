@@ -31,6 +31,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import type { AlertService } from '../../services/alerts/index.js';
 import type { FileIndexEntry, FileIndexService } from '../../services/file-index/index.js';
+import type { ReportService } from '../../services/reports/index.js';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { AlertAction, AlertDefinition } from '../../types/alert.js';
@@ -52,6 +53,9 @@ export interface AlertWizardRoutesOptions {
 	// Only `listSpaces` is used — the wizard is admin-only, so every space is
 	// shown (no per-user membership filter like the member-facing routes).
 	spaceService?: Pick<SpaceService, 'listSpaces'>;
+	// Only `listReports` is used — powers the run_report action's report
+	// picker (select of existing reports instead of a raw ID text input).
+	reportService?: Pick<ReportService, 'listReports'>;
 	dataDir: string;
 	timezone: string;
 	logger: Logger;
@@ -101,6 +105,162 @@ function countDataSources(values: Record<string, string>): number {
 		if (values[`ds_app_id_${i}`]) count++;
 	}
 	return count;
+}
+
+/**
+ * The six action types the `parseFormToAlert` contract (alerts.ts) supports,
+ * in picker display order. The wizard's step 4 renders exactly one action
+ * (single-action scope — see module doc); the legacy Advanced editor
+ * (alert-edit.eta) remains the path for multi-action alerts.
+ */
+const ACTION_TYPES = [
+	'telegram_message',
+	'run_report',
+	'webhook',
+	'write_data',
+	'audio',
+	'dispatch_message',
+] as const;
+
+/** Every per-type action config field name for index `i`, across all six action types. */
+function actionFieldNames(i: number): string[] {
+	return [
+		`action_message_${i}`,
+		`action_llm_summary_${i}`,
+		`action_report_id_${i}`,
+		`action_webhook_url_${i}`,
+		`action_webhook_include_data_${i}`,
+		`action_wd_app_id_${i}`,
+		`action_wd_user_id_${i}`,
+		`action_wd_path_${i}`,
+		`action_wd_content_${i}`,
+		`action_wd_mode_${i}`,
+		`action_audio_message_${i}`,
+		`action_audio_device_${i}`,
+		`action_dispatch_text_${i}`,
+		`action_dispatch_user_id_${i}`,
+	];
+}
+
+/** Field names step 4's action picker + config fields render as VISIBLE inputs, for every action index. */
+function step4ActionFieldNames(): Set<string> {
+	const names = new Set<string>();
+	for (let i = 0; i < MAX_WIZARD_ITEMS; i++) {
+		names.add(`action_type_${i}`);
+		for (const name of actionFieldNames(i)) names.add(name);
+	}
+	return names;
+}
+
+/**
+ * Render the per-type config fields for a single action, given its type and
+ * the wizard's accumulated `values` (used for echoing back prior input on a
+ * validation-error re-render, and for edit-wizard prefill). `index` is the
+ * action's position (always 0 for the single-action wizard scope; multi-
+ * action passthrough carries indices 0..N-1 through as opaque hidden fields
+ * instead of calling this renderer).
+ */
+function renderActionConfigFields(
+	type: string,
+	index: number,
+	values: Record<string, string>,
+	reports: Array<{ id: string; name: string }>,
+): string {
+	const v = (name: string) => escapeHtml(values[`${name}_${index}`] || '');
+
+	if (type === 'run_report') {
+		if (reports.length > 0) {
+			const options = reports
+				.map(
+					(r) =>
+						`<option value="${escapeHtml(r.id)}" ${values[`action_report_id_${index}`] === r.id ? 'selected' : ''}>${escapeHtml(r.name)}</option>`,
+				)
+				.join('');
+			return `<label>Report
+				<select name="action_report_id_${index}"><option value="">-- Select report --</option>${options}</select>
+			</label>`;
+		}
+		return `<label>Report ID<input type="text" name="action_report_id_${index}" value="${v('action_report_id')}" placeholder="weekly-digest" /></label>`;
+	}
+
+	if (type === 'webhook') {
+		const includeChecked =
+			values[`action_webhook_include_data_${index}`] === 'true' ? 'checked' : '';
+		return `<label>Webhook URL<input type="url" name="action_webhook_url_${index}" value="${v('action_webhook_url')}" placeholder="https://n8n.example.com/webhook/..." /></label>
+			<label style="display:flex;align-items:center;gap:0.5rem;min-height:44px">
+				<input type="checkbox" name="action_webhook_include_data_${index}" value="true" ${includeChecked} />
+				Include the trigger data in the webhook payload
+			</label>`;
+	}
+
+	if (type === 'write_data') {
+		// Contract note: WriteDataActionConfig.mode is 'write' | 'append'
+		// (alert-validator.ts rejects anything else) — alert-edit.eta's legacy
+		// select uses the same two values, labeled "Replace file contents" /
+		// "Add to end of file".
+		const mode = values[`action_wd_mode_${index}`] || 'append';
+		return `<label>Save to app (ID)<input type="text" name="action_wd_app_id_${index}" value="${v('action_wd_app_id')}" placeholder="food" /></label>
+			<label>For user (ID)<input type="text" name="action_wd_user_id_${index}" value="${v('action_wd_user_id')}" /></label>
+			<label>File path<input type="text" name="action_wd_path_${index}" value="${v('action_wd_path')}" placeholder="alert-log/{date}.md" /></label>
+			<label>What to write<textarea name="action_wd_content_${index}" rows="2" placeholder="Alert: {alert_name} fired on {date}">${v('action_wd_content')}</textarea></label>
+			<label>Write mode
+				<select name="action_wd_mode_${index}">
+					<option value="append" ${mode === 'append' ? 'selected' : ''}>Add to end of file</option>
+					<option value="write" ${mode === 'write' ? 'selected' : ''}>Replace file contents</option>
+				</select>
+			</label>`;
+	}
+
+	if (type === 'audio') {
+		return `<label>What to say<input type="text" name="action_audio_message_${index}" value="${v('action_audio_message')}" placeholder="Attention! {alert_name} has been triggered." /></label>
+			<label>Speaker (optional)<input type="text" name="action_audio_device_${index}" value="${v('action_audio_device')}" placeholder="Leave blank for default speaker" /></label>`;
+	}
+
+	if (type === 'dispatch_message') {
+		return `<label>Message to send<input type="text" name="action_dispatch_text_${index}" value="${v('action_dispatch_text')}" placeholder="/note Alert: {alert_name} fired" /></label>
+			<label>Send as user (ID)<input type="text" name="action_dispatch_user_id_${index}" value="${v('action_dispatch_user_id')}" /></label>`;
+	}
+
+	// Default / telegram_message.
+	const summaryChecked = values[`action_llm_summary_${index}`] === 'true' ? 'checked' : '';
+	return `<label>Message
+			<textarea name="action_message_${index}" rows="2" id="action-message-${index}">${v('action_message')}</textarea>
+		</label>
+		<div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+			<button type="button" class="outline" onclick="(function(){var t=document.getElementById('action-message-${index}');t.value+='{data}';})()">Insert {data}</button>
+			<button type="button" class="outline" onclick="(function(){var t=document.getElementById('action-message-${index}');t.value+='{summary}';})()">Insert {summary}</button>
+			<button type="button" class="outline" onclick="(function(){var t=document.getElementById('action-message-${index}');t.value+='{alert_name}';})()">Insert {alert_name}</button>
+			<button type="button" class="outline" onclick="(function(){var t=document.getElementById('action-message-${index}');t.value+='{date}';})()">Insert {date}</button>
+		</div>
+		<label style="display:flex;align-items:center;gap:0.5rem;min-height:44px">
+			<input type="checkbox" name="action_llm_summary_${index}" value="true" ${summaryChecked} />
+			Add an AI summary of what was found
+		</label>`;
+}
+
+/** Render the action-type picker (radio cards, one selectable action) + the selected type's config fields. */
+function renderActionPicker(
+	values: Record<string, string>,
+	reports: Array<{ id: string; name: string }>,
+): string {
+	const selectedType = values.action_type_0 || 'telegram_message';
+	const cards = ACTION_TYPES.map((type) => {
+		const checked = selectedType === type ? 'checked' : '';
+		return `<label style="display:flex;align-items:center;gap:0.5rem;min-height:44px">
+			<input type="radio" name="action_type_0" value="${type}" ${checked}
+				hx-post="/gui/alerts/new/step" hx-target="#wizard-body" hx-swap="innerHTML"
+				hx-include="closest form" hx-vals='{"action_type_changed":"1"}' hx-trigger="change" />
+			${escapeHtml(humanizeLabel(type))}
+		</label>`;
+	}).join('\n');
+
+	return `<div class="pas-action-picker">
+		${cards}
+		<p><small>Need several actions? Use the Advanced editor.</small></p>
+	</div>
+	<div class="pas-action-fields">
+		${renderActionConfigFields(selectedType, 0, values, reports)}
+	</div>`;
 }
 
 interface FriendlyDataSource {
@@ -168,7 +328,15 @@ function organizeDataSources(
 			own.push(friendly);
 		} else if (entry.scope === 'shared') {
 			shared.push(friendly);
-		} else if (entry.scope === 'space' && entry.owner) {
+		} else if ((entry.scope === 'space' || entry.scope === 'collaboration') && entry.owner) {
+			// Collaboration-scope entries (`collaborations/<sId>/<appId>/...`) use
+			// the same id space as `SpaceService.listSpaces()` ids (entry-parser.ts
+			// sets `owner` to the collaboration space id), and `AlertDataSource`
+			// only has a single `space_id` field with no kind discriminant — the
+			// alert condition/action resolution path (AlertService, DataQuery)
+			// already branches on `SpaceDefinition.kind` internally when reading
+			// `space_id`. So collaboration spaces are grouped under their space
+			// section exactly like household-kind spaces, rather than dropped.
 			const list = bySpace.get(entry.owner) ?? [];
 			list.push(friendly);
 			bySpace.set(entry.owner, list);
@@ -223,8 +391,11 @@ function renderStep1(
 			usedIndices.set(key, index);
 		}
 		const checked = previouslySelected.has(key) ? 'checked' : '';
+		// Collaboration-scope sources are submitted with ds_scope=space (same as
+		// household-kind spaces) — parseFormToAlert's AlertDataSource contract
+		// only distinguishes space_id vs user_id, with no kind discriminant.
 		const scopeField =
-			source.scope === 'space'
+			source.scope === 'space' || source.scope === 'collaboration'
 				? `<input type="hidden" name="ds_scope_${index}" value="space" />` +
 					`<input type="hidden" name="ds_space_id_${index}" value="${escapeHtml(source.owner ?? '')}" />`
 				: source.scope === 'user'
@@ -400,9 +571,31 @@ function renderStep3(values: Record<string, string>, csrfToken: string, error?: 
 	</form>`;
 }
 
+/**
+ * Whether `values` carries more than one action (from an edit-prefill of an
+ * alert with multiple actions). The wizard's step 4 can only represent a
+ * single action — see module doc and the "Lossless edit prefill" tests —
+ * so when `action_type_1` is present the action picker is suppressed in
+ * favor of a passthrough notice, and every action_*_N field is carried
+ * through to Review unchanged via `hiddenFields`.
+ */
+function isMultiAction(values: Record<string, string>): boolean {
+	return Boolean(values.action_type_1);
+}
+
+/** Count how many `action_type_{i}` fields are present in the submitted values. */
+function countActions(values: Record<string, string>): number {
+	let count = 0;
+	for (let i = 0; i < MAX_WIZARD_ITEMS; i++) {
+		if (values[`action_type_${i}`]) count++;
+	}
+	return count;
+}
+
 function renderStep4(
 	values: Record<string, string>,
 	users: Array<{ id: string; name: string }>,
+	reports: Array<{ id: string; name: string }>,
 	csrfToken: string,
 	error?: string,
 ): string {
@@ -420,10 +613,39 @@ function renderStep4(
 	const cooldownN = values.cooldown_n || '4';
 	const cooldownUnit = values.cooldown_unit || 'hours';
 
+	const multiAction = isMultiAction(values);
+	const actionSection = multiAction
+		? `<div class="pas-error-card" role="status">
+				<strong>This alert has ${countActions(values)} actions.</strong>
+				<p>The guided wizard can only edit a single action. Use the Advanced editor to change these — they'll be saved unchanged if you continue here.</p>
+			</div>`
+		: renderActionPicker(values, reports);
+
+	// step4ActionFieldNames() covers step 4's own VISIBLE action inputs so a
+	// validation-error re-render never emits a <input type="hidden"> with the
+	// same name as a visible one (the Batch 3 hardening pattern). In
+	// multi-action passthrough mode there is no visible action input at all —
+	// every action_*_N field must survive as a hidden field instead, so it is
+	// deliberately NOT excluded in that branch.
+	const exclude = new Set([
+		'step',
+		'_csrf',
+		'delivery',
+		'name',
+		'id',
+		'description',
+		'cooldown_n',
+		'cooldown_unit',
+		'action_type_changed',
+	]);
+	if (!multiAction) {
+		for (const name of step4ActionFieldNames()) exclude.add(name);
+	}
+
 	return `<form hx-post="/gui/alerts/new/step" hx-target="#wizard-body" hx-swap="innerHTML" method="post" action="/gui/alerts/new/step">
 		<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}" />
 		<input type="hidden" name="step" value="4" />
-		${hiddenFields(values, new Set(['step', '_csrf', 'delivery', 'name', 'id', 'description', 'action_type_0', 'action_message_0', 'cooldown_n', 'cooldown_unit']))}
+		${hiddenFields(values, exclude)}
 		<h2>What should happen?</h2>
 		${error ? errorCard(error) : ''}
 		<label>Alert name<input type="text" name="name" value="${escapeHtml(values.name || '')}" required /></label>
@@ -432,16 +654,7 @@ function renderStep4(
 		<h3>Send to</h3>
 		${userChecks}
 		<h3>Action</h3>
-		<input type="hidden" name="action_type_0" value="telegram_message" />
-		<label>Message
-			<textarea name="action_message_0" rows="2" id="action-message-0">${escapeHtml(values.action_message_0 || '')}</textarea>
-		</label>
-		<div style="display:flex;gap:0.5rem;flex-wrap:wrap">
-			<button type="button" class="outline" onclick="(function(){var t=document.getElementById('action-message-0');t.value+='{data}';})()">Insert {data}</button>
-			<button type="button" class="outline" onclick="(function(){var t=document.getElementById('action-message-0');t.value+='{summary}';})()">Insert {summary}</button>
-			<button type="button" class="outline" onclick="(function(){var t=document.getElementById('action-message-0');t.value+='{alert_name}';})()">Insert {alert_name}</button>
-			<button type="button" class="outline" onclick="(function(){var t=document.getElementById('action-message-0');t.value+='{date}';})()">Insert {date}</button>
-		</div>
+		${actionSection}
 		<h3>Don't repeat this alert too often</h3>
 		<label>Wait at least
 			<input type="number" name="cooldown_n" value="${escapeHtml(cooldownN)}" min="0" style="width:6rem;display:inline-block" />
@@ -540,7 +753,7 @@ export function registerAlertWizardRoutes(
 	server: FastifyInstance,
 	options: AlertWizardRoutesOptions,
 ): void {
-	const { userManager, fileIndex, spaceService, timezone } = options;
+	const { userManager, fileIndex, spaceService, reportService, timezone } = options;
 
 	function getUsers() {
 		return userManager.getAllUsers().map((u) => ({ id: u.id, name: u.name }));
@@ -553,6 +766,12 @@ export function registerAlertWizardRoutes(
 	function getDataSources() {
 		const entries = fileIndex?.getEntries() ?? [];
 		return organizeDataSources(entries, getSpaces());
+	}
+
+	async function getReports(): Promise<Array<{ id: string; name: string }>> {
+		if (!reportService) return [];
+		const reports = await reportService.listReports();
+		return reports.map((r) => ({ id: r.id, name: r.name }));
 	}
 
 	function getCsrfToken(request: FastifyRequest): string {
@@ -624,10 +843,39 @@ export function registerAlertWizardRoutes(
 					values.condition_advanced = values.condition_expression;
 				}
 			}
+			// Critical 2 fix: copy action_type_i AND every per-type config field for
+			// EVERY action (not just telegram_message on index 0) — previously
+			// only telegram_message's `message` was copied, so editing an alert
+			// whose first action was webhook/write_data/run_report/audio/
+			// dispatch_message silently converted it to an empty telegram action
+			// on save. When there is more than one action, the wizard cannot
+			// represent them (single-action scope) — all actions are still
+			// copied here so they survive as an opaque lossless passthrough
+			// (renderStep4 detects `action_type_1` and suppresses the picker).
 			(alert.actions ?? []).forEach((action, i) => {
 				values[`action_type_${i}`] = action.type;
+				const config = action.config as unknown as Record<string, unknown>;
 				if (action.type === 'telegram_message') {
-					values[`action_message_${i}`] = (action.config as { message?: string }).message ?? '';
+					values[`action_message_${i}`] = String(config.message ?? '');
+					const llmSummary = config.llm_summary as { enabled?: boolean } | undefined;
+					if (llmSummary?.enabled) values[`action_llm_summary_${i}`] = 'true';
+				} else if (action.type === 'run_report') {
+					values[`action_report_id_${i}`] = String(config.report_id ?? '');
+				} else if (action.type === 'webhook') {
+					values[`action_webhook_url_${i}`] = String(config.url ?? '');
+					if (config.include_data) values[`action_webhook_include_data_${i}`] = 'true';
+				} else if (action.type === 'write_data') {
+					values[`action_wd_app_id_${i}`] = String(config.app_id ?? '');
+					values[`action_wd_user_id_${i}`] = String(config.user_id ?? '');
+					values[`action_wd_path_${i}`] = String(config.path ?? '');
+					values[`action_wd_content_${i}`] = String(config.content ?? '');
+					values[`action_wd_mode_${i}`] = String(config.mode ?? 'append');
+				} else if (action.type === 'audio') {
+					values[`action_audio_message_${i}`] = String(config.message ?? '');
+					if (config.device) values[`action_audio_device_${i}`] = String(config.device);
+				} else if (action.type === 'dispatch_message') {
+					values[`action_dispatch_text_${i}`] = String(config.text ?? '');
+					values[`action_dispatch_user_id_${i}`] = String(config.user_id ?? '');
 				}
 			});
 
@@ -775,10 +1023,22 @@ export function registerAlertWizardRoutes(
 					condition_type: conditionType,
 					condition_expression: expression,
 				};
-				return reply.type('text/html').send(renderStep4(next, getUsers(), csrfToken));
+				return reply
+					.type('text/html')
+					.send(renderStep4(next, getUsers(), await getReports(), csrfToken));
 			}
 
 			if (step === 4) {
+				// Changing the action-type radio re-POSTs step 4 to re-render with
+				// that type's config fields — no validation, just a re-render (the
+				// htmx hx-vals marker on the radio; see renderActionPicker).
+				if (body.action_type_changed) {
+					const { action_type_changed, ...rest } = body;
+					return reply
+						.type('text/html')
+						.send(renderStep4(rest, getUsers(), await getReports(), csrfToken));
+				}
+
 				const deliveryUsers = ([] as string[]).concat(
 					(body as unknown as { delivery_user?: string | string[] }).delivery_user ?? [],
 				);
@@ -791,6 +1051,7 @@ export function registerAlertWizardRoutes(
 							renderStep4(
 								{ ...body, delivery: delivery.join(', ') },
 								getUsers(),
+								await getReports(),
 								csrfToken,
 								'Give this alert a name and an ID.',
 							),
@@ -804,6 +1065,7 @@ export function registerAlertWizardRoutes(
 							renderStep4(
 								{ ...body, delivery: delivery.join(', ') },
 								getUsers(),
+								await getReports(),
 								csrfToken,
 								'Choose at least one person to send it to.',
 							),
@@ -819,6 +1081,7 @@ export function registerAlertWizardRoutes(
 							renderStep4(
 								{ ...body, delivery: delivery.join(', ') },
 								getUsers(),
+								await getReports(),
 								csrfToken,
 								'Enter how long to wait before repeating this alert.',
 							),

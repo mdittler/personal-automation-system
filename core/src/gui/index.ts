@@ -355,6 +355,7 @@ export async function registerGuiRoutes(
 					userManager,
 					fileIndex: options.fileIndex,
 					spaceService,
+					reportService,
 					dataDir,
 					timezone: config.timezone,
 					logger,
