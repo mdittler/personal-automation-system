@@ -403,7 +403,10 @@ describe('nav regroup', () => {
 			'Household',
 			'Shared spaces',
 			'Files',
+			'Conversations',
+			'Activity',
 			'AI usage',
+			'Backups',
 		]) {
 			expect(res.body).toContain(label);
 		}
@@ -425,5 +428,9 @@ describe('nav regroup', () => {
 		// Batch 5, Task 5.2: Household nav item is now visible to members too —
 		// the route opened a read-only, own-household-scoped view for non-admins.
 		expect(res.body).toContain('>Household<');
+		// Batch 6: Conversations + Activity are "Your data" items, visible to
+		// every authenticated user (own-scoped), unlike the admin-only System items.
+		expect(res.body).toContain('>Conversations<');
+		expect(res.body).toContain('>Activity<');
 	});
 });

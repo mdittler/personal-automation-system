@@ -54,6 +54,7 @@ import { registerRegressionRoutes } from './routes/regression.js';
 import { registerReportWizardRoutes } from './routes/report-wizard.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerSchedulerRoutes } from './routes/scheduler.js';
+import { registerSessionsRoutes } from './routes/sessions.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerSpaceRoutes } from './routes/spaces.js';
 import { registerUserRoutes } from './routes/users.js';
@@ -113,11 +114,15 @@ export interface GuiOptions {
 	loginByNameAllowed?: boolean;
 	/**
 	 * Batch 2 (GUI UX redesign): chat transcript FTS index, used by the
-	 * permission-scoped activity-daily metrics endpoint (message counts) and,
-	 * in a later batch, the Conversations browser. Optional — when absent,
-	 * activity-daily's message counts are always 0 rather than erroring.
+	 * permission-scoped activity-daily metrics endpoint (message counts) and
+	 * (Batch 6, Task 6.1) the read-only Conversations browser. Optional —
+	 * when absent, activity-daily's message counts are always 0 and the
+	 * Conversations routes are not registered at all.
 	 */
-	chatTranscriptIndex?: Pick<ChatTranscriptIndex, 'countMessagesByDay'>;
+	chatTranscriptIndex?: Pick<
+		ChatTranscriptIndex,
+		'countMessagesByDay' | 'listSessionsForUser' | 'listMessagesForSession' | 'searchSessions'
+	>;
 	/**
 	 * Batch 4 (GUI UX redesign): file-metadata index, used by the alert
 	 * wizard's step-1 data-source picker (Task 4.3). Optional — when absent,
@@ -211,6 +216,16 @@ export async function registerGuiRoutes(
 				alertService,
 				logger,
 			});
+			// Batch 6, Task 6.1: read-only Conversations browser. Registered only
+			// when the transcript index is present — own-sessions-only for EVERY
+			// authenticated user, including platform admins (deliberate privacy
+			// decision; see docs/open-items.md).
+			if (options.chatTranscriptIndex) {
+				registerSessionsRoutes(gui, {
+					chatTranscriptIndex: options.chatTranscriptIndex,
+					logger,
+				});
+			}
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir, logger });
 			registerSchedulerRoutes(gui, { scheduler, timezone: config.timezone, logger });
 			registerLogsRoutes(gui, { dataDir, logger });

@@ -96,6 +96,18 @@
               <span class="nav-label">Files</span>
             </a>
           </li>
+          <li>
+            <a href="/gui/sessions" title="Conversations" <% if (it.activePage === 'sessions') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <span class="nav-label">Conversations</span>
+            </a>
+          </li>
+          <li>
+            <a href="/gui/activity" title="Activity" <% if (it.activePage === 'activity') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              <span class="nav-label">Activity</span>
+            </a>
+          </li>
 
           <% if (it.isPlatformAdmin) { %>
           <li class="nav-section-label">System</li>
@@ -133,6 +145,12 @@
             <a href="/gui/context" title="Context" <% if (it.activePage === 'context') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
               <span class="nav-label">Context</span>
+            </a>
+          </li>
+          <li>
+            <a href="/gui/backups" title="Backups" <% if (it.activePage === 'backups') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+              <span class="nav-label">Backups</span>
             </a>
           </li>
           <% } %>
