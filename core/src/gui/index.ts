@@ -182,10 +182,15 @@ export async function registerGuiRoutes(
 				logger,
 				alertService,
 				reportService,
+				chatTranscriptIndex: options.chatTranscriptIndex,
+				householdService: options.householdService,
+				costTracker,
+				llmSafeguards,
 			});
 			registerMetricsRoutes(gui, {
 				dataDir,
 				chatTranscriptIndex: options.chatTranscriptIndex,
+				alertService,
 				logger,
 			});
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir, logger });

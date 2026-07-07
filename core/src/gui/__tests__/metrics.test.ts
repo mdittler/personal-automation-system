@@ -21,6 +21,7 @@ import { Eta } from 'eta';
 import Fastify from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { AlertService } from '../../services/alerts/index.js';
 import type { ChatTranscriptIndex } from '../../services/chat-transcript-index/index.js';
 import { CredentialService } from '../../services/credentials/index.js';
 import type { HouseholdService } from '../../services/household/index.js';
@@ -96,7 +97,10 @@ function makeHouseholdService(): Pick<HouseholdService, 'getHouseholdForUser' | 
 	};
 }
 
-async function buildApp(tempDir: string) {
+async function buildApp(
+	tempDir: string,
+	opts: { alertService?: Pick<AlertService, 'listAlerts'> } = {},
+) {
 	const credService = new CredentialService({ dataDir: tempDir });
 	await credService.setPassword(ADMIN_ID, 'admin-pass-123');
 	await credService.setPassword(MEMBER_A_ID, 'member-a-pass');
@@ -140,6 +144,7 @@ async function buildApp(tempDir: string) {
 			registerMetricsRoutes(gui, {
 				dataDir: tempDir,
 				chatTranscriptIndex: transcriptIndex as ChatTranscriptIndex,
+				alertService: opts.alertService as AlertService | undefined,
 				logger,
 			});
 		},
@@ -288,10 +293,20 @@ describe('GET /gui/api/metrics/activity-daily', () => {
 	let tempDir: string;
 	let app: Awaited<ReturnType<typeof buildApp>>;
 
+	// Two alerts with different delivery targets — member A should only see
+	// firings for the alert delivered to them, never member B's alert.
+	const alertService: Pick<AlertService, 'listAlerts'> = {
+		listAlerts: async () =>
+			[
+				{ id: 'alert-a', name: 'Alert A', enabled: true, delivery: [MEMBER_A_ID] },
+				{ id: 'alert-b', name: 'Alert B', enabled: true, delivery: [MEMBER_B_ID] },
+			] as unknown as Awaited<ReturnType<AlertService['listAlerts']>>,
+	};
+
 	beforeEach(async () => {
 		tempDir = await mkdtemp(join(tmpdir(), 'pas-metrics-activity-'));
 		await mkdir(join(tempDir, 'system'), { recursive: true });
-		app = await buildApp(tempDir);
+		app = await buildApp(tempDir, { alertService });
 	});
 
 	afterEach(async () => {
@@ -326,7 +341,53 @@ describe('GET /gui/api/metrics/activity-daily', () => {
 		expect(day.alertFirings).toBe(1);
 	});
 
-	it('returns an aggregated admin view', async () => {
+	it("does not count another member's alert firings", async () => {
+		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-a'), { recursive: true });
+		await writeFile(
+			join(tempDir, 'system', 'alert-history', 'alert-a', '2026-07-01_09-00-00-000.md'),
+			'fired\n',
+			'utf-8',
+		);
+		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-b'), { recursive: true });
+		await writeFile(
+			join(tempDir, 'system', 'alert-history', 'alert-b', '2026-07-01_09-05-00-000.md'),
+			'fired\n',
+			'utf-8',
+		);
+		await writeFile(
+			join(tempDir, 'system', 'alert-history', 'alert-b', '2026-07-01_09-06-00-000.md'),
+			'fired\n',
+			'utf-8',
+		);
+
+		const cookies = await login(app, MEMBER_A_ID, 'member-a-pass');
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/api/metrics/activity-daily',
+			cookies,
+		});
+
+		expect(res.statusCode).toBe(200);
+		const body = res.json();
+		const day = body.days.find((d: { date: string }) => d.date === '2026-07-01');
+		// Member A only sees alert-a's single firing, never alert-b's two firings.
+		expect(day.alertFirings).toBe(1);
+	});
+
+	it('returns an aggregated admin view including all alerts', async () => {
+		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-a'), { recursive: true });
+		await writeFile(
+			join(tempDir, 'system', 'alert-history', 'alert-a', '2026-07-01_09-00-00-000.md'),
+			'fired\n',
+			'utf-8',
+		);
+		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-b'), { recursive: true });
+		await writeFile(
+			join(tempDir, 'system', 'alert-history', 'alert-b', '2026-07-01_09-05-00-000.md'),
+			'fired\n',
+			'utf-8',
+		);
+
 		const cookies = await login(app, ADMIN_ID, 'admin-pass-123');
 		const res = await app.inject({
 			method: 'GET',
@@ -338,6 +399,7 @@ describe('GET /gui/api/metrics/activity-daily', () => {
 		const body = res.json();
 		const day = body.days.find((d: { date: string }) => d.date === '2026-07-01');
 		expect(day?.messages).toBe(5); // stubbed admin (all-users) path
+		expect(day?.alertFirings).toBe(2); // both alert-a and alert-b counted for admin
 	});
 
 	it('handles no activity with an empty series, not an error', async () => {

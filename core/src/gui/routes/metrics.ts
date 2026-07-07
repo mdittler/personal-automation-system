@@ -14,6 +14,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
+import type { AlertService } from '../../services/alerts/index.js';
 import type { ChatTranscriptIndex } from '../../services/chat-transcript-index/index.js';
 import { countAlertFiringsByDay } from '../utils/alert-history-stats.js';
 import { parseUsageMarkdown } from './llm-usage.js';
@@ -22,6 +23,13 @@ export interface MetricsRoutesOptions {
 	dataDir: string;
 	/** Optional — when absent, activity-daily's message counts are always 0. */
 	chatTranscriptIndex?: Pick<ChatTranscriptIndex, 'countMessagesByDay'>;
+	/**
+	 * Optional — used to scope alert-firing counts to the requesting member's
+	 * own alerts (those whose `delivery` includes their userId). Admins are
+	 * unaffected. When absent, non-admins get 0 alert firings rather than the
+	 * system-wide count.
+	 */
+	alertService?: Pick<AlertService, 'listAlerts'>;
 	logger: Logger;
 }
 
@@ -69,7 +77,7 @@ export function registerMetricsRoutes(
 	server: FastifyInstance,
 	options: MetricsRoutesOptions,
 ): void {
-	const { dataDir, chatTranscriptIndex, logger } = options;
+	const { dataDir, chatTranscriptIndex, alertService, logger } = options;
 
 	server.get(
 		'/api/metrics/llm-daily',
@@ -167,7 +175,17 @@ export function registerMetricsRoutes(
 
 			let alertCounts: Array<{ date: string; count: number }> = [];
 			try {
-				alertCounts = await countAlertFiringsByDay(dataDir, { sinceIso });
+				let alertIds: string[] | undefined;
+				if (!isAdmin) {
+					// Members only see firings for alerts delivered to them — resolve
+					// their alert ids first and restrict the history scan to those
+					// alert-history directories. Missing alertService => no ids => 0.
+					const alerts = alertService ? await alertService.listAlerts() : [];
+					alertIds = alerts
+						.filter((a) => a.delivery.includes(actor?.userId ?? ''))
+						.map((a) => a.id);
+				}
+				alertCounts = await countAlertFiringsByDay(dataDir, { sinceIso, alertIds });
 			} catch (error) {
 				logger.warn(
 					{ error: error instanceof Error ? error.message : String(error) },

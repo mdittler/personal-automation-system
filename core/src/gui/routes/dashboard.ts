@@ -20,10 +20,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { chartsForPage } from '../../gui/charts/registry.js';
 import type { AppRegistry } from '../../services/app-registry/index.js';
+import type { ChatTranscriptIndex } from '../../services/chat-transcript-index/index.js';
+import { DEFAULT_LLM_SAFEGUARDS } from '../../services/config/defaults.js';
 import { collectChanges } from '../../services/daily-diff/collector.js';
+import type { HouseholdService } from '../../services/household/index.js';
+import type { CostTracker } from '../../services/llm/cost-tracker.js';
 import type { ModelSelector } from '../../services/llm/model-selector.js';
 import type { SchedulerServiceImpl } from '../../services/scheduler/index.js';
-import type { SystemConfig } from '../../types/config.js';
+import type { LLMSafeguardsConfig, SystemConfig } from '../../types/config.js';
 import { formatRelativeTime, getNextRun } from '../../utils/cron-describe.js';
 import { parseUsageMarkdown } from './llm-usage.js';
 
@@ -46,6 +50,14 @@ export interface DashboardOptions {
 			Array<{ id: string; name: string; enabled: boolean; delivery: string[]; schedule: string }>
 		>;
 	};
+	/** Optional — used for the "messages this week" glance card. */
+	chatTranscriptIndex?: Pick<ChatTranscriptIndex, 'countMessagesByDay'>;
+	/** Optional — used to resolve household membership/name for the cost-cap banner. */
+	householdService?: Pick<HouseholdService, 'listHouseholds'>;
+	/** Optional — live per-household monthly cost, for the cost-cap banner. */
+	costTracker?: Pick<CostTracker, 'getMonthlyHouseholdCost'>;
+	/** Optional — resolves each household's cap for the cost-cap banner. */
+	llmSafeguards?: LLMSafeguardsConfig;
 }
 
 interface AttentionBanner {
@@ -151,6 +163,50 @@ async function checkOllamaBanner(
 	}
 }
 
+/** A household's monthly AI spend at or above this fraction of its cap surfaces an admin banner. */
+const COST_CAP_BANNER_THRESHOLD = 0.8;
+
+/**
+ * Attention banner: warns admins when a household's monthly AI spend is
+ * approaching (>= 80% of) its resolved monthly cost cap. Mirrors the cap
+ * resolution used by the per-household breakdown on /gui/llm
+ * (buildPerHouseholdRows in llm-usage.ts): per-household override falls back
+ * to the configured default, which falls back to DEFAULT_LLM_SAFEGUARDS.
+ */
+async function checkCostCapBanner(
+	householdService: Pick<HouseholdService, 'listHouseholds'> | undefined,
+	costTracker: Pick<CostTracker, 'getMonthlyHouseholdCost'> | undefined,
+	llmSafeguards: LLMSafeguardsConfig | undefined,
+	logger: Logger,
+): Promise<AttentionBanner[]> {
+	if (!householdService || !costTracker) return [];
+	try {
+		const defaultCap =
+			llmSafeguards?.defaultHouseholdMonthlyCostCap ??
+			DEFAULT_LLM_SAFEGUARDS.defaultHouseholdMonthlyCostCap;
+
+		const banners: AttentionBanner[] = [];
+		for (const hh of householdService.listHouseholds()) {
+			const cap = llmSafeguards?.householdOverrides?.[hh.id]?.monthlyCostCap ?? defaultCap;
+			if (cap <= 0) continue;
+			const monthlyCost = costTracker.getMonthlyHouseholdCost(hh.id);
+			if (monthlyCost >= cap * COST_CAP_BANNER_THRESHOLD) {
+				banners.push({
+					kind: 'warning',
+					message: `AI spending is at $${monthlyCost.toFixed(2)} of the $${cap.toFixed(2)} monthly cap for ${escapeHtml(hh.name)}.`,
+				});
+			}
+		}
+		return banners;
+	} catch (error) {
+		logger.warn(
+			{ error: error instanceof Error ? error.message : String(error) },
+			'Home: cost-cap banner probe failed',
+		);
+		return [];
+	}
+}
+
 export function registerDashboardRoutes(server: FastifyInstance, options: DashboardOptions): void {
 	const {
 		registry,
@@ -161,6 +217,10 @@ export function registerDashboardRoutes(server: FastifyInstance, options: Dashbo
 		logger,
 		alertService,
 		reportService,
+		chatTranscriptIndex,
+		householdService,
+		costTracker,
+		llmSafeguards,
 	} = options;
 
 	server.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -170,12 +230,14 @@ export function registerDashboardRoutes(server: FastifyInstance, options: Dashbo
 		// ---- Attention banners (admin-only system health) ----
 		const banners: AttentionBanner[] = [];
 		if (isAdmin) {
-			const [backupBanner, ollamaBanner] = await Promise.all([
+			const [backupBanner, ollamaBanner, costCapBanners] = await Promise.all([
 				checkBackupBanner(config, logger),
 				checkOllamaBanner(config, logger),
+				checkCostCapBanner(householdService, costTracker, llmSafeguards, logger),
 			]);
 			if (backupBanner) banners.push(backupBanner);
 			if (ollamaBanner) banners.push(ollamaBanner);
+			banners.push(...costCapBanners);
 		}
 
 		// ---- Glance metrics (scoped unless admin) ----
@@ -195,6 +257,23 @@ export function registerDashboardRoutes(server: FastifyInstance, options: Dashbo
 			}
 		} catch {
 			// No usage log yet — $0 spend, not an error.
+		}
+
+		let messagesThisWeek = 0;
+		if (chatTranscriptIndex) {
+			try {
+				const sinceIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+				const counts = await chatTranscriptIndex.countMessagesByDay({
+					userId: isAdmin ? undefined : actor?.userId,
+					sinceIso,
+				});
+				messagesThisWeek = counts.reduce((sum, c) => sum + c.count, 0);
+			} catch (error) {
+				logger.warn(
+					{ error: error instanceof Error ? error.message : String(error) },
+					'Home: messages-this-week glance failed',
+				);
+			}
 		}
 
 		let activeAlertsCount = 0;
@@ -273,6 +352,7 @@ export function registerDashboardRoutes(server: FastifyInstance, options: Dashbo
 			banners,
 			noAttentionNeeded,
 			monthCost: monthCost.toFixed(2),
+			messagesThisWeek,
 			activeAlertsCount,
 			nextReportLine,
 			activity,

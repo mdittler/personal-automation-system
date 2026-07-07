@@ -27,6 +27,10 @@
     <div class="value">$<%= it.monthCost %></div>
   </div>
   <div class="stat-card">
+    <h3>Messages this week</h3>
+    <div class="value"><%= it.messagesThisWeek %></div>
+  </div>
+  <div class="stat-card">
     <h3>Active alerts</h3>
     <div class="value"><%= it.activeAlertsCount %></div>
   </div>
