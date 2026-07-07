@@ -7,6 +7,9 @@
   <link rel="stylesheet" href="/gui/public/pico.min.css" />
   <link rel="stylesheet" href="/gui/public/pas.css" />
   <script src="/gui/public/htmx.min.js"></script>
+  <% if (it.charts && it.charts.length > 0) { %>
+  <script src="/gui/public/chart.umd.min.js"></script>
+  <% } %>
   <% if (it.csrfToken) { %>
   <meta name="csrf-token" content="<%= it.csrfToken %>" />
   <% } %>
@@ -28,43 +31,40 @@
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         PAS
       </a>
-      <a href="/gui/" class="pas-topbar-link <% if (it.activePage === 'dashboard') { %>active<% } %>" title="Dashboard">
-        Dashboard
+      <a href="/gui/" class="pas-topbar-link <% if (it.activePage === 'dashboard') { %>active<% } %>" title="Home">
+        Home
       </a>
+      <span class="pas-spinner" id="pas-global-spinner" role="status" aria-label="Loading" aria-hidden="true"></span>
     </div>
     <div class="pas-topbar-right">
       <% if (it.currentUser) { %>
         <span style="font-size:0.85rem;color:var(--pico-muted-color);margin-right:0.5rem"><%= it.currentUser.name %></span>
       <% } %>
-      <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" type="button">&#9790;</button>
+      <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode" type="button">&#9790;</button>
+      <% if (!it.isLoginPage) { %>
       <form method="post" action="/gui/logout" style="margin:0">
         <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
         <button type="submit" class="outline secondary" style="padding:0.25rem 0.5rem;margin:0;border-radius:999px;font-size:0.85rem">Logout</button>
       </form>
+      <% } %>
     </div>
   </header>
 
   <!-- App layout: sidebar + content -->
   <div class="pas-app-layout">
-    <!-- Left sidebar -->
+    <!-- Left sidebar (hidden for unauthenticated visitors on the login page) -->
+    <% if (!it.isLoginPage) { %>
     <aside class="pas-sidebar" id="pas-sidebar">
       <nav>
         <ul>
-          <% if (it.isPlatformAdmin) { %>
           <li>
-            <a href="/gui/apps" title="Apps" <% if (it.activePage === 'apps') { %>aria-current="page"<% } %>>
-              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-              <span class="nav-label">Apps</span>
+            <a href="/gui/" title="Home" <% if (it.activePage === 'dashboard') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+              <span class="nav-label">Home</span>
             </a>
           </li>
-          <li>
-            <a href="/gui/scheduler" title="Scheduler" <% if (it.activePage === 'scheduler') { %>aria-current="page"<% } %>>
-              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              <span class="nav-label">Scheduler</span>
-            </a>
-          </li>
-          <li class="nav-section-divider"></li>
-          <% } %>
+
+          <li class="nav-section-label">Automations</li>
           <li>
             <a href="/gui/reports" title="Reports" <% if (it.activePage === 'reports') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -77,45 +77,71 @@
               <span class="nav-label">Alerts</span>
             </a>
           </li>
-          <li class="nav-section-divider"></li>
+
+          <li class="nav-section-label">People and sharing</li>
           <li>
-            <a href="/gui/spaces" title="Spaces" <% if (it.activePage === 'spaces') { %>aria-current="page"<% } %>>
-              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              <span class="nav-label">Spaces</span>
+            <a href="/gui/users" title="Household" <% if (it.activePage === 'users') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <span class="nav-label">Household</span>
             </a>
           </li>
+          <li>
+            <a href="/gui/spaces" title="Shared spaces" <% if (it.activePage === 'spaces') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span class="nav-label">Shared spaces</span>
+            </a>
+          </li>
+
+          <li class="nav-section-label">Your data</li>
           <% if (it.isPlatformAdmin) { %>
           <li>
-            <a href="/gui/users" title="Users" <% if (it.activePage === 'users') { %>aria-current="page"<% } %>>
-              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              <span class="nav-label">Users</span>
+            <a href="/gui/data" title="Files" <% if (it.activePage === 'data') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <span class="nav-label">Files</span>
             </a>
           </li>
+          <% } %>
+          <% if (!it.navFlags || it.navFlags.sessions) { %>
           <li>
-            <a href="/gui/context" title="Context" <% if (it.activePage === 'context') { %>aria-current="page"<% } %>>
-              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-              <span class="nav-label">Context</span>
+            <a href="/gui/sessions" title="Conversations" <% if (it.activePage === 'sessions') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <span class="nav-label">Conversations</span>
+            </a>
+          </li>
+          <% } %>
+          <% if (!it.navFlags || it.navFlags.activity) { %>
+          <li>
+            <a href="/gui/activity" title="Activity" <% if (it.activePage === 'activity') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              <span class="nav-label">Activity</span>
             </a>
           </li>
           <% } %>
           <li>
-            <a href="/gui/data" title="Data" <% if (it.activePage === 'data') { %>aria-current="page"<% } %>>
-              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-              <span class="nav-label">Data</span>
+            <a href="/gui/llm" title="AI usage" <% if (it.activePage === 'llm') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/><circle cx="12" cy="15" r="2"/></svg>
+              <span class="nav-label">AI usage</span>
             </a>
           </li>
+
           <% if (it.isPlatformAdmin) { %>
-          <li class="nav-section-divider"></li>
+          <li class="nav-section-label">System</li>
+          <li>
+            <a href="/gui/apps" title="Apps" <% if (it.activePage === 'apps') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+              <span class="nav-label">Apps</span>
+            </a>
+          </li>
+          <li>
+            <a href="/gui/scheduler" title="Scheduler" <% if (it.activePage === 'scheduler') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span class="nav-label">Scheduler</span>
+            </a>
+          </li>
           <li>
             <a href="/gui/logs" title="Logs" <% if (it.activePage === 'logs') { %>aria-current="page"<% } %>>
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
               <span class="nav-label">Logs</span>
-            </a>
-          </li>
-          <li>
-            <a href="/gui/llm" title="LLM" <% if (it.activePage === 'llm') { %>aria-current="page"<% } %>>
-              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/><circle cx="12" cy="15" r="2"/></svg>
-              <span class="nav-label">LLM</span>
             </a>
           </li>
           <li>
@@ -124,7 +150,22 @@
               <span class="nav-label">Regression</span>
             </a>
           </li>
+          <li>
+            <a href="/gui/context" title="Context" <% if (it.activePage === 'context') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span class="nav-label">Context</span>
+            </a>
+          </li>
+          <% if (!it.navFlags || it.navFlags.backups) { %>
+          <li>
+            <a href="/gui/backups" title="Backups" <% if (it.activePage === 'backups') { %>aria-current="page"<% } %>>
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+              <span class="nav-label">Backups</span>
+            </a>
+          </li>
           <% } %>
+          <% } %>
+
           <li class="nav-section-divider"></li>
           <li>
             <a href="/gui/settings" title="Settings" <% if (it.activePage === 'settings') { %>aria-current="page"<% } %>>
@@ -141,9 +182,13 @@
         </ul>
       </nav>
     </aside>
+    <% } %>
 
     <!-- Sidebar overlay (mobile) -->
     <div class="pas-sidebar-overlay" id="sidebar-overlay"></div>
+
+    <!-- Toast region for htmx failures that have no local target (I5) -->
+    <div id="pas-toast" aria-live="polite"></div>
 
     <!-- Main content -->
     <div class="pas-main-content">
@@ -155,6 +200,10 @@
       </footer>
     </div>
   </div>
+
+  <% if (it.charts && it.charts.length > 0) { %>
+  <script src="/gui/public/pas-charts.js"></script>
+  <% } %>
 
   <script>
     (function() {
@@ -225,6 +274,92 @@
             e.preventDefault();
           }
         }
+      });
+
+      // Guarantee no unstyled htmx failure ever reaches the user (I5).
+      // htmx's default responseHandling does NOT swap 4xx/5xx bodies into
+      // the target — it only fires htmx:responseError. So on every failed
+      // htmx request we manually swap the styled error card into the
+      // request's own hx-target when one exists (the fragment renders in
+      // context, e.g. next to the toggle button that failed); otherwise —
+      // or on a network-level failure with no response body — we fall back
+      // to the shared toast region so the user still sees something.
+      var toast = document.getElementById('pas-toast');
+      function showToast(html) {
+        if (!toast) return;
+        toast.innerHTML = html;
+        window.clearTimeout(showToast._timer);
+        showToast._timer = window.setTimeout(function() {
+          toast.innerHTML = '';
+        }, 8000);
+      }
+      var GENERIC_ERROR_CARD = '<div class="pas-error-card" role="alert"><strong>Something went wrong</strong><p>Try again in a moment.</p></div>';
+      document.addEventListener('htmx:responseError', function(evt) {
+        var xhr = evt.detail && evt.detail.xhr;
+        var body = xhr && xhr.responseText ? xhr.responseText : '';
+        var isErrorCard = body.indexOf('pas-error-card') !== -1;
+        var target = evt.detail && evt.detail.target;
+        if (target && isErrorCard) {
+          target.innerHTML = body;
+          return;
+        }
+        showToast(isErrorCard ? body : GENERIC_ERROR_CARD);
+      });
+      document.addEventListener('htmx:sendError', function() {
+        showToast('<div class="pas-error-card" role="alert"><strong>Something went wrong</strong><p>Check your connection and try again.</p></div>');
+      });
+
+      // Global loading indicators + disabled submits during requests (I6).
+      // htmx requests: disable the triggering submit button and mark it
+      // aria-busy while the request is in flight (so a slow request can't
+      // be double-submitted), and show the topbar spinner as a global,
+      // always-visible loading cue regardless of which element triggered
+      // the request.
+      var globalSpinner = document.getElementById('pas-global-spinner');
+      var inFlightCount = 0;
+      document.addEventListener('htmx:beforeRequest', function(evt) {
+        inFlightCount++;
+        if (globalSpinner) globalSpinner.classList.add('htmx-request');
+        var el = evt.target;
+        if (!el || !(el instanceof Element)) return;
+        var submitBtn = el.matches && el.matches('button, input[type="submit"]')
+          ? el
+          : el.querySelector && el.querySelector('button[type="submit"], input[type="submit"]');
+        if (submitBtn) {
+          submitBtn.setAttribute('aria-busy', 'true');
+          submitBtn.disabled = true;
+        }
+      });
+      document.addEventListener('htmx:afterRequest', function(evt) {
+        inFlightCount = Math.max(0, inFlightCount - 1);
+        if (globalSpinner && inFlightCount === 0) globalSpinner.classList.remove('htmx-request');
+        var el = evt.target;
+        if (!el || !(el instanceof Element)) return;
+        var submitBtn = el.matches && el.matches('button, input[type="submit"]')
+          ? el
+          : el.querySelector && el.querySelector('button[type="submit"], input[type="submit"]');
+        if (submitBtn) {
+          submitBtn.removeAttribute('aria-busy');
+          submitBtn.disabled = false;
+        }
+      });
+
+      // Full-page (non-htmx) form submits: disable the submit button and
+      // mark it aria-busy AFTER the browser has serialized the form data,
+      // so the disabled attribute doesn't drop the button's value from the
+      // submission. setTimeout(0) defers past the current submit tick.
+      document.addEventListener('submit', function(evt) {
+        var form = evt.target;
+        if (!form || !(form instanceof HTMLFormElement)) return;
+        if (form.hasAttribute('hx-post') || form.hasAttribute('hx-get') || form.hasAttribute('hx-put') || form.hasAttribute('hx-delete')) {
+          return; // htmx owns this form's lifecycle instead
+        }
+        var submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+        if (!submitBtn) return;
+        window.setTimeout(function() {
+          submitBtn.setAttribute('aria-busy', 'true');
+          submitBtn.disabled = true;
+        }, 0);
       });
     })();
   </script>

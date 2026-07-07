@@ -1,8 +1,11 @@
 <div class="page-header">
   <h1>Alerts</h1>
+  <% if (it.isPlatformAdmin) { %>
   <div class="actions">
-    <a href="/gui/alerts/new" role="button">Create Alert</a>
+    <a href="/gui/alerts/new" role="button">Set up an alert</a>
+    <a href="/gui/alerts/new/legacy" class="outline" role="button">Advanced</a>
   </div>
+  <% } %>
 </div>
 
 <% if (it.alerts.length === 0) { %>
@@ -32,6 +35,7 @@
             <% if (alert.description) { %>
               <br><small><%= alert.description %></small>
             <% } %>
+            <br><small class="pas-describe-sentence"><%= alert.descriptionSentence %></small>
           </td>
           <td>
             <code><%= alert.conditionType %></code>
@@ -49,21 +53,27 @@
           <td><%= alert.cooldown %></td>
           <td><%= alert.lastFired %></td>
           <td>
-            <span id="toggle-<%= alert.id %>">
-              <form method="post"
-                    action="/gui/alerts/<%= alert.id %>/toggle"
-                    hx-post="/gui/alerts/<%= alert.id %>/toggle"
-                    hx-target="#toggle-<%= alert.id %>"
-                    hx-swap="innerHTML"
-                    style="margin:0">
-                <button type="submit" class="toggle-btn outline <%= alert.enabled ? 'secondary' : '' %>">
-                  <span class="badge <%= alert.enabled ? 'badge-ok' : 'badge-err' %>"><%= alert.enabled ? 'On' : 'Off' %></span>
-                </button>
-              </form>
-            </span>
+            <% if (it.isPlatformAdmin) { %>
+              <span id="toggle-<%= alert.id %>">
+                <form method="post"
+                      action="/gui/alerts/<%= alert.id %>/toggle"
+                      hx-post="/gui/alerts/<%= alert.id %>/toggle"
+                      hx-target="#toggle-<%= alert.id %>"
+                      hx-swap="innerHTML"
+                      style="margin:0">
+                  <button type="submit" class="toggle-btn outline <%= alert.enabled ? 'secondary' : '' %>">
+                    <span class="badge <%= alert.enabled ? 'badge-ok' : 'badge-err' %>"><%= alert.enabled ? 'On' : 'Off' %></span>
+                  </button>
+                </form>
+              </span>
+            <% } else { %>
+              <span class="badge <%= alert.enabled ? 'badge-ok' : 'badge-err' %>"><%= alert.enabled ? 'On' : 'Off' %></span>
+            <% } %>
           </td>
           <td>
-            <a href="/gui/alerts/<%= alert.id %>/edit" style="margin-right:0.5rem">Edit</a>
+            <% if (it.isPlatformAdmin) { %>
+              <a href="/gui/alerts/<%= alert.id %>/edit" style="margin-right:0.5rem">Edit</a>
+            <% } %>
             <a href="/gui/alerts/<%= alert.id %>/history">History</a>
           </td>
         </tr>

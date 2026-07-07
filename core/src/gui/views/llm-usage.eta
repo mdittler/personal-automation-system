@@ -1,6 +1,49 @@
 <div class="page-header">
-  <h1>LLM</h1>
+  <h1>AI usage</h1>
 </div>
+
+<% if (it.isMember) { %>
+  <p style="color:var(--pico-muted-color);max-width:60ch">Your own AI usage — what it's cost so far this month, app by app.</p>
+
+  <% if (!it.hasData) { %>
+    <p class="empty-state">No AI usage recorded for you yet.</p>
+  <% } else { %>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <h3>This month</h3>
+        <div class="value">$<%= it.monthCost %></div>
+      </div>
+    </div>
+
+    <% if (it.perAppLines.length > 0) { %>
+      <ul>
+        <% for (const line of it.perAppLines) { %>
+          <li>The <%= line.app %> app used $<%= line.monthCost %> this month.</li>
+        <% } %>
+      </ul>
+    <% } %>
+  <% } %>
+
+  <!-- Charts (declarative registry — see docs/GUI_CHARTS.md) -->
+  <% if (it.charts && it.charts.length > 0) { %>
+  <div class="card">
+    <% it.charts.forEach(function(c) { %>
+      <div class="pas-chart-card">
+        <h3><%= c.title %></h3>
+        <div
+          class="pas-chart-slot"
+          data-pas-chart="<%= c.id %>"
+          data-endpoint="<%= c.endpoint %>"
+          data-type="<%= c.type %>"
+          data-title="<%= c.title %>"
+          data-height="<%= c.height || 240 %>"
+          data-series='<%~ JSON.stringify(c.series) %>'
+        ></div>
+      </div>
+    <% }); %>
+  </div>
+  <% } %>
+<% } else { %>
 
 <h2>Live</h2>
 <div id="live-metrics"
@@ -99,6 +142,27 @@
 <% } %>
 
 <h2>Cost Summary</h2>
+
+<!-- Charts (declarative registry — see docs/GUI_CHARTS.md) -->
+<% if (it.charts && it.charts.length > 0) { %>
+<div class="card">
+  <% it.charts.forEach(function(c) { %>
+    <div class="pas-chart-card">
+      <h3><%= c.title %></h3>
+      <div
+        class="pas-chart-slot"
+        data-pas-chart="<%= c.id %>"
+        data-endpoint="<%= c.endpoint %>"
+        data-type="<%= c.type %>"
+        data-title="<%= c.title %>"
+        data-height="<%= c.height || 240 %>"
+        data-series='<%~ JSON.stringify(c.series) %>'
+      ></div>
+    </div>
+  <% }); %>
+</div>
+<% } %>
+
 <% if (!it.hasData) { %>
   <p class="empty-state">No LLM API usage recorded yet.</p>
 <% } else { %>
@@ -208,4 +272,5 @@
       </tbody>
     </table>
   </div>
+<% } %>
 <% } %>

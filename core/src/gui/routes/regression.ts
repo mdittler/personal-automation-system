@@ -48,6 +48,7 @@ import type {
 	SummaryTier,
 	WeaknessSummarizer,
 } from '../services/regression/weakness-summarizer.js';
+import { sendErrorFragment } from '../utils/error-fragment.js';
 
 export interface RegressionRoutesOptions {
 	caseDiscovery: CaseDiscoveryService;
@@ -354,10 +355,14 @@ export function registerRegressionRoutes(
 		platformAdminOnly,
 		async (request, reply) => {
 			const { caseId } = request.params;
-			if (!SAFE_CASE_ID_RE.test(caseId)) return reply.status(404).send('not found');
+			if (!SAFE_CASE_ID_RE.test(caseId)) {
+				return sendErrorFragment(reply, 404, "That case couldn't be found.");
+			}
 			const discovery = await caseDiscovery.discover();
 			const listed = discovery.cases.find((c) => c.caseId === caseId);
-			if (!listed) return reply.status(404).send('not found');
+			if (!listed) {
+				return sendErrorFragment(reply, 404, "That case couldn't be found.");
+			}
 			let display: DisplayResult | null = null;
 			try {
 				display = await readDisplayForCase(cacheDir, caseId, listed.currentCacheKey);
@@ -416,13 +421,17 @@ export function registerRegressionRoutes(
 		platformAdminOnly,
 		async (request, reply) => {
 			const { caseId } = request.params;
-			if (!SAFE_CASE_ID_RE.test(caseId)) return reply.status(404).send('not found');
+			if (!SAFE_CASE_ID_RE.test(caseId)) {
+				return sendErrorFragment(reply, 404, "That case couldn't be found.");
+			}
 			// Mirror the drilldown/row allowlist check so a regex-valid but
 			// unknown caseId can't read a directory left behind by a removed
 			// case definition.
 			const discovery = await caseDiscovery.discover();
 			const listed = discovery.cases.find((c) => c.caseId === caseId);
-			if (!listed) return reply.status(404).send('not found');
+			if (!listed) {
+				return sendErrorFragment(reply, 404, "That case couldn't be found.");
+			}
 			let entries: RunResult[];
 			try {
 				entries = await readHistoryForCase(cacheDir, caseId);

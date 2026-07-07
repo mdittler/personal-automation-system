@@ -1,6 +1,8 @@
 <div class="page-header">
-  <h1><%= it.isNew ? 'Create Space' : 'Edit Space' %></h1>
+  <h1><%= it.isNew ? 'Create a shared space' : 'Edit shared space' %></h1>
 </div>
+
+<p style="color:var(--pico-muted-color);max-width:60ch"><% if (it.isNew) { %>Give it a name, pick who's in it, and everyone you add can see and add to the data written here.<% } else { %>Add or remove people below — everyone in the space can see and add to the data written here.<% } %></p>
 
 <% if (it.errors.length > 0) { %>
   <div class="alert-banner alert-banner-error">
@@ -31,7 +33,7 @@
       <small>Lowercase letters, numbers, hyphens. Cannot be changed after creation.</small>
     </label>
     <label>
-      Display Name
+      Display name
       <input type="text" name="name" value="<%= it.space?.name ?? '' %>"
              maxlength="100" placeholder="e.g., Family Shared" required />
     </label>
@@ -44,7 +46,10 @@
   </label>
 
   <fieldset>
-    <legend>Members</legend>
+    <legend>Who's in this space</legend>
+    <small style="display:block;margin-bottom:0.5rem;color:var(--pico-muted-color)">
+      Check everyone who should be able to see and add to this space's data.
+    </small>
     <% const memberSet = new Set(it.space?.members ?? []); %>
     <% for (const user of it.users) { %>
       <label style="display:inline-flex;align-items:center;gap:0.25rem;margin-right:1rem;">
@@ -63,7 +68,7 @@
   <% } %>
 
   <div style="display:flex;gap:0.5rem;">
-    <button type="submit"><%= it.isNew ? 'Create Space' : 'Save Changes' %></button>
+    <button type="submit"><%= it.isNew ? 'Create shared space' : 'Save changes' %></button>
     <a href="/gui/spaces" role="button" class="outline secondary">Cancel</a>
   </div>
 </form>

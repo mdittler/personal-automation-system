@@ -235,35 +235,46 @@ describe('Alert GUI Routes', () => {
 			const res = await authenticatedGet('/gui/alerts');
 			// Raw cron removed; human-readable schedule shown
 			expect(res.body).toContain('06:00 PM');
-			expect(res.body).toContain('deterministic');
+			// Raw enum value humanized (audit M3) — no raw "deterministic" on screen
+			expect(res.body).toContain('Exact rule');
+			expect(res.body).not.toContain('>deterministic<');
+		});
+
+		it('renders the describeAlert human-readable sentence (Batch 4, Task 4.2)', async () => {
+			await createAlert();
+			const res = await authenticatedGet('/gui/alerts');
+			expect(res.body).toContain('pas-describe-sentence');
+			// createAlert() uses "not empty" + telegram_message + grocery list.md
+			expect(res.body).toMatch(/Grocery list/);
+			expect(res.body).toMatch(/Telegram message/);
 		});
 	});
 
-	// --- New form ---
+	// --- New form (legacy/advanced — the wizard now owns GET /gui/alerts/new) ---
 
-	describe('GET /gui/alerts/new', () => {
+	describe('GET /gui/alerts/new/legacy', () => {
 		it('returns 200 with create form', async () => {
-			const res = await authenticatedGet('/gui/alerts/new');
+			const res = await authenticatedGet('/gui/alerts/new/legacy');
 			expect(res.statusCode).toBe(200);
 			expect(res.body).toContain('Create Alert');
 		});
 
 		it('includes user checkboxes for delivery', async () => {
-			const res = await authenticatedGet('/gui/alerts/new');
+			const res = await authenticatedGet('/gui/alerts/new/legacy');
 			expect(res.body).toContain('Test User');
 			expect(res.body).toContain('123456789');
 			expect(res.body).toContain('delivery-cb');
 		});
 
 		it('includes app options for data sources', async () => {
-			const res = await authenticatedGet('/gui/alerts/new');
+			const res = await authenticatedGet('/gui/alerts/new/legacy');
 			expect(res.body).toContain('PAS_APPS');
 			expect(res.body).toContain('"grocery"');
 			expect(res.body).toContain('"notes"');
 		});
 
 		it('includes report options for run_report actions', async () => {
-			const res = await authenticatedGet('/gui/alerts/new');
+			const res = await authenticatedGet('/gui/alerts/new/legacy');
 			expect(res.body).toContain('PAS_REPORTS');
 			expect(res.body).toContain('"daily-summary"');
 		});
@@ -462,6 +473,7 @@ describe('Alert GUI Routes', () => {
 		});
 
 		it('rejects non-.md files', async () => {
+			await createAlert();
 			const res = await authenticatedGet('/gui/alerts/test-alert/history/file.txt');
 			expect(res.statusCode).toBe(400);
 		});

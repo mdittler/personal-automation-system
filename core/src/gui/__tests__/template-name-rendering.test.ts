@@ -7,8 +7,10 @@
  *     keeps the numeric id (legitimate submit key).
  *   - Source/data user dropdowns (alert-edit, report-edit): <option> text shows
  *     the name only; the option `value` keeps the numeric id.
- *   - Admin debug tables (dashboard, config): name is the primary cell content,
- *     numeric id only appears wrapped in <small>.
+ *   - Admin debug tables (config.eta, direct-rendered — no longer routed
+ *     since the Batch 2 GUI UX redesign replaced the dashboard route with
+ *     Home): name is the primary cell content, numeric id only appears
+ *     wrapped in <small>.
  *   - Context page header: name primary, id wrapped in <small>.
  *   - Data browser sidebar: name primary, id wrapped in <small>.
  *   - users/reset-password screen: the page shows the user's name; any rendered
@@ -315,7 +317,9 @@ describe('operator GUI templates surface user.name, not user.id', () => {
 
 	it('alert-edit delivery checkboxes show name as label text, not numeric id', async () => {
 		const cookies = await loginAsAdmin(built.app);
-		const res = await built.app.inject({ method: 'GET', url: '/gui/alerts/new', cookies });
+		// The wizard now owns GET /gui/alerts/new; the legacy alert-edit
+		// template (with its delivery-cb checkboxes) lives at /new/legacy.
+		const res = await built.app.inject({ method: 'GET', url: '/gui/alerts/new/legacy', cookies });
 		expect(res.statusCode).toBe(200);
 		const labels = extractDeliveryCbLabels(res.body);
 		expect(labels.length).toBeGreaterThanOrEqual(1);
@@ -420,7 +424,7 @@ describe('operator GUI templates surface user.name, not user.id', () => {
 
 	it('report-edit delivery checkboxes show name as label text, not numeric id', async () => {
 		const cookies = await loginAsAdmin(built.app);
-		const res = await built.app.inject({ method: 'GET', url: '/gui/reports/new', cookies });
+		const res = await built.app.inject({ method: 'GET', url: '/gui/reports/new/legacy', cookies });
 		expect(res.statusCode).toBe(200);
 		const labels = extractDeliveryCbLabels(res.body);
 		expect(labels.length).toBeGreaterThanOrEqual(1);
@@ -517,28 +521,12 @@ describe('operator GUI templates surface user.name, not user.id', () => {
 		await rm(tempDir, { recursive: true, force: true });
 	});
 
-	// --- dashboard admin table ---
-
-	it('dashboard registered-users table shows name primary, id only inside <small>', async () => {
-		const cookies = await loginAsAdmin(built.app);
-		const res = await built.app.inject({ method: 'GET', url: '/gui/', cookies });
-		expect(res.statusCode).toBe(200);
-		// Locate the Registered Users table specifically (not the stat-card h3 of
-		// the same name). The dashboard renders <h2>Registered Users</h2> inside
-		// a <div class="card"> followed by a <table>...</table> with the user rows.
-		const card = res.body.match(/<h2>Registered Users<\/h2>[\s\S]*?<\/table>/);
-		expect(card).not.toBeNull();
-		const cardBody = card![0];
-		// Name appears as the primary cell content.
-		expect(cardBody).toMatch(/<td[^>]*>[\s\S]*?Matt[\s\S]*?<\/td>/);
-		// Every id appearance inside the card is wrapped in <small>.
-		const cardIdHits = [...cardBody.matchAll(new RegExp(ADMIN_ID, 'g'))];
-		expect(cardIdHits.length).toBeGreaterThan(0);
-		for (const hit of cardIdHits) {
-			const surrounding = cardBody.slice(Math.max(0, hit.index! - 80), hit.index! + 80);
-			expect(surrounding).toMatch(/<small[^>]*>[\s\S]*?111/);
-		}
-	});
+	// Registered-users table admin coverage: this used to live on the routed
+	// dashboard page; the Batch 2 GUI UX redesign replaced that route with
+	// Home (which does not include a full user table — see /gui/users for
+	// the modern household hub). The identical config.eta markup is still
+	// present in the repo and covered directly below by "config.eta direct
+	// render", so the name-primary/id-in-<small> shape stays regression-guarded.
 
 	// --- context page ---
 

@@ -15,6 +15,7 @@ import {
 } from '../../services/model-journal/index.js';
 import type { SystemConfig } from '../../types/config.js';
 import type { SpaceDefinition } from '../../types/spaces.js';
+import { sendErrorFragment } from '../utils/error-fragment.js';
 
 export interface DataOptions {
 	config: SystemConfig;
@@ -50,7 +51,12 @@ interface FileEntry {
 }
 
 function denyDataAccess(reply: FastifyReply): FastifyReply {
-	return reply.status(403).type('text/html').send('Access denied.');
+	return sendErrorFragment(
+		reply,
+		403,
+		"You don't have access to this data.",
+		'Ask a platform admin if you believe this is a mistake.',
+	);
 }
 
 function enforceDataActorScope(
@@ -349,7 +355,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 		const { scope, userId, appId, subpath, householdId } = query;
 
 		if (!scope) {
-			return reply.status(400).type('text/html').send('Missing scope parameter.');
+			return sendErrorFragment(reply, 400, 'A scope is required to browse data.');
 		}
 
 		const actorDenied = enforceDataActorScope(
@@ -381,16 +387,17 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 				resolvedHouseholdId = request.user.householdId ?? undefined;
 			}
 			if (scope === 'shared' && !resolvedHouseholdId) {
-				return reply.status(400).type('text/html').send('Missing householdId for shared scope.');
+				return sendErrorFragment(reply, 400, 'A household is required for shared data.');
 			}
 			if (scope === 'user' && userId) {
 				const actualHh = householdService.getHouseholdForUser(userId);
 				if (resolvedHouseholdId) {
 					if (actualHh !== resolvedHouseholdId) {
-						return reply
-							.status(403)
-							.type('text/html')
-							.send('User does not belong to the specified household.');
+						return sendErrorFragment(
+							reply,
+							403,
+							"This user doesn't belong to the specified household.",
+						);
 					}
 				} else if (actualHh) {
 					// Auto-derive: route to the household layout without requiring the
@@ -410,7 +417,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			spaceService,
 		);
 		if (targetPath === null) {
-			return reply.status(400).type('text/html').send('Invalid path.');
+			return sendErrorFragment(reply, 400, "That file path isn't valid.");
 		}
 
 		const entries = await listDirectory(targetPath);
@@ -481,7 +488,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 		const { scope, userId, appId, subpath, householdId } = query;
 
 		if (!scope || !subpath) {
-			return reply.status(400).type('text/html').send('Missing parameters.');
+			return sendErrorFragment(reply, 400, 'A scope and file path are required.');
 		}
 
 		const actorDenied = enforceDataActorScope(
@@ -508,16 +515,17 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 				resolvedHouseholdId = request.user.householdId ?? undefined;
 			}
 			if (scope === 'shared' && !resolvedHouseholdId) {
-				return reply.status(400).type('text/html').send('Missing householdId for shared scope.');
+				return sendErrorFragment(reply, 400, 'A household is required for shared data.');
 			}
 			if (scope === 'user' && userId) {
 				const actualHh = householdService.getHouseholdForUser(userId);
 				if (resolvedHouseholdId) {
 					if (actualHh !== resolvedHouseholdId) {
-						return reply
-							.status(403)
-							.type('text/html')
-							.send('User does not belong to the specified household.');
+						return sendErrorFragment(
+							reply,
+							403,
+							"This user doesn't belong to the specified household.",
+						);
 					}
 				} else if (actualHh) {
 					resolvedHouseholdId = actualHh;
@@ -535,13 +543,18 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			spaceService,
 		);
 		if (targetPath === null) {
-			return reply.status(400).type('text/html').send('Invalid path.');
+			return sendErrorFragment(reply, 400, "That file path isn't valid.");
 		}
 
 		try {
 			const stats = await lstat(targetPath);
 			if (stats.isSymbolicLink() || stats.isDirectory()) {
-				return reply.status(400).type('text/html').send('Cannot view this entry.');
+				return sendErrorFragment(
+					reply,
+					400,
+					"This entry can't be viewed here.",
+					'Select a file, not a folder.',
+				);
 			}
 			if (stats.size > MAX_FILE_SIZE) {
 				return reply
@@ -577,7 +590,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 		const { scope, userId, appId, subpath, target, householdId } = query;
 
 		if (!scope || !target) {
-			return reply.status(400).type('text/html').send('<small>Missing parameters.</small>');
+			return sendErrorFragment(reply, 400, 'A scope and target are required.');
 		}
 
 		const actorDenied = enforceDataActorScope(
@@ -593,7 +606,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 		}
 
 		if (!/^[A-Za-z0-9_-]+$/.test(target)) {
-			return reply.status(400).type('text/html').send('<small>Invalid target parameter.</small>');
+			return sendErrorFragment(reply, 400, "That target isn't valid.");
 		}
 
 		if (!userId || !appId) {
@@ -612,19 +625,17 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 				resolvedHouseholdId = request.user.householdId ?? undefined;
 			}
 			if (scope === 'shared' && !resolvedHouseholdId) {
-				return reply
-					.status(400)
-					.type('text/html')
-					.send('<small>Missing householdId for shared scope.</small>');
+				return sendErrorFragment(reply, 400, 'A household is required for shared data.');
 			}
 			if (scope === 'user') {
 				const actualHh = householdService.getHouseholdForUser(userId);
 				if (resolvedHouseholdId) {
 					if (actualHh !== resolvedHouseholdId) {
-						return reply
-							.status(403)
-							.type('text/html')
-							.send('<small>User does not belong to the specified household.</small>');
+						return sendErrorFragment(
+							reply,
+							403,
+							"This user doesn't belong to the specified household.",
+						);
 					}
 				} else if (actualHh) {
 					resolvedHouseholdId = actualHh;
@@ -642,7 +653,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			spaceService,
 		);
 		if (targetPath === null) {
-			return reply.status(400).type('text/html').send('<small>Invalid path.</small>');
+			return sendErrorFragment(reply, 400, "That file path isn't valid.");
 		}
 
 		const entries = await listDirectory(targetPath);
@@ -721,7 +732,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 		const slug = query.slug;
 
 		if (!slug || !MODEL_SLUG_PATTERN.test(slug)) {
-			return reply.status(400).type('text/html').send('Invalid model slug.');
+			return sendErrorFragment(reply, 400, "That model isn't valid.");
 		}
 
 		const journalPath = join(dataDir, 'model-journal', `${slug}.md`);
@@ -772,11 +783,11 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 		const { slug, file } = query;
 
 		if (!slug || !MODEL_SLUG_PATTERN.test(slug)) {
-			return reply.status(400).type('text/html').send('Invalid model slug.');
+			return sendErrorFragment(reply, 400, "That model isn't valid.");
 		}
 
 		if (!file || !ARCHIVE_FILENAME_PATTERN.test(file)) {
-			return reply.status(400).type('text/html').send('Invalid archive file.');
+			return sendErrorFragment(reply, 400, "That archive file isn't valid.");
 		}
 
 		try {
@@ -785,7 +796,7 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 			const resolvedArchive = resolve(archivePath);
 			const resolvedData = resolve(dataDir);
 			if (!resolvedArchive.startsWith(resolvedData)) {
-				return reply.status(400).type('text/html').send('Invalid path.');
+				return sendErrorFragment(reply, 400, "That file path isn't valid.");
 			}
 
 			const content = await readFile(archivePath, 'utf-8');

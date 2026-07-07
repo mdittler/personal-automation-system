@@ -31,6 +31,7 @@ import { registerAuth } from '../auth.js';
 import { registerCsrfProtection } from '../csrf.js';
 import { registerAlertRoutes } from '../routes/alerts.js';
 import { registerAppsRoutes } from '../routes/apps.js';
+import { registerBackupsRoutes } from '../routes/backups.js';
 import { registerConfigRoutes } from '../routes/config.js';
 import { registerContextRoutes } from '../routes/context.js';
 import { registerLlmUsageRoutes } from '../routes/llm-usage.js';
@@ -92,12 +93,19 @@ function makeUserManager(): UserManager {
 	} as unknown as UserManager;
 }
 
-function makeHouseholdService(): Pick<HouseholdService, 'getHouseholdForUser' | 'getHousehold'> {
+function makeHouseholdService(): Pick<
+	HouseholdService,
+	'getHouseholdForUser' | 'getHousehold' | 'listHouseholds' | 'getMembers'
+> {
 	return {
 		getHouseholdForUser: vi.fn().mockReturnValue('hh-1'),
 		getHousehold: vi
 			.fn()
 			.mockReturnValue({ id: 'hh-1', name: 'Home', adminUserIds: [ADMIN_USER.id] }),
+		listHouseholds: vi
+			.fn()
+			.mockReturnValue([{ id: 'hh-1', name: 'Home', adminUserIds: [ADMIN_USER.id] }]),
+		getMembers: vi.fn().mockReturnValue(ALL_USERS),
 	};
 }
 
@@ -291,6 +299,7 @@ async function buildApp(tempDir: string) {
 				userMutationService: makeUserMutationService(),
 				registry,
 				spaceService,
+				householdService,
 				logger,
 			});
 			registerContextRoutes(gui, {
@@ -317,6 +326,17 @@ async function buildApp(tempDir: string) {
 				spaceService,
 				dataDir: tempDir,
 				timezone: config.timezone,
+				logger,
+			});
+			registerBackupsRoutes(gui, {
+				backupConfig: {
+					enabled: false,
+					path: '/tmp/pas-backups',
+					schedule: '0 3 * * *',
+					retentionCount: 7,
+				},
+				dataDir: tempDir,
+				configDir: tempDir,
 				logger,
 			});
 		},
@@ -380,9 +400,8 @@ describe('GUI admin route guards', () => {
 		'/gui/scheduler',
 		'/gui/logs',
 		'/gui/config',
-		'/gui/llm',
-		'/gui/users',
 		'/gui/context',
+		'/gui/backups',
 	])('returns 403 for member access to %s', async (url) => {
 		const cookies = await loginAsMember();
 		const res = await app.inject({
@@ -393,6 +412,55 @@ describe('GUI admin route guards', () => {
 
 		expect(res.statusCode).toBe(403);
 		expect(res.body).toContain('Insufficient Privileges');
+	});
+
+	// Batch 6, Task 6.4 — DELIBERATE guard change: `/gui/llm` (AI usage) is no
+	// longer admin-only for GET. Members get a scoped, read-only view of their
+	// OWN usage (no tier/model tables, no mutation controls); tier/model
+	// mutation POSTs and the live /llm/metrics partial remain platform-admin-only
+	// (see llm-usage.test.ts for the full member-scoping + chart-slot coverage).
+	// This test documents the new contract explicitly — it previously asserted
+	// 403 alongside the admin-only routes above.
+	it('member GET /gui/llm → 200 (scoped read-only AI-usage view, not 403)', async () => {
+		const cookies = await loginAsMember();
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/llm',
+			cookies,
+		});
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).not.toContain('Insufficient Privileges');
+	});
+
+	it('member GET /gui/llm/metrics (live ops partial) still 403s — admin-only', async () => {
+		const cookies = await loginAsMember();
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/llm/metrics',
+			cookies,
+		});
+
+		expect(res.statusCode).toBe(403);
+	});
+
+	// Batch 5, Task 5.2 — DELIBERATE guard change: `/gui/users` (Household hub)
+	// is no longer admin-only for GET. Members get a read-only, household-scoped
+	// view (no invite form, no mutation controls); all mutation POSTs on
+	// /gui/users/* remain platform-admin-only (see household.test.ts for the
+	// full read-only + two-household-isolation coverage). This test documents
+	// the new contract explicitly — it previously asserted 403 alongside the
+	// admin-only routes above.
+	it('member GET /gui/users → 200 (read-only Household view, not 403)', async () => {
+		const cookies = await loginAsMember();
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/users',
+			cookies,
+		});
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).not.toContain('Insufficient Privileges');
 	});
 
 	it.each([

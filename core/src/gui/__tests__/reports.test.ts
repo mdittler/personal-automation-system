@@ -212,26 +212,33 @@ describe('Report GUI Routes', () => {
 			expect(res.body).toContain('Monday');
 			expect(res.body).toContain('1'); // section count
 		});
+
+		it('shows a human-readable describeReport sentence per row', async () => {
+			await createReport();
+			const res = await authenticatedGet('/gui/reports');
+			expect(res.body).toContain('pas-describe-sentence');
+			expect(res.body).toContain('Intro');
+		});
 	});
 
 	// --- New form ---
 
-	describe('GET /gui/reports/new', () => {
+	describe('GET /gui/reports/new/legacy', () => {
 		it('returns 200 with create form', async () => {
-			const res = await authenticatedGet('/gui/reports/new');
+			const res = await authenticatedGet('/gui/reports/new/legacy');
 			expect(res.statusCode).toBe(200);
 			expect(res.body).toContain('Create Report');
 		});
 
 		it('includes user checkboxes for delivery', async () => {
-			const res = await authenticatedGet('/gui/reports/new');
+			const res = await authenticatedGet('/gui/reports/new/legacy');
 			expect(res.body).toContain('Test User');
 			expect(res.body).toContain('123456789');
 			expect(res.body).toContain('delivery-cb');
 		});
 
 		it('includes app options for sections', async () => {
-			const res = await authenticatedGet('/gui/reports/new');
+			const res = await authenticatedGet('/gui/reports/new/legacy');
 			expect(res.body).toContain('PAS_APPS');
 			expect(res.body).toContain('"notes"');
 			expect(res.body).toContain('"echo"');
@@ -450,6 +457,7 @@ describe('Report GUI Routes', () => {
 		});
 
 		it('rejects non-.md files', async () => {
+			await createReport();
 			const res = await authenticatedGet('/gui/reports/test-report/history/file.txt');
 			expect(res.statusCode).toBe(400);
 		});

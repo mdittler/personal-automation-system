@@ -187,6 +187,21 @@
 	margin: 0.4rem 0.75rem;
 }
 
+/* Non-interactive plain-language section header above a nav group. */
+.nav-section-label {
+	padding: 0.75rem 0.9rem 0.25rem;
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--pas-text-muted);
+	white-space: nowrap;
+}
+
+.pas-sidebar.collapsed .nav-section-label {
+	display: none;
+}
+
 .nav-icon {
 	width: 16px;
 	height: 16px;
@@ -448,6 +463,100 @@ table tbody tr:nth-child(even):hover {
 	color: var(--pas-success);
 }
 
+/* ----- 9a. Shared htmx error fragment (I5) ----- */
+/* Every htmx failure response (validation error or network error) swaps
+   this card into the target/toast region — never a raw unstyled string. */
+.pas-error-card {
+	background: var(--pas-danger-light);
+	border: 1px solid var(--pas-danger);
+	border-left: 4px solid var(--pas-danger);
+	border-radius: var(--pas-radius-sm);
+	padding: 0.85rem 1rem;
+	color: var(--pas-danger);
+	box-shadow: var(--pas-card-shadow);
+}
+
+.pas-error-card strong {
+	color: var(--pas-danger);
+	display: block;
+}
+
+.pas-error-card p {
+	margin: 0.35rem 0 0;
+	color: var(--pico-color, inherit);
+	font-size: 0.9rem;
+}
+
+#pas-toast {
+	position: fixed;
+	top: 4.5rem;
+	right: 1rem;
+	z-index: 1000;
+	max-width: 22rem;
+}
+
+#pas-toast:empty {
+	display: none;
+}
+
+/* ----- 9c. Global loading indicator (I6) ----- */
+/* Shown alongside any element htmx has marked as in-flight
+   (htmx adds/removes .htmx-request automatically during a request). */
+.pas-spinner {
+	display: none;
+	width: 1em;
+	height: 1em;
+	margin-left: 0.4em;
+	border: 2px solid var(--pas-border);
+	border-top-color: var(--pas-primary);
+	border-radius: 50%;
+	vertical-align: middle;
+	animation: pas-spin 0.6s linear infinite;
+}
+
+.htmx-request .pas-spinner,
+.htmx-request.pas-spinner {
+	display: inline-block;
+}
+
+@keyframes pas-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* ----- 9d. Report/alert wizard steps (Batch 3/4) ----- */
+/* Single-column stacking + >=44px touch targets at all widths, per the
+   responsive rules that bind every batch. */
+.pas-wizard-card {
+	border: 1px solid var(--pas-border);
+	border-radius: var(--pas-radius-sm);
+	padding: 0.75rem 1rem;
+	margin-bottom: 0.75rem;
+}
+
+.pas-wizard-card summary {
+	cursor: pointer;
+}
+
+.pas-wizard-card label,
+.pas-wizard-card input,
+.pas-wizard-card select,
+.pas-wizard-card textarea {
+	min-height: 44px;
+}
+
+.pas-describe-sentence {
+	display: block;
+	font-style: italic;
+}
+
+button[aria-busy="true"],
+input[aria-busy="true"] {
+	opacity: 0.7;
+	cursor: progress;
+}
+
 /* ----- 9b. Regression terminal banners ----- */
 /* `gate-failed` is a model result, not a crash — it must read amber/warning,
    visibly distinct from the red `failed` (real error) state. */
@@ -606,4 +715,64 @@ fieldset {
 	padding: 1rem;
 	margin-bottom: 1rem;
 	border-radius: var(--pas-radius-sm);
+}
+
+/* ----- 18. Chart slots (Batch 2: declarative chart registry) ----- */
+/* Rendered by pas-charts.js from core/src/gui/charts/registry.ts descriptors.
+   Never hand-write per-chart CSS — this block is generic for all charts. */
+.pas-chart-card {
+	background: var(--pas-card-bg, var(--pico-card-background-color));
+	border: 1px solid var(--pas-border);
+	border-radius: var(--pas-radius-sm);
+	padding: 1rem;
+	margin-bottom: 1rem;
+}
+
+.pas-chart-card h3 {
+	margin-top: 0;
+	font-size: 1rem;
+}
+
+.pas-chart-slot {
+	position: relative;
+	width: 100%;
+}
+
+.pas-chart-slot canvas {
+	width: 100% !important;
+	height: 100% !important;
+}
+
+.pas-chart-unavailable {
+	color: var(--pas-text-muted);
+	font-size: 0.9rem;
+	text-align: center;
+	padding: 2rem 0;
+}
+
+/* ----- 12. Conversations transcript (Batch 6, Task 6.1) ----- */
+.pas-transcript {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+.pas-transcript-message {
+	padding: 0.75rem 1rem;
+	border-radius: var(--pico-border-radius, 0.5rem);
+	border: 1px solid var(--pas-border, var(--pico-muted-border-color));
+}
+
+.pas-transcript-message p {
+	margin: 0.35rem 0 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.pas-transcript-user {
+	background: var(--pas-surface, transparent);
+}
+
+.pas-transcript-assistant {
+	background: transparent;
 }

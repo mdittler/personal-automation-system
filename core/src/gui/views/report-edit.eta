@@ -148,7 +148,7 @@
               </label>
               <label>
                 Scope
-                <div>
+                <div role="radiogroup" aria-label="Section scope">
                   <label style="display:inline-flex;align-items:center;gap:0.4rem;margin-right:1rem">
                     <input type="radio" name="section_scope_<%= i %>" value="user" <%= !isSpaceScope ? 'checked' : '' %> onchange="toggleScope(<%= i %>,'section')" /> User
                   </label>
@@ -354,7 +354,7 @@ function addSection() {
     html += '</div>';
   } else if (type === 'app-data') {
     html += '<div class="grid"><label>App ID' + buildAppSelect('section_app_id_' + i, '') + '</label>';
-    html += '<label>Scope<div>';
+    html += '<label>Scope<div role="radiogroup" aria-label="Section scope">';
     html += '<label style="display:inline-flex;align-items:center;gap:0.4rem;margin-right:1rem"><input type="radio" name="section_scope_' + i + '" value="user" checked onchange="toggleScope(' + i + ',\'section\')" /> User</label>';
     html += '<label style="display:inline-flex;align-items:center;gap:0.4rem"><input type="radio" name="section_scope_' + i + '" value="space" onchange="toggleScope(' + i + ',\'section\')" /> Space</label>';
     html += '</div></label></div>';

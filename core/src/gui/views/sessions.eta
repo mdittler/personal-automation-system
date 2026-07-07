@@ -1,0 +1,63 @@
+<div class="page-header">
+  <h1>Conversations</h1>
+</div>
+
+<p style="color:var(--pico-muted-color);max-width:60ch">
+  Your own chats with the bot — nobody else's, not even an administrator's.
+  Search to find something you talked about before.
+</p>
+
+<form method="get" action="/gui/sessions" role="search" style="margin-bottom:1.5rem">
+  <input
+    type="search"
+    name="q"
+    value="<%= it.searchQuery %>"
+    placeholder="Search your conversations…"
+    aria-label="Search your conversations"
+    style="max-width:40ch"
+  />
+</form>
+
+<% if (it.sessions.length === 0) { %>
+  <% if (it.isSearch) { %>
+    <p class="empty-state">No conversations matched "<%= it.searchQuery %>". Try a different word.</p>
+  <% } else { %>
+    <p class="empty-state">You haven't started a conversation with the bot yet. Send it a message on Telegram to get going.</p>
+  <% } %>
+<% } else { %>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Conversation</th>
+          <th>Started</th>
+          <% if (it.isSearch) { %><th>Match</th><% } else { %><th>Messages</th><% } %>
+        </tr>
+      </thead>
+      <tbody>
+        <% for (const session of it.sessions) { %>
+          <tr>
+            <td><a href="/gui/sessions/<%= session.id %>"><%= session.title %></a></td>
+            <td><%= new Date(session.startedAt).toLocaleString() %></td>
+            <% if (it.isSearch) { %>
+              <td><small><%= session.snippet %></small></td>
+            <% } else { %>
+              <td><%= session.messageCount %></td>
+            <% } %>
+          </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if (!it.isSearch && (it.offset > 0 || it.hasMore)) { %>
+    <nav style="margin-top:1rem;display:flex;gap:0.75rem">
+      <% if (it.offset > 0) { %>
+        <a href="/gui/sessions?limit=<%= it.limit %>&offset=<%= Math.max(0, it.offset - it.limit) %>" role="button" class="outline secondary">Newer</a>
+      <% } %>
+      <% if (it.hasMore) { %>
+        <a href="/gui/sessions?limit=<%= it.limit %>&offset=<%= it.offset + it.limit %>" role="button" class="outline secondary">Older</a>
+      <% } %>
+    </nav>
+  <% } %>
+<% } %>

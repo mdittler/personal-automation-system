@@ -27,6 +27,7 @@ import type { SystemConfig } from '../../types/config.js';
 import type { AppConfigService } from '../../types/config.js';
 import { escapeHtml } from '../../utils/escape-html.js';
 import { requirePlatformAdmin } from '../guards/require-platform-admin.js';
+import { sendErrorFragment } from '../utils/error-fragment.js';
 import { matchesDangerConfirmPhrase } from './settings-confirm-helpers.js';
 
 const NON_ADMIN_CATEGORIES: readonly SettingsCategory[] = [
@@ -465,28 +466,42 @@ export function registerSettingsRoutes(
 			const isAdmin = user.isPlatformAdmin;
 
 			if (!PARAM_PATTERN.test(appId) || !PARAM_PATTERN.test(key)) {
-				return reply.status(404).send('Not found');
+				return sendErrorFragment(reply, 404, "That setting couldn't be found.");
 			}
 
 			const def = settingsRegistry.getByAppKey(appId, key);
-			if (!def || def.hidden) return reply.status(404).send('Not found');
+			if (!def || def.hidden) {
+				return sendErrorFragment(reply, 404, "That setting couldn't be found.");
+			}
 
 			// REQ-SETTINGS-034: dangerous resets require confirm flow.
 			if (def.dangerous) {
-				return reply.status(403).send('Dangerous settings require the confirm flow');
+				return sendErrorFragment(
+					reply,
+					403,
+					'This setting requires confirmation to reset.',
+					'Use the Reset… button, which opens a confirmation dialog.',
+				);
 			}
 
 			// System-scope resets: adminOnly keys require admin; non-adminOnly system
 			// keys (retention_days, auto_reset_idle_minutes) are writable by all users
 			// per the visibility matrix — resets follow the same rule.
 			if (def.scope === 'system') {
-				if (def.adminOnly && !isAdmin) return reply.status(403).send('Forbidden');
+				if (def.adminOnly && !isAdmin) {
+					return sendErrorFragment(reply, 403, "You don't have permission to reset this setting.");
+				}
 
 				const writer = systemConfigWriter;
 				const config = systemConfig;
 				if (!writer || !config) {
 					logger.warn({ appId, key, userId: user.userId }, 'settings reset: no SystemConfigWriter');
-					return reply.status(500).send('Internal error');
+					return sendErrorFragment(
+						reply,
+						500,
+						'Something went wrong resetting this setting.',
+						'Try again in a moment.',
+					);
 				}
 
 				let prevValue: unknown = def.default;
@@ -511,13 +526,18 @@ export function registerSettingsRoutes(
 
 			// Per-user non-dangerous: adminOnly requires admin.
 			if (def.adminOnly && !isAdmin) {
-				return reply.status(403).send('Forbidden');
+				return sendErrorFragment(reply, 403, "You don't have permission to reset this setting.");
 			}
 
 			const cfg = appConfigResolver(appId);
 			if (!cfg) {
 				logger.warn({ appId, key, userId: user.userId }, 'settings reset: no AppConfigService');
-				return reply.status(500).send('Internal error');
+				return sendErrorFragment(
+					reply,
+					500,
+					'Something went wrong resetting this setting.',
+					'Try again in a moment.',
+				);
 			}
 
 			// Capture prevValue before removal (for hook ctx)
@@ -567,14 +587,16 @@ export function registerSettingsRoutes(
 			const query = request.query as Record<string, string>;
 
 			if (!PARAM_PATTERN.test(appId) || !PARAM_PATTERN.test(key)) {
-				return reply.status(404).send('Not found');
+				return sendErrorFragment(reply, 404, "That setting couldn't be found.");
 			}
 
 			const def = settingsRegistry.getByAppKey(appId, key);
-			if (!def) return reply.status(404).send('Not found');
+			if (!def) {
+				return sendErrorFragment(reply, 404, "That setting couldn't be found.");
+			}
 
 			if (!def.dangerous) {
-				return reply.status(400).send('Confirm flow only applies to dangerous settings');
+				return sendErrorFragment(reply, 400, 'This setting does not require confirmation.');
 			}
 
 			const action = query.action === 'reset' ? 'reset' : 'set';
@@ -637,14 +659,16 @@ export function registerSettingsRoutes(
 			const body = (request.body ?? {}) as Record<string, string>;
 
 			if (!PARAM_PATTERN.test(appId) || !PARAM_PATTERN.test(key)) {
-				return reply.status(404).send('Not found');
+				return sendErrorFragment(reply, 404, "That setting couldn't be found.");
 			}
 
 			const def = settingsRegistry.getByAppKey(appId, key);
-			if (!def) return reply.status(404).send('Not found');
+			if (!def) {
+				return sendErrorFragment(reply, 404, "That setting couldn't be found.");
+			}
 
 			if (!def.dangerous) {
-				return reply.status(400).send('Confirm flow only applies to dangerous settings');
+				return sendErrorFragment(reply, 400, 'This setting does not require confirmation.');
 			}
 
 			const action = body.action === 'reset' ? 'reset' : 'set';
@@ -655,7 +679,12 @@ export function registerSettingsRoutes(
 			const expectedPhrase = def.dangerConfirmPrompt;
 			if (!expectedPhrase) {
 				logger.error({ appId, key }, 'confirm: dangerous def missing dangerConfirmPrompt');
-				return reply.status(500).send('Internal configuration error');
+				return sendErrorFragment(
+					reply,
+					500,
+					'Something went wrong confirming this setting.',
+					'Try again in a moment.',
+				);
 			}
 
 			// REQ-SETTINGS-027: timing-safe phrase match.
@@ -688,7 +717,13 @@ export function registerSettingsRoutes(
 					source: 'admin-confirmed',
 				});
 				if (!result.ok) {
-					return reply.status(400).send(`Write failed: ${result.reason}`);
+					logger.warn({ appId, key, reason: result.reason }, 'settings confirm: write failed');
+					return sendErrorFragment(
+						reply,
+						400,
+						"Couldn't save this setting.",
+						'The value entered is not valid for this setting. Check it and try again.',
+					);
 				}
 			} else {
 				// action === 'reset'
@@ -696,7 +731,12 @@ export function registerSettingsRoutes(
 				if (def.scope === 'system') {
 					if (!systemConfigWriter || !systemConfig) {
 						logger.warn({ appId, key, userId }, 'confirm reset: no SystemConfigWriter');
-						return reply.status(500).send('Internal error');
+						return sendErrorFragment(
+							reply,
+							500,
+							'Something went wrong resetting this setting.',
+							'Try again in a moment.',
+						);
 					}
 					try {
 						prevValue = systemConfigWriter.read(key, systemConfig);
@@ -716,7 +756,12 @@ export function registerSettingsRoutes(
 				const cfg = appConfigResolver(appId);
 				if (!cfg) {
 					logger.warn({ appId, key, userId }, 'confirm reset: no AppConfigService');
-					return reply.status(500).send('Internal error');
+					return sendErrorFragment(
+						reply,
+						500,
+						'Something went wrong resetting this setting.',
+						'Try again in a moment.',
+					);
 				}
 				try {
 					const all = await cfg.getAll(userId);

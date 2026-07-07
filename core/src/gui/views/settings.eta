@@ -107,6 +107,7 @@
                 hx-post="/gui/settings/<%= def.appId %>/<%= def.key %>/reset"
                 hx-target="closest .setting-row"
                 hx-swap="outerHTML"
+                data-confirm-delete="Reset this setting to its default value?"
               >Reset</button>
             </div>
           </div>

@@ -14,10 +14,13 @@ import type { AlertService } from '../services/alerts/index.js';
 import type { ApiKeyService } from '../services/api-keys/index.js';
 import type { AppRegistry } from '../services/app-registry/index.js';
 import type { AppToggleStore } from '../services/app-toggle/index.js';
+import type { ChatTranscriptIndex } from '../services/chat-transcript-index/index.js';
 import type { SystemConfigWriter } from '../services/config/system-config-writer.js';
 import type { ContextStoreServiceImpl } from '../services/context-store/index.js';
 import type { CredentialService } from '../services/credentials/index.js';
+import type { FileIndexService } from '../services/file-index/index.js';
 import type { HouseholdService } from '../services/household/index.js';
+import type { InviteService } from '../services/invite/index.js';
 import type { CostTracker } from '../services/llm/cost-tracker.js';
 import type { LLMServiceImpl } from '../services/llm/index.js';
 import type { ModelCatalog } from '../services/llm/model-catalog.js';
@@ -35,9 +38,12 @@ import type { AppConfigService, LLMSafeguardsConfig, SystemConfig } from '../typ
 import { describeCron } from '../utils/cron-describe.js';
 import { registerAuth } from './auth.js';
 import { registerCsrfProtection } from './csrf.js';
+import { registerActivityRoutes } from './routes/activity.js';
+import { registerAlertWizardRoutes } from './routes/alert-wizard.js';
 import { registerAlertRoutes } from './routes/alerts.js';
 import { registerApiKeyRoutes } from './routes/api-keys.js';
 import { registerAppsRoutes } from './routes/apps.js';
+import { registerBackupsRoutes } from './routes/backups.js';
 import { registerConfigRoutes } from './routes/config.js';
 import { registerContextRoutes } from './routes/context.js';
 import { registerCredentialRoutes } from './routes/credentials.js';
@@ -45,9 +51,12 @@ import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerDataRoutes } from './routes/data.js';
 import { registerLlmUsageRoutes } from './routes/llm-usage.js';
 import { registerLogsRoutes } from './routes/logs.js';
+import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerRegressionRoutes } from './routes/regression.js';
+import { registerReportWizardRoutes } from './routes/report-wizard.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerSchedulerRoutes } from './routes/scheduler.js';
+import { registerSessionsRoutes } from './routes/sessions.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerSpaceRoutes } from './routes/spaces.js';
 import { registerUserRoutes } from './routes/users.js';
@@ -105,6 +114,51 @@ export interface GuiOptions {
 	systemConfig?: SystemConfig;
 	/** `false` ⇒ login-by-name disabled (see scanForDuplicateNames). Default `true`. */
 	loginByNameAllowed?: boolean;
+	/**
+	 * Batch 2 (GUI UX redesign): chat transcript FTS index, used by the
+	 * permission-scoped activity-daily metrics endpoint (message counts) and
+	 * (Batch 6, Task 6.1) the read-only Conversations browser. Optional —
+	 * when absent, activity-daily's message counts are always 0 and the
+	 * Conversations routes are not registered at all.
+	 */
+	chatTranscriptIndex?: Pick<
+		ChatTranscriptIndex,
+		'countMessagesByDay' | 'listSessionsForUser' | 'listMessagesForSession' | 'searchSessions'
+	>;
+	/**
+	 * Batch 4 (GUI UX redesign): file-metadata index, used by the alert
+	 * wizard's step-1 data-source picker (Task 4.3). Optional — when absent,
+	 * the wizard falls back to registering with an empty data-source list
+	 * rather than erroring (fileIndex is not on the critical path for any
+	 * other route).
+	 */
+	fileIndex?: Pick<FileIndexService, 'getEntries'>;
+	/**
+	 * Batch 5 (GUI UX redesign): invite service, used by the Household hub's
+	 * guided invite flow (Task 5.1). Optional — when absent, the invite POST
+	 * responds with a styled error rather than erroring.
+	 */
+	inviteService?: InviteService;
+	/**
+	 * Batch 6 (GUI UX redesign): scheduled-backup config (= `config.backup`),
+	 * used by the admin-only Backups status page (Task 6.2). The GUI never
+	 * receives a live BackupService instance — bootstrap builds one after GUI
+	 * registration for the cron path only — so the route constructs its own
+	 * from this config + `dataDir`/`configDir` when enabled. Optional — when
+	 * absent, the Backups routes are not registered at all.
+	 */
+	backupConfig?: { enabled: boolean; path: string; schedule: string; retentionCount: number };
+	/**
+	 * Batch 6 (GUI UX redesign): absolute path to the config directory,
+	 * tarred alongside `dataDir` by the Backups page's own BackupService.
+	 */
+	configDir?: string;
+	/**
+	 * Batch 6 (GUI UX redesign): absolute path to the change-log JSONL file
+	 * (ChangeLog.getLogPath()), used by the scoped Activity feed (Task 6.3).
+	 * Optional — when absent, the Activity routes are not registered at all.
+	 */
+	changeLogPath?: string;
 }
 
 /**
@@ -158,13 +212,74 @@ export async function registerGuiRoutes(
 			// CSRF protection (after auth, before content routes)
 			await registerCsrfProtection(gui);
 
-			// View-locals: inject currentUser into every template render (D5b-3)
+			// View-locals: inject currentUser into every template render (D5b-3).
+			// navFlags mirror the SAME conditions used below to conditionally
+			// register the sessions/activity/backups routes, so layout.eta never
+			// links to a route that isn't actually registered (final Codex review
+			// round, Important).
 			if (userManager) {
-				await registerViewLocals(gui, { userManager });
+				await registerViewLocals(gui, {
+					userManager,
+					navFlags: {
+						sessions: Boolean(options.chatTranscriptIndex),
+						activity: Boolean(options.changeLogPath && options.householdService && spaceService),
+						backups: Boolean(options.backupConfig),
+					},
+				});
 			}
 
 			// Content routes
-			registerDashboardRoutes(gui, { registry, scheduler, config, modelSelector, dataDir, logger });
+			registerDashboardRoutes(gui, {
+				registry,
+				scheduler,
+				config,
+				modelSelector,
+				dataDir,
+				logger,
+				alertService,
+				reportService,
+				chatTranscriptIndex: options.chatTranscriptIndex,
+				householdService: options.householdService,
+				costTracker,
+				llmSafeguards,
+			});
+			registerMetricsRoutes(gui, {
+				dataDir,
+				chatTranscriptIndex: options.chatTranscriptIndex,
+				alertService,
+				logger,
+			});
+			// Batch 6, Task 6.1: read-only Conversations browser. Registered only
+			// when the transcript index is present — own-sessions-only for EVERY
+			// authenticated user, including platform admins (deliberate privacy
+			// decision; see docs/open-items.md).
+			if (options.chatTranscriptIndex) {
+				registerSessionsRoutes(gui, {
+					chatTranscriptIndex: options.chatTranscriptIndex,
+					logger,
+				});
+			}
+			// Batch 6, Task 6.2: admin-only Backups status page. Registered only
+			// when backupConfig is present; builds its own BackupService per
+			// request rather than depending on bootstrap's cron-only instance.
+			if (options.backupConfig) {
+				registerBackupsRoutes(gui, {
+					backupConfig: options.backupConfig,
+					dataDir,
+					configDir: options.configDir ?? resolve('config'),
+					logger,
+				});
+			}
+			// Batch 6, Task 6.3: scoped Activity feed. Registered only when the
+			// change-log path + household/space services are present.
+			if (options.changeLogPath && options.householdService && spaceService) {
+				registerActivityRoutes(gui, {
+					logPath: options.changeLogPath,
+					householdService: options.householdService,
+					spaceService,
+					logger,
+				});
+			}
 			registerAppsRoutes(gui, { registry, config, appToggle, dataDir, logger });
 			registerSchedulerRoutes(gui, { scheduler, timezone: config.timezone, logger });
 			registerLogsRoutes(gui, { dataDir, logger });
@@ -286,6 +401,16 @@ export async function registerGuiRoutes(
 					timezone: config.timezone,
 					logger,
 				});
+				// Batch 3: guided report wizard — same reportService/registry, submits
+				// the existing POST /gui/reports contract via reports.ts's own handler.
+				registerReportWizardRoutes(gui, {
+					reportService,
+					userManager,
+					registry,
+					dataDir,
+					timezone: config.timezone,
+					logger,
+				});
 			}
 			if (alertService && userManager) {
 				registerAlertRoutes(gui, {
@@ -295,6 +420,18 @@ export async function registerGuiRoutes(
 					reportService,
 					spaceService,
 					n8nDispatchUrl: config.n8n?.dispatchUrl,
+					dataDir,
+					timezone: config.timezone,
+					logger,
+				});
+				// Batch 4: guided alert wizard — same alertService/registry, submits
+				// the existing POST /gui/alerts contract via alerts.ts's own handler.
+				registerAlertWizardRoutes(gui, {
+					alertService,
+					userManager,
+					fileIndex: options.fileIndex,
+					spaceService,
+					reportService,
 					dataDir,
 					timezone: config.timezone,
 					logger,
@@ -313,6 +450,8 @@ export async function registerGuiRoutes(
 					userMutationService,
 					registry,
 					spaceService,
+					householdService: options.householdService,
+					inviteService: options.inviteService,
 					logger,
 				});
 			}

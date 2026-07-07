@@ -182,7 +182,8 @@ describe('security', () => {
 		});
 
 		expect(res.statusCode).toBe(400);
-		expect(res.body).toContain('Invalid path');
+		expect(res.body).toContain('pas-error-card');
+		expect(res.body).toContain('That file path isn&#39;t valid.');
 	});
 
 	it('rejects invalid userId format', async () => {
@@ -374,7 +375,8 @@ describe('GET /gui/data/journal/model (per-model journal)', () => {
 		});
 
 		expect(res.statusCode).toBe(400);
-		expect(res.body).toContain('Invalid model slug');
+		expect(res.body).toContain('pas-error-card');
+		expect(res.body).toContain('That model isn&#39;t valid.');
 	});
 
 	it('returns 400 for missing slug parameter', async () => {
@@ -430,7 +432,8 @@ describe('GET /gui/data/journal/archive (per-model archive)', () => {
 		});
 
 		expect(res.statusCode).toBe(400);
-		expect(res.body).toContain('Invalid model slug');
+		expect(res.body).toContain('pas-error-card');
+		expect(res.body).toContain('That model isn&#39;t valid.');
 	});
 
 	it('returns 400 for invalid filename (path traversal)', async () => {
@@ -441,7 +444,8 @@ describe('GET /gui/data/journal/archive (per-model archive)', () => {
 		});
 
 		expect(res.statusCode).toBe(400);
-		expect(res.body).toContain('Invalid archive file');
+		expect(res.body).toContain('pas-error-card');
+		expect(res.body).toContain('That archive file isn&#39;t valid.');
 	});
 
 	it('returns 400 for missing slug parameter', async () => {
@@ -523,7 +527,8 @@ describe('GET /gui/data/files (file browser for data sources)', () => {
 			headers: { cookie: authCookie },
 		});
 		expect(res.statusCode).toBe(400);
-		expect(res.body).toContain('Invalid target parameter');
+		expect(res.body).toContain('pas-error-card');
+		expect(res.body).toContain('That target isn&#39;t valid.');
 	});
 
 	it('escapes filenames with apostrophes in data-pick-path', async () => {

@@ -8,6 +8,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
+import { sendErrorFragment } from '../utils/error-fragment.js';
 
 export interface SpaceRoutesOptions {
 	spaceService: SpaceService;
@@ -163,7 +164,7 @@ export function registerSpaceRoutes(server: FastifyInstance, options: SpaceRoute
 		const userId = body.userId?.trim();
 
 		if (!userId) {
-			return reply.status(400).type('text/html').send('Missing user ID.');
+			return sendErrorFragment(reply, 400, 'A user is required to add a member.');
 		}
 
 		const errors = await spaceService.addMember(id, userId);
@@ -188,7 +189,7 @@ export function registerSpaceRoutes(server: FastifyInstance, options: SpaceRoute
 			const userId = body.userId?.trim();
 
 			if (!userId) {
-				return reply.status(400).type('text/html').send('Missing user ID.');
+				return sendErrorFragment(reply, 400, 'A user is required to remove a member.');
 			}
 
 			const errors = await spaceService.removeMember(id, userId);

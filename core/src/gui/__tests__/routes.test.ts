@@ -356,17 +356,30 @@ describe('GUI Routes', () => {
 		});
 	});
 
-	describe('GET /gui/ (Dashboard)', () => {
-		it('returns 200 with dashboard content', async () => {
+	describe('GET /gui/ (Home)', () => {
+		it('returns 200 with Home content', async () => {
 			const res = await authenticatedGet(app, '/gui/');
 			expect(res.statusCode).toBe(200);
-			expect(res.body).toContain('Dashboard');
-			expect(res.body).toContain('Uptime');
+			expect(res.body).toContain('Home');
+			expect(res.body).toContain('AI spend this month');
 		});
 
 		it('shows loaded app count', async () => {
 			const res = await authenticatedGet(app, '/gui/');
+			expect(res.body).toContain('Loaded apps');
 			expect(res.body).toContain('1'); // One loaded app (echo)
+		});
+
+		it('wires global loading indicators for htmx and full-page form submits (I6)', async () => {
+			const res = await authenticatedGet(app, '/gui/');
+			// htmx request lifecycle hooks disable the triggering submit + toggle aria-busy
+			expect(res.body).toContain('htmx:beforeRequest');
+			expect(res.body).toContain('htmx:afterRequest');
+			expect(res.body).toContain('aria-busy');
+			// Full-page (non-htmx) form submits also get a disabled/aria-busy submit button
+			expect(res.body).toContain("addEventListener('submit'");
+			// Visible spinner class exists so .htmx-request has a rendered indicator
+			expect(res.body).toContain('pas-spinner');
 		});
 	});
 
@@ -875,25 +888,10 @@ describe('GUI Routes', () => {
 	});
 
 	describe('GET /gui/config', () => {
-		it('redirects to dashboard', async () => {
+		it('redirects to Home (system config now lives under /gui/settings)', async () => {
 			const res = await authenticatedGet(app, '/gui/config');
 			expect(res.statusCode).toBe(302);
 			expect(res.headers.location).toBe('/gui/');
-		});
-	});
-
-	describe('GET /gui/ (Dashboard — merged config)', () => {
-		it('shows system config on dashboard', async () => {
-			const res = await authenticatedGet(app, '/gui/');
-			expect(res.statusCode).toBe(200);
-			expect(res.body).toContain('System Config');
-			expect(res.body).toContain('3000'); // port
-			expect(res.body).toContain('UTC'); // timezone
-		});
-
-		it('shows registered users on dashboard', async () => {
-			const res = await authenticatedGet(app, '/gui/');
-			expect(res.body).toContain('TestUser');
 		});
 	});
 

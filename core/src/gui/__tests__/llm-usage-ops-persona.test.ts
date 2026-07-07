@@ -265,8 +265,12 @@ describe('LLM Ops Dashboard — Persona Tests', () => {
 		expect(res.body).toMatch(/0\.25/);
 	});
 
-	// G2
-	it('Nina (non-admin) receives 403 when opening /gui/llm', async () => {
+	// G2 — Batch 6, Task 6.4 DELIBERATE guard change: `/gui/llm` is no longer
+	// admin-only. Non-admins now get a scoped, read-only view of their OWN
+	// usage rather than a 403 (see llm-usage.test.ts for the full member-view
+	// coverage); the admin-only tables/mutation controls and the live
+	// /llm/metrics partial (G3 below) are unaffected.
+	it('Nina (non-admin) sees her own scoped AI-usage view, not a 403, when opening /gui/llm', async () => {
 		const built = await buildPersonaApp();
 		app = built.app;
 		tempDir = built.tempDir;
@@ -274,7 +278,10 @@ describe('LLM Ops Dashboard — Persona Tests', () => {
 		const cookies = await loginAs(app, NINA.userId, NINA.password);
 		const res = await app.inject({ method: 'GET', url: '/gui/llm', cookies });
 
-		expect(res.statusCode).toBe(403);
+		expect(res.statusCode).toBe(200);
+		expect(res.body).not.toContain('Insufficient Privileges');
+		// No admin-only mutation affordances or per-household tables leak through.
+		expect(res.body).not.toContain('hx-post="/gui/llm/tiers"');
 	});
 
 	// G3

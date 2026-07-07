@@ -569,7 +569,8 @@ describe('Reset endpoint', () => {
 		});
 
 		expect(res.statusCode).toBe(403);
-		expect(res.body).toContain('confirm flow');
+		expect(res.body).toContain('pas-error-card');
+		expect(res.body).toContain('This setting requires confirmation to reset.');
 	});
 
 	it('reset of unknown key → 404', async () => {

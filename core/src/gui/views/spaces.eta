@@ -1,12 +1,19 @@
 <div class="page-header">
-  <h1>Spaces</h1>
+  <h1>Shared spaces</h1>
   <div class="actions">
-    <a href="/gui/spaces/new" role="button">Create Space</a>
+    <a href="/gui/spaces/new" role="button">Create a shared space</a>
   </div>
 </div>
 
+<p style="color:var(--pico-muted-color);max-width:60ch">
+  Things you share with others. Anyone added to a space can see and add to
+  the data written there — a grocery list, a household project, anything
+  you'd rather keep in one place instead of split between everyone's own
+  apps.
+</p>
+
 <% if (it.spaces.length === 0) { %>
-  <p class="empty-state">No shared spaces yet. Create one to share data with specific people.</p>
+  <p class="empty-state">No shared spaces yet. Create one to start sharing data with specific people.</p>
 <% } else { %>
   <table>
     <thead>
@@ -15,7 +22,7 @@
         <th>ID</th>
         <th>Description</th>
         <th>Members</th>
-        <th>Created By</th>
+        <th>Created by</th>
         <th>Actions</th>
       </tr>
     </thead>

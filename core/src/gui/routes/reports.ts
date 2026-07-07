@@ -9,6 +9,8 @@ import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { isDeliveryVisible } from '../../gui/guards/resolve-viewer-scope.js';
+import { describeReport } from '../../gui/utils/describe-automation.js';
+import { sendErrorFragment } from '../../gui/utils/error-fragment.js';
 import type { ReportService } from '../../services/reports/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type {
@@ -77,6 +79,7 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 					id: r.id,
 					name: r.name ?? r.id,
 					description: r.description,
+					descriptionSentence: describeReport(r),
 					schedule,
 					humanSchedule: describeCron(schedule),
 					nextRun: nextRun ? formatDateTime(nextRun, timezone) : null,
@@ -90,8 +93,9 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 		});
 	});
 
-	// --- New form ---
-	server.get('/reports/new', async (request: FastifyRequest, reply: FastifyReply) => {
+	// --- New form (legacy/advanced — the wizard at GET /reports/new is the default
+	// admin path; this route stays reachable via the list page's "Advanced" link) ---
+	server.get('/reports/new/legacy', async (request: FastifyRequest, reply: FastifyReply) => {
 		// D5b-5: only platform-admin can create reports.
 		if (request.user && !request.user.isPlatformAdmin) {
 			return reply.status(403).viewAsync('403', { title: '403 Forbidden — PAS' });
@@ -162,6 +166,14 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 				});
 			}
 
+			// Wizard-originated saves (review form carries a hidden from=wizard
+			// field) land on the list page — a nontechnical admin who just walked
+			// through the guided wizard shouldn't be dumped into the legacy raw
+			// edit form. The legacy form has no `from` field, so its redirect is
+			// unchanged.
+			if (body.from === 'wizard') {
+				return reply.redirect('/gui/reports');
+			}
 			return reply.redirect(`/gui/reports/${def.id}/edit`);
 		},
 	);
@@ -220,11 +232,21 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 		async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
 			// D5b-5: only platform-admin can toggle reports.
 			if (request.user && !request.user.isPlatformAdmin) {
-				return reply.status(403).send('Forbidden');
+				return sendErrorFragment(
+					reply,
+					403,
+					"Couldn't change this report.",
+					'Only an administrator can turn reports on or off.',
+				);
 			}
 			const report = await reportService.getReport(request.params.id);
 			if (!report) {
-				return reply.code(404).send('Report not found');
+				return sendErrorFragment(
+					reply,
+					404,
+					"Couldn't find this report.",
+					'It may have been deleted. Refresh the page and try again.',
+				);
 			}
 
 			report.enabled = !report.enabled;
@@ -277,6 +299,15 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 			if (!report) {
 				return reply.code(404).send('Report not found');
 			}
+			// Scoping gap (final Codex review round, Critical): the delivery-visibility
+			// check applied to the list/edit views must also gate history access — a
+			// member not in the delivery list must not be able to read a report's run
+			// history. 404 (not 403) matches the sessions-route precedent, which avoids
+			// leaking whether a given report id exists to actors who can't see it.
+			const actor = request.user;
+			if (actor && !isDeliveryVisible(report.delivery ?? [], actor)) {
+				return reply.code(404).send('Report not found');
+			}
 
 			const historyDir = join(
 				resolve(options.dataDir),
@@ -316,6 +347,18 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 			reply: FastifyReply,
 		) => {
 			const { id, file } = request.params;
+
+			// Scoping gap (final Codex review round, Critical): same delivery-visibility
+			// gate as the history list route, applied before any filesystem access.
+			// Unknown ids and non-visible ids both 404 identically (no existence leak).
+			const report = await reportService.getReport(id);
+			if (!report) {
+				return reply.code(404).send('Report not found');
+			}
+			const actor = request.user;
+			if (actor && !isDeliveryVisible(report.delivery ?? [], actor)) {
+				return reply.code(404).send('Report not found');
+			}
 
 			// Validate file name: must be .md, no path traversal
 			if (

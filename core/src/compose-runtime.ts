@@ -1668,6 +1668,12 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		systemConfigWriter,
 		systemConfig: config,
 		loginByNameAllowed,
+		chatTranscriptIndex,
+		fileIndex,
+		inviteService,
+		backupConfig: config.backup,
+		configDir: resolve('config'),
+		changeLogPath: changeLog.getLogPath(),
 	});
 
 	// 13b. External Data API (optional)

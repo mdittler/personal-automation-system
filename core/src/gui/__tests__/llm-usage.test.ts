@@ -245,6 +245,38 @@ async function authenticatedGetAs(
 	return app.inject({ method: 'GET', url, cookies });
 }
 
+async function authenticatedPostAs(
+	app: Awaited<ReturnType<typeof Fastify>>,
+	userId: string,
+	password: string,
+	url: string,
+	payload: Record<string, unknown>,
+) {
+	const loginRes = await app.inject({
+		method: 'POST',
+		url: '/gui/login',
+		payload: { userId, password },
+	});
+	const loginCookies = collectCookies(loginRes);
+
+	const getRes = await app.inject({
+		method: 'GET',
+		url: '/gui/llm',
+		cookies: loginCookies,
+	});
+	const allCookies = collectCookies(loginRes, getRes);
+
+	const metaMatch = getRes.body.match(/name="csrf-token" content="([^"]+)"/);
+	const csrfToken = metaMatch?.[1] ?? '';
+
+	return app.inject({
+		method: 'POST',
+		url,
+		payload: { ...payload, _csrf: csrfToken },
+		cookies: allCookies,
+	});
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests: parseUsageMarkdown
 // ---------------------------------------------------------------------------
@@ -621,6 +653,81 @@ describe('LLM Usage Routes', () => {
 		});
 	});
 
+	// Batch 6, Task 6.4 — DELIBERATE guard change: `/gui/llm` is no longer
+	// admin-only for GET. Members get a scoped, read-only view (own usage
+	// only); tier/model mutation POSTs stay admin-only.
+	describe('GET /gui/llm — member-scoped view (Batch 6, Task 6.4)', () => {
+		it('member GET /gui/llm → 200, not 403', async () => {
+			const built = await buildApp();
+			app = built.app;
+
+			const res = await authenticatedGetAs(app, NON_ADMIN_USER_ID, NON_ADMIN_PASSWORD, '/gui/llm');
+
+			expect(res.statusCode).toBe(200);
+			expect(res.body).not.toContain('Insufficient Privileges');
+		});
+
+		it('member sees ONLY their own usage rows, not another user’s', async () => {
+			const now = new Date().toISOString().slice(0, 10);
+			const usageContent = [
+				`| ${now}T10:00:00Z | anthropic | sonnet | 100 | 50 | 1.10 | echo | ${NON_ADMIN_USER_ID} |`,
+				`| ${now}T11:00:00Z | anthropic | sonnet | 100 | 50 | 2.20 | echo | ${TEST_USER_ID} |`,
+			].join('\n');
+			const built = await buildApp({ usageContent });
+			app = built.app;
+
+			const res = await authenticatedGetAs(app, NON_ADMIN_USER_ID, NON_ADMIN_PASSWORD, '/gui/llm');
+
+			expect(res.statusCode).toBe(200);
+			// Only the member's own $1.10 spend shows, never the other user's $2.20.
+			expect(res.body).toContain('1.10');
+			expect(res.body).not.toContain('2.20');
+		});
+
+		it('member view has no tier-assignment mutation controls, and mutation POSTs stay admin-only', async () => {
+			const built = await buildApp();
+			app = built.app;
+
+			const res = await authenticatedGetAs(app, NON_ADMIN_USER_ID, NON_ADMIN_PASSWORD, '/gui/llm');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).not.toContain('hx-post="/gui/llm/tiers"');
+
+			const postRes = await authenticatedPostAs(
+				app,
+				NON_ADMIN_USER_ID,
+				NON_ADMIN_PASSWORD,
+				'/gui/llm/tiers',
+				{ tier: 'fast', provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+			);
+			expect(postRes.statusCode).toBe(403);
+		});
+
+		it('member view renders a plain-language per-app line ("The food app used $X this month")', async () => {
+			const now = new Date().toISOString().slice(0, 10);
+			const usageContent = [
+				`| ${now}T10:00:00Z | anthropic | sonnet | 100 | 50 | 1.20 | food | ${NON_ADMIN_USER_ID} |`,
+			].join('\n');
+			const built = await buildApp({ usageContent });
+			app = built.app;
+
+			const res = await authenticatedGetAs(app, NON_ADMIN_USER_ID, NON_ADMIN_PASSWORD, '/gui/llm');
+
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toMatch(/food.*used.*\$1\.20.*this month/is);
+		});
+
+		it("admin view renders registry chart slots for chartsForPage('llm') — no hand-written canvases", async () => {
+			const built = await buildApp();
+			app = built.app;
+
+			const res = await authenticatedGet(app, '/gui/llm');
+
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('data-pas-chart="ai-tokens-daily"');
+			expect(res.body).not.toContain('<canvas');
+		});
+	});
+
 	describe('POST /gui/llm/tiers', () => {
 		it('updates fast tier and returns HX-Refresh', async () => {
 			const built = await buildApp({
@@ -690,7 +797,8 @@ describe('LLM Usage Routes', () => {
 			});
 
 			expect(res.statusCode).toBe(400);
-			expect(res.body).toContain('Invalid tier');
+			expect(res.body).toContain('pas-error-card');
+			expect(res.body).toContain('That tier isn&#39;t valid.');
 		});
 
 		it('rejects missing tier with 400', async () => {
@@ -716,7 +824,8 @@ describe('LLM Usage Routes', () => {
 			});
 
 			expect(res.statusCode).toBe(400);
-			expect(res.body).toContain('Invalid provider');
+			expect(res.body).toContain('pas-error-card');
+			expect(res.body).toContain('That provider isn&#39;t valid.');
 		});
 
 		it('rejects invalid model pattern with 400', async () => {
@@ -732,7 +841,8 @@ describe('LLM Usage Routes', () => {
 			});
 
 			expect(res.statusCode).toBe(400);
-			expect(res.body).toContain('Invalid model');
+			expect(res.body).toContain('pas-error-card');
+			expect(res.body).toContain('That model isn&#39;t valid.');
 		});
 
 		it('rejects unknown provider with 400', async () => {
@@ -748,7 +858,8 @@ describe('LLM Usage Routes', () => {
 			});
 
 			expect(res.statusCode).toBe(400);
-			expect(res.body).toContain('Unknown provider');
+			expect(res.body).toContain('pas-error-card');
+			expect(res.body).toContain('That provider isn&#39;t recognized.');
 		});
 	});
 
@@ -1164,6 +1275,60 @@ describe('buildPerHouseholdRows — Chunk D (via GET /gui/llm)', () => {
 		expect(res.body).toContain('Alpha');
 		expect(res.body).toContain('5.000000'); // monthlyCost
 		expect(res.body).toContain('25'); // pctOfCap = round(5/20 * 100) = 25
+	});
+
+	// A2 regression: buildPerHouseholdRows sourced callCount from
+	// parseUsageMarkdown(...).perHousehold with NO date filter, while the same
+	// row's monthlyCost comes from costTracker.getMonthlyHouseholdCost (which
+	// IS month-scoped). Seed rows across two months and assert the rendered
+	// "Calls (month)" count reflects only the current month's rows, not all
+	// time.
+	it('Calls (month) column is scoped to the current month, not all-time', async () => {
+		const hs = makeLlmHouseholdService([{ id: 'hh-1', name: 'Alpha' }], {
+			'hh-1': ['user1'],
+		});
+		const ct = { getMonthlyHouseholdCost: (_id: string) => 1.0 };
+
+		const now = new Date();
+		const thisMonth = now.toISOString().slice(0, 7);
+		// A month safely in the past relative to "now" (works whether "now" is
+		// January or not) — two full months back avoids any month-length edge case.
+		const oldDate = new Date(now.getFullYear(), now.getMonth() - 2, 15);
+		const oldMonth = oldDate.toISOString().slice(0, 7);
+
+		const content = [
+			'| Timestamp | Provider | Model | Input Tokens | Output Tokens | Cost ($) | App | User | Household |',
+			'|-----------|----------|-------|-------------|---------------|----------|-----|------|-----------|',
+			// Two calls THIS month for hh-1
+			`| ${thisMonth}-05T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |`,
+			`| ${thisMonth}-06T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |`,
+			// Three calls from an OLD month for hh-1 — must NOT count toward "Calls (month)"
+			`| ${oldMonth}-01T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |`,
+			`| ${oldMonth}-02T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |`,
+			`| ${oldMonth}-03T10:00:00Z | anthropic | sonnet | 100 | 50 | 0.001 | echo | alice | hh-1 |`,
+		].join('\n');
+
+		const built = await buildApp({
+			householdServiceFull: hs,
+			monthlyCostTracker: ct,
+			usageContent: content,
+			llmSafeguards: {
+				defaultHouseholdMonthlyCostCap: 20,
+				householdOverrides: {},
+			} as LLMSafeguardsConfig,
+		});
+		app = built.app;
+
+		const res = await authenticatedGet(app, '/gui/llm');
+
+		expect(res.statusCode).toBe(200);
+		// Only the 2 this-month calls should be reflected in the per-household
+		// "Calls (month)" cell, not the all-time total of 5.
+		const start = res.body.indexOf('Per-Household Breakdown');
+		const end = res.body.indexOf('</table>', start);
+		const perHouseholdSection = res.body.slice(start, end);
+		expect(perHouseholdSection).toContain('<td>2</td>');
+		expect(perHouseholdSection).not.toContain('<td>5</td>');
 	});
 
 	// C2
