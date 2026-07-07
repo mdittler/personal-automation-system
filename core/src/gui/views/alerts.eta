@@ -53,21 +53,27 @@
           <td><%= alert.cooldown %></td>
           <td><%= alert.lastFired %></td>
           <td>
-            <span id="toggle-<%= alert.id %>">
-              <form method="post"
-                    action="/gui/alerts/<%= alert.id %>/toggle"
-                    hx-post="/gui/alerts/<%= alert.id %>/toggle"
-                    hx-target="#toggle-<%= alert.id %>"
-                    hx-swap="innerHTML"
-                    style="margin:0">
-                <button type="submit" class="toggle-btn outline <%= alert.enabled ? 'secondary' : '' %>">
-                  <span class="badge <%= alert.enabled ? 'badge-ok' : 'badge-err' %>"><%= alert.enabled ? 'On' : 'Off' %></span>
-                </button>
-              </form>
-            </span>
+            <% if (it.isPlatformAdmin) { %>
+              <span id="toggle-<%= alert.id %>">
+                <form method="post"
+                      action="/gui/alerts/<%= alert.id %>/toggle"
+                      hx-post="/gui/alerts/<%= alert.id %>/toggle"
+                      hx-target="#toggle-<%= alert.id %>"
+                      hx-swap="innerHTML"
+                      style="margin:0">
+                  <button type="submit" class="toggle-btn outline <%= alert.enabled ? 'secondary' : '' %>">
+                    <span class="badge <%= alert.enabled ? 'badge-ok' : 'badge-err' %>"><%= alert.enabled ? 'On' : 'Off' %></span>
+                  </button>
+                </form>
+              </span>
+            <% } else { %>
+              <span class="badge <%= alert.enabled ? 'badge-ok' : 'badge-err' %>"><%= alert.enabled ? 'On' : 'Off' %></span>
+            <% } %>
           </td>
           <td>
-            <a href="/gui/alerts/<%= alert.id %>/edit" style="margin-right:0.5rem">Edit</a>
+            <% if (it.isPlatformAdmin) { %>
+              <a href="/gui/alerts/<%= alert.id %>/edit" style="margin-right:0.5rem">Edit</a>
+            <% } %>
             <a href="/gui/alerts/<%= alert.id %>/history">History</a>
           </td>
         </tr>

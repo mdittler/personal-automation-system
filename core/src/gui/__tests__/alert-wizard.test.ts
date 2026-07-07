@@ -669,3 +669,127 @@ describe('Review step contract', () => {
 		expect(res.statusCode).toBe(403);
 	});
 });
+
+describe('Member read-only alerts view (Task 4.4)', () => {
+	it('member GET /gui/alerts lists only alerts whose delivery targets them', async () => {
+		await alertService.saveAlert({
+			id: 'for-member',
+			name: 'For Member',
+			enabled: true,
+			schedule: '0 9 * * *',
+			condition: {
+				type: 'deterministic',
+				expression: 'is empty',
+				data_sources: [{ app_id: 'food', user_id: ADMIN_USER.id, path: 'x.md' }],
+			},
+			actions: [{ type: 'telegram_message', config: { message: 'hi' } }],
+			delivery: [MEMBER_USER.id],
+			cooldown: '1 hour',
+		});
+		await alertService.saveAlert({
+			id: 'not-for-member',
+			name: 'Not For Member',
+			enabled: true,
+			schedule: '0 9 * * *',
+			condition: {
+				type: 'deterministic',
+				expression: 'is empty',
+				data_sources: [{ app_id: 'food', user_id: ADMIN_USER.id, path: 'x.md' }],
+			},
+			actions: [{ type: 'telegram_message', config: { message: 'hi' } }],
+			delivery: [ADMIN_USER.id],
+			cooldown: '1 hour',
+		});
+
+		const cookies = await login(MEMBER_USER.id, MEMBER_PASS);
+		const res = await app.inject({ method: 'GET', url: '/gui/alerts', cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('For Member');
+		expect(res.body).not.toContain('Not For Member');
+	});
+
+	it('member view shows describeAlert sentences and no create/edit/toggle/test controls', async () => {
+		await alertService.saveAlert({
+			id: 'for-member',
+			name: 'For Member',
+			enabled: true,
+			schedule: '0 9 * * *',
+			condition: {
+				type: 'deterministic',
+				expression: 'is empty',
+				data_sources: [{ app_id: 'food', user_id: ADMIN_USER.id, path: 'x.md' }],
+			},
+			actions: [{ type: 'telegram_message', config: { message: 'hi' } }],
+			delivery: [MEMBER_USER.id],
+			cooldown: '1 hour',
+		});
+
+		const cookies = await login(MEMBER_USER.id, MEMBER_PASS);
+		const res = await app.inject({ method: 'GET', url: '/gui/alerts', cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('pas-describe-sentence');
+		expect(res.body).not.toContain('Set up an alert');
+		expect(res.body).not.toContain('>Edit<');
+		expect(res.body).not.toContain('/toggle"');
+	});
+
+	it('member POST mutations on alerts remain 403', async () => {
+		await alertService.saveAlert({
+			id: 'for-member',
+			name: 'For Member',
+			enabled: true,
+			schedule: '0 9 * * *',
+			condition: {
+				type: 'deterministic',
+				expression: 'is empty',
+				data_sources: [{ app_id: 'food', user_id: ADMIN_USER.id, path: 'x.md' }],
+			},
+			actions: [{ type: 'telegram_message', config: { message: 'hi' } }],
+			delivery: [MEMBER_USER.id],
+			cooldown: '1 hour',
+		});
+
+		const loginCookies = await login(MEMBER_USER.id, MEMBER_PASS);
+		const csrfRes = await app.inject({ method: 'GET', url: '/gui/alerts', cookies: loginCookies });
+		const cookies = { ...loginCookies, ...collectCookies(csrfRes) };
+		const csrfToken = csrfRes.body.match(/name="csrf-token" content="([^"]+)"/)?.[1] ?? '';
+
+		const toggle = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/for-member/toggle',
+			cookies,
+			payload: { _csrf: csrfToken },
+		});
+		expect(toggle.statusCode).toBe(403);
+
+		const del = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/for-member/delete',
+			cookies,
+			payload: { _csrf: csrfToken },
+		});
+		expect(del.statusCode).toBe(403);
+	});
+
+	it('admin view still shows create/edit/toggle controls', async () => {
+		await alertService.saveAlert({
+			id: 'for-admin',
+			name: 'For Admin',
+			enabled: true,
+			schedule: '0 9 * * *',
+			condition: {
+				type: 'deterministic',
+				expression: 'is empty',
+				data_sources: [{ app_id: 'food', user_id: ADMIN_USER.id, path: 'x.md' }],
+			},
+			actions: [{ type: 'telegram_message', config: { message: 'hi' } }],
+			delivery: [ADMIN_USER.id],
+			cooldown: '1 hour',
+		});
+		const cookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const res = await app.inject({ method: 'GET', url: '/gui/alerts', cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('Set up an alert');
+		expect(res.body).toContain('>Edit<');
+	});
+});
