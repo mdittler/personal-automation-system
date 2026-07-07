@@ -12,7 +12,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import type { AlertService } from '../../services/alerts/index.js';
 import type { ChatTranscriptIndex } from '../../services/chat-transcript-index/index.js';
@@ -63,6 +63,15 @@ const DAYS_DEFAULT = 30;
 const ACTIVITY_DAYS_MAX = 90;
 const ACTIVITY_DAYS_DEFAULT = 30;
 
+/**
+ * Both endpoints return per-user-scoped data (own rows unless admin) — a
+ * shared/proxy cache must never serve one user's response to another, so
+ * `private` is mandatory. `max-age=30` keeps rapid chart-refresh polling
+ * cheap without serving meaningfully stale data (final Codex review round,
+ * Minor).
+ */
+const METRICS_CACHE_CONTROL = 'private, max-age=30';
+
 function clampDays(raw: unknown, fallback: number, max: number): number {
 	const n = Number.parseInt(String(raw ?? ''), 10);
 	if (Number.isNaN(n)) return fallback;
@@ -84,7 +93,9 @@ export function registerMetricsRoutes(
 		'/api/metrics/llm-daily',
 		async (
 			request: FastifyRequest<{ Querystring: { days?: string } }>,
+			reply: FastifyReply,
 		): Promise<LlmDailyResponse> => {
+			reply.header('Cache-Control', METRICS_CACHE_CONTROL);
 			const actor = request.user;
 			// Legacy shared-token mode (no per-user auth deps at all) leaves
 			// request.user undefined for the whole request — isGuiAdmin treats
@@ -158,7 +169,9 @@ export function registerMetricsRoutes(
 		'/api/metrics/activity-daily',
 		async (
 			request: FastifyRequest<{ Querystring: { days?: string } }>,
+			reply: FastifyReply,
 		): Promise<ActivityDailyResponse> => {
+			reply.header('Cache-Control', METRICS_CACHE_CONTROL);
 			const actor = request.user;
 			// Legacy shared-token mode (no per-user auth deps at all) leaves
 			// request.user undefined for the whole request — isGuiAdmin treats

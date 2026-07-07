@@ -200,6 +200,17 @@ describe('GET /gui/api/metrics/llm-daily', () => {
 		expect([301, 302, 401]).toContain(res.statusCode);
 	});
 
+	it('sets a private, short-lived Cache-Control header (per-user data must never be shared-cached)', async () => {
+		const cookies = await login(app, MEMBER_A_ID, 'member-a-pass');
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/api/metrics/llm-daily',
+			cookies,
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.headers['cache-control']).toBe('private, max-age=30');
+	});
+
 	it('returns per-day cost/token totals for the requesting member, own rows only', async () => {
 		const usageLines = [
 			HEADER_8,
@@ -317,6 +328,17 @@ describe('GET /gui/api/metrics/activity-daily', () => {
 	it('requires auth', async () => {
 		const res = await app.inject({ method: 'GET', url: '/gui/api/metrics/activity-daily' });
 		expect([301, 302, 401]).toContain(res.statusCode);
+	});
+
+	it('sets a private, short-lived Cache-Control header (per-user data must never be shared-cached)', async () => {
+		const cookies = await login(app, MEMBER_A_ID, 'member-a-pass');
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/api/metrics/activity-daily',
+			cookies,
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.headers['cache-control']).toBe('private, max-age=30');
 	});
 
 	it('returns member-scoped message + alert-firing counts', async () => {
