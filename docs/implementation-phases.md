@@ -3850,6 +3850,90 @@ The first two audit passes (C1–C2, I1–I10, M1–M7, B1–B3, O1–O3, D1–D
 
 ---
 
+# Planned Phases — Strategic Review & Agentic Autonomy (2026-07-07)
+
+Confirmed by the operator on 2026-07-07 from two Fable strategic documents:
+`docs/superpowers/plans/2026-07-07-fable-strategic-review.md` (SR-1..SR-4 — the gaps between
+the current system and the open-source-infrastructure ambition) and
+`docs/superpowers/plans/2026-07-07-agentic-harness-deep-dive.md` (AG — whether/how PAS gets a
+light-harness agentic mode). Each phase below still needs a `superpowers:writing-plans` pass +
+Codex review before implementation; the source docs carry the full analysis, issue IDs
+(`ISO-*`, `CHA-*`, `PUB-*`, `EXT-*`, AG-1..AG-8), epistemic markers, and open questions.
+**Already shipped from this set:** AG-1 — the graduated-autonomy doctrine is adopted and
+recorded at `docs/agentic-autonomy-doctrine.md`, including the AG-8 standing decision (no
+OpenClaw-style resident agent in core; three-condition revisit gate).
+
+## SR-1 — App Isolation & Shared-App Trust Model
+
+**Goal:** Make "share apps safely" architecturally true instead of aspirationally true. Today apps run in-process with manifest-filtered but advisory service injection; the install-time regex analyzer stops accidents, not adversaries (SEC-4's own conclusion); `telegram.send(anyUserId)` lets any app message any registered user.
+
+**Scope (three independent tiers):**
+1. *Tier A — capability scoping:* reply-scoped messenger as the default injected surface (`telegram:any-user` becomes an explicit manifest capability); per-app outbound send rate limits mirroring LLMGuard; a least-privilege inventory pass over every `CoreServices` member ("what can a hostile caller do with this?").
+2. *Tier B — runtime enforcement:* ESM loader hook (`module.register()`) resolving every import — dynamic specifiers included — against manifest capabilities; `process.env` scrubbed into a core-held closure before app load. Regex analyzer demoted to install-time UX hint.
+3. *Tier C — process isolation:* one worker/child process per app (or trust tier), CoreServices as an RPC boundary, Node 22 `--permission` in the child. **Gate: required before a public app registry ships.**
+4. *Docs (do first):* `docs/APP_TRUST_MODEL.md` promoted from `app-sharing-vision.md`'s "What PAS Does NOT Enforce" — ships in SR-3 regardless of tier progress.
+
+**Sequencing:** Design pass **before T2a** — Tier A capability names and T2a's `capabilities.tools[]` + AG-3 metadata share one manifest surface. Open questions (worker vs. child process, loader-hook × tsx dev-mode interaction) in the strategic-review doc §SR-1.
+
+**Doc footprint:** `docs/APP_TRUST_MODEL.md` (new); `MANIFEST_REFERENCE.md` + `CREATING_AN_APP.md` capability documentation; `app-manifest.schema.json`; URS area `REQ-ISO-*`; CLAUDE.md status bullet per phase; close/annotate the "Container isolation" open-items line.
+
+## SR-2 — Channel Abstraction Seam
+
+**Goal:** Telegram becomes the reference channel implementation instead of the substrate, so a Discord/Matrix/web contributor adds an adapter instead of forking core. No second channel is built.
+
+**Scope:** `ChannelAdapter` interface (send/sendRich/edit + capability descriptor: `supportsButtons`, `maxMessageLength`, markup dialect); channel-neutral inbound context with `channel: { id, native }` escape hatch; `TelegramChannelAdapter` as sole implementation with byte-identical behavior (existing suite is the verifier); `MessageContext` kept as compatibility alias; 4000-char split + Markdown escaping behind the descriptor (BufferingTelegramProxy → channel-generic proxy + Telegram policy object). Non-goals: second channel, GUI-chat channel, changing Telegram-id-based GUI identity.
+
+**Sequencing:** Interface lands **before T5.notes** so each T5 app slice migrates once; fallback is folding into T6b cleanup. Open question: does `sendOptions`' await-user-tap pattern generalize or need an async-interaction capability flag?
+
+**Doc footprint:** `CREATING_AN_APP.md` context/type updates; URS area `REQ-CHANNEL-*`; CLAUDE.md Key File Paths row for the adapter interface; status bullet.
+
+## SR-3 — Open-Source Publication Cut
+
+**Goal:** Everything between "PP-1..PP-7 done" and a public repo a stranger succeeds with in 30 minutes.
+
+**Scope:** (1) git-history/secret audit — gitleaks + manual fixture/personal-data review; decide squash-republish vs. full history; (2) license decision (operator; shapes app-ecosystem licensing); (3) README pitch + quickstart verified on a never-run-PAS machine, then scripted as a CI-run fresh-install test (makes INST-1's fix a regression-tested property); (4) SECURITY.md + disclosure policy; (5) CONTRIBUTING.md + issue templates + "good first app" guide seeded from `CREATING_AN_APP.md`; (6) CoreServices API stability statement (after SR-1 Tier A changes surfaces; promotes `app-sharing-vision.md`'s versioning section to a public contract); (7) internal-docs hygiene — decide publish/prune/split for `docs/superpowers/*`; "Hermes" codename never public-facing; (8) demo recording; (9) `docs/APP_TRUST_MODEL.md` shipped. Absorbs the unimplemented remainder of DOC-1..10 — reconcile overlap with PP-6 at planning time.
+
+**Sequencing:** After PP-1..PP-7. The two blocking decisions (history strategy, license) are operator calls that can be made any time earlier.
+
+**Doc footprint:** README, SECURITY.md, CONTRIBUTING.md, APP_TRUST_MODEL.md, API stability doc; URS area `REQ-PUB-*`; status bullet.
+
+## SR-4 — Regression Harness Extraction
+
+**Goal:** The persona-regression core (budgeted, cached, model-swappable, LLM-judged behavioral regression) becomes a standalone package — PAS's credibility wedge for the open-source launch.
+
+**Scope:** Workspace package with zero `@core/*` imports (enforced like the LLM boundary); `CaseRunner` adapter interface (loaded case + model handle → output for oracles) + `CacheKeyContributor` (consumers add cache-salt inputs; PAS contributes tier snapshots); PAS buckets become the first adapter. **One seam serves three consumers:** this extraction, the "Regression Suite v2 — generic per-app test discovery" proposal, and AG-7's `agent` bucket — design it once. Repo split only when an external consumer exists. Open question: does the rubric oracle's transient judge-model override extract cleanly from ModelSelector?
+
+**Sequencing:** After SR-3; lowest urgency, high optionality.
+
+**Doc footprint:** package README; URS area `REQ-HARNESS-*`; status bullet.
+
+## AG-2 — Bounded Interactive Agent Sessions (+ AG-6 GUI timeline, AG-7 agent regression bucket)
+
+**Goal:** The long tail and cross-app composition — an explicit, budgeted escape hatch from structured routing, per the adopted doctrine (`docs/agentic-autonomy-doctrine.md`): heavy boundary, light inside; code-owned loop; reasoning-tier floor.
+
+**Scope:**
+1. *Session envelope:* `/agent <task>` command + an escalation *offer* when structured routing + single-shot tools can't satisfy a request (offer shows estimated budget); session lifecycle states; per-session budget reservation against CostTracker; step cap; timeout; kill switch; plain-language completion report (steps, touches, cost) — budget/step-cap stops are outcomes, not errors.
+2. *Policy:* same ToolRegistry as the structured path filtered by ToolPolicy + AG-3 metadata (`agentAllowed`, risk class); confirmation gates render tool *arguments*; no agent-only tools; tier floor refusal with explanation (AG-4 ladder: fast = classification only, standard = single tool calls, reasoning = bounded loops).
+3. *AG-6 observability:* per-session timeline on the GUI Activity surface rendered from the T2c tool trace.
+4. *AG-7 evaluation:* new `agent` regression bucket — seed temp data tree, run task at fixed budget, assert final file state (existing multiset/structural oracles) + budget/step compliance; never assert the tool-call path. Model-matrix coverage is what makes the AG-4 ladder enforceable.
+5. *Config:* `agent.enabled` (default false), `agent.tier_floor` (default `reasoning`), `agent.max_steps`, `agent.budget_usd_per_session`, `agent.daily_budget_usd`, `agent.tools_denylist`, `agent.require_confirmation` (default true; per-tool override only via manifest). Household caps via `HouseholdLLMLimiter`.
+
+**Sequencing:** **After T3** (shadow-mode telemetry is the evidence the loop substrate behaves). Admin-only first; per-user opt-in only when AG-7's bucket is green across the model matrix (mirrors T3b). Telemetry from day one: per-session cost/step distributions, confirmation deny rate, abandonment.
+
+**Doc footprint:** URS area `REQ-AGENT-*`; USER_GUIDE.md `/agent` section; `pas.yaml` config docs; GUI Activity docs; status bullet.
+
+## AG-5 — Routine Distillation ("agency as authoring, structure as execution")
+
+**Goal:** The strategic differentiator and the answer to the cheap-model constraint: a frontier-tier agent session solves a novel task once; its trace is distilled into a reviewed, human-readable routine that thereafter runs deterministically or on the fast/local tier at ~zero cost. Agent spend becomes compounding automation instead of per-request cost.
+
+**Scope:** Routine artifact format (markdown+YAML, linear steps + guard conditions + typed slots for varying parts — deliberately no loops/branching beyond guard-skip in v1); distillation step (frontier-tier, offline, one-shot, trajectory → routine) with its own regression bucket; admin review queue in the GUI (reuse wizard patterns) — **review is mandatory and not config-disableable** (`routines.review_required`), which is what keeps this on the right side of the hermes review's self-improvement rejection; execution engine (deterministic steps LLM-free; fuzzy slots on fast tier); staleness handling (routines bind to tool schema versions; invalidate on mismatch); invocation by name from chat, on a schedule, or as an alert action. Key metric: routine reuse counts — the number that proves the thesis.
+
+**Sequencing:** **After AG-2 + ≥1 month of real session traces** — traces are the design input for the routine representation; designing it earlier is guessing. This gate is deliberate so the go/no-go is made on evidence.
+
+**Doc footprint:** URS area `REQ-ROUTINE-*`; USER_GUIDE.md routines section; review-queue GUI docs; status bullet.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
