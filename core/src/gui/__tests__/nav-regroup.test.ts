@@ -426,6 +426,11 @@ describe('nav regroup', () => {
 		for (const label of ['Apps', 'Scheduler', 'Logs', 'Regression', 'Context', 'Backups']) {
 			expect(res.body).not.toContain(`>${label}<`);
 		}
+		// C7 fix: /gui/data (Files) is platform-admin-only server-side
+		// (data.ts's route guard, a deliberate R3-phase data-boundary decision
+		// that is NOT being changed here) — the nav item must not dangle in
+		// front of members who would only get a 403 on click.
+		expect(res.body).not.toContain('>Files<');
 		// Batch 5, Task 5.2: Household nav item is now visible to members too —
 		// the route opened a read-only, own-household-scoped view for non-admins.
 		expect(res.body).toContain('>Household<');
@@ -436,6 +441,17 @@ describe('nav regroup', () => {
 		// Batch 6, Task 6.4: AI usage moved out of the admin-only System group —
 		// members now get a scoped, read-only view of their own usage.
 		expect(res.body).toContain('>AI usage<');
+	});
+
+	it('shows Files to an admin (still platform-admin-only, gated same as System)', async () => {
+		const cookies = await loginAsAdmin();
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/reports',
+			cookies,
+		});
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('>Files<');
 	});
 });
 
