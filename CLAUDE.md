@@ -123,6 +123,7 @@ After a phase merges, a brief cleanup commit is allowed before starting the next
 | `config/pas.yaml` | System configuration |
 | `core/src/services/conversation/` | ConversationService + all conversation helpers (fallback, /ask, /edit, /notes) |
 | `apps/food/` | Food management app (household, recipes, grocery, pantry) |
+| `scripts/gui-verify-harness.ts` | Dev tool: boots the real GUI on :3777 with seeded multi-household data, no Telegram/LLM creds (guide: `docs/GUI_VERIFY_HARNESS.md`) |
 | `docs/urs.md` | User Requirements Specification |
 | `docs/CREATING_AN_APP.md` | App developer guide |
 | `docs/MANIFEST_REFERENCE.md` | Manifest field reference |
