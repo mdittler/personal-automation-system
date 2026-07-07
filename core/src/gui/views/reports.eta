@@ -48,21 +48,27 @@
           <td><%= report.sectionCount %></td>
           <td><%= report.llmEnabled ? 'Yes' : 'No' %></td>
           <td>
-            <span id="toggle-<%= report.id %>">
-              <form method="post"
-                    action="/gui/reports/<%= report.id %>/toggle"
-                    hx-post="/gui/reports/<%= report.id %>/toggle"
-                    hx-target="#toggle-<%= report.id %>"
-                    hx-swap="innerHTML"
-                    style="margin:0">
-                <button type="submit" class="toggle-btn outline <%= report.enabled ? 'secondary' : '' %>">
-                  <span class="badge <%= report.enabled ? 'badge-ok' : 'badge-err' %>"><%= report.enabled ? 'On' : 'Off' %></span>
-                </button>
-              </form>
-            </span>
+            <% if (it.isPlatformAdmin) { %>
+              <span id="toggle-<%= report.id %>">
+                <form method="post"
+                      action="/gui/reports/<%= report.id %>/toggle"
+                      hx-post="/gui/reports/<%= report.id %>/toggle"
+                      hx-target="#toggle-<%= report.id %>"
+                      hx-swap="innerHTML"
+                      style="margin:0">
+                  <button type="submit" class="toggle-btn outline <%= report.enabled ? 'secondary' : '' %>">
+                    <span class="badge <%= report.enabled ? 'badge-ok' : 'badge-err' %>"><%= report.enabled ? 'On' : 'Off' %></span>
+                  </button>
+                </form>
+              </span>
+            <% } else { %>
+              <span class="badge <%= report.enabled ? 'badge-ok' : 'badge-err' %>"><%= report.enabled ? 'On' : 'Off' %></span>
+            <% } %>
           </td>
           <td>
-            <a href="/gui/reports/<%= report.id %>/edit" style="margin-right:0.5rem">Edit</a>
+            <% if (it.isPlatformAdmin) { %>
+              <a href="/gui/reports/<%= report.id %>/edit" style="margin-right:0.5rem">Edit</a>
+            <% } %>
             <a href="/gui/reports/<%= report.id %>/history">History</a>
           </td>
         </tr>

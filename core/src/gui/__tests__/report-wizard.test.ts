@@ -450,3 +450,107 @@ describe('Review step contract', () => {
 		expect(res.body).toContain('*/7 3 * * 2');
 	});
 });
+
+describe('Member read-only reports view (Task 3.4)', () => {
+	it('member GET /gui/reports lists only reports whose delivery targets them', async () => {
+		await reportService.saveReport({
+			id: 'for-member',
+			name: 'For Member',
+			enabled: true,
+			schedule: '0 9 * * *',
+			delivery: [MEMBER_USER.id],
+			sections: [{ type: 'custom', label: 'Notes', config: { text: 'x' } }],
+			llm: { enabled: false },
+		});
+		await reportService.saveReport({
+			id: 'not-for-member',
+			name: 'Not For Member',
+			enabled: true,
+			schedule: '0 9 * * *',
+			delivery: [ADMIN_USER.id],
+			sections: [{ type: 'custom', label: 'Notes', config: { text: 'x' } }],
+			llm: { enabled: false },
+		});
+
+		const cookies = await login(MEMBER_USER.id, MEMBER_PASS);
+		const res = await app.inject({ method: 'GET', url: '/gui/reports', cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('For Member');
+		expect(res.body).not.toContain('Not For Member');
+	});
+
+	it('member view shows describeReport sentences and no create/edit/toggle controls', async () => {
+		await reportService.saveReport({
+			id: 'for-member',
+			name: 'For Member',
+			enabled: true,
+			schedule: '0 9 * * *',
+			delivery: [MEMBER_USER.id],
+			sections: [{ type: 'custom', label: 'Notes', config: { text: 'x' } }],
+			llm: { enabled: false },
+		});
+
+		const cookies = await login(MEMBER_USER.id, MEMBER_PASS);
+		const res = await app.inject({ method: 'GET', url: '/gui/reports', cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('pas-describe-sentence');
+		expect(res.body).not.toContain('Set up a report');
+		expect(res.body).not.toContain('>Advanced<');
+		expect(res.body).not.toContain('>Edit<');
+		expect(res.body).not.toContain('/toggle"');
+	});
+
+	it('member POST mutations on reports remain 403', async () => {
+		await reportService.saveReport({
+			id: 'for-member',
+			name: 'For Member',
+			enabled: true,
+			schedule: '0 9 * * *',
+			delivery: [MEMBER_USER.id],
+			sections: [{ type: 'custom', label: 'Notes', config: { text: 'x' } }],
+			llm: { enabled: false },
+		});
+
+		const loginCookies = await login(MEMBER_USER.id, MEMBER_PASS);
+		const csrfRes = await app.inject({
+			method: 'GET',
+			url: '/gui/reports',
+			cookies: loginCookies,
+		});
+		const cookies = { ...loginCookies, ...collectCookies(csrfRes) };
+		const csrfToken = csrfRes.body.match(/name="csrf-token" content="([^"]+)"/)?.[1] ?? '';
+
+		const toggle = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/for-member/toggle',
+			cookies,
+			payload: { _csrf: csrfToken },
+		});
+		expect(toggle.statusCode).toBe(403);
+
+		const del = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/for-member/delete',
+			cookies,
+			payload: { _csrf: csrfToken },
+		});
+		expect(del.statusCode).toBe(403);
+	});
+
+	it('admin view still shows create/edit/toggle controls', async () => {
+		await reportService.saveReport({
+			id: 'for-admin',
+			name: 'For Admin',
+			enabled: true,
+			schedule: '0 9 * * *',
+			delivery: [ADMIN_USER.id],
+			sections: [{ type: 'custom', label: 'Notes', config: { text: 'x' } }],
+			llm: { enabled: false },
+		});
+		const cookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const res = await app.inject({ method: 'GET', url: '/gui/reports', cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('Set up a report');
+		expect(res.body).toContain('>Edit<');
+	});
+});
