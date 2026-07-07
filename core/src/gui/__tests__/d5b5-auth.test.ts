@@ -793,4 +793,22 @@ describe('D5b-5: spaces actor-based authorization', () => {
 		expect(res.body).toContain('Member Space');
 		expect(res.body).toContain('Admin Space');
 	});
+
+	// Batch 5, Task 5.3 — plain-language reframe copy anchors.
+	it('spaces page uses plain-language framing, not the old technical labels', async () => {
+		const cookies = await loginAs(ADMIN_ID, ADMIN_PASSWORD);
+		const res = await app.inject({ method: 'GET', url: '/gui/spaces', cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('Shared spaces');
+		expect(res.body).toContain('Things you share with others');
+		expect(res.body).not.toContain('>Spaces<');
+	});
+
+	it('create-space page explains what a shared space does in one line', async () => {
+		const cookies = await loginAs(ADMIN_ID, ADMIN_PASSWORD);
+		const res = await app.inject({ method: 'GET', url: '/gui/spaces/new', cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('Create a shared space');
+		expect(res.body).toContain('can see and add to');
+	});
 });
