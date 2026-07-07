@@ -231,6 +231,22 @@ describe('Household hub — invite flow (admin)', () => {
 		expect(codes[0]?.name).toBe('New Person');
 	});
 
+	it('escapes a hostile invite name in the instruction card', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+
+		const res = await app.inject({
+			method: 'POST',
+			url: '/gui/users/invite',
+			payload: { name: '<script>alert(1)</script>', role: 'member', _csrf: csrfToken },
+			cookies,
+		});
+
+		expect(res.statusCode).toBe(200);
+		expect(res.body).not.toContain('<script>alert(1)</script>');
+		expect(res.body).toContain('&lt;script&gt;');
+	});
+
 	it('invite POST requires platform admin + CSRF', async () => {
 		// Member is forbidden outright.
 		const memberLogin = await login(MEMBER_USER.id, MEMBER_PASS);
