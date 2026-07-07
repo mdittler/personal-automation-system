@@ -15,7 +15,7 @@ A local-first home automation platform where users interact through a single Tel
 - **Developer commands**: `pnpm dev`, `pnpm build`, `pnpm lint`, `pnpm test`, `pnpm scaffold-app --name=<app>`, `pnpm install-app <git-url>`
 
 ### Data & Storage
-- **Markdown files on filesystem** — no database. Scoped paths: `data/users/<user_id>/<app_id>/`, `data/users/shared/<app_id>/`, `data/spaces/<spaceId>/<appId>/`, `data/system/`
+- **Markdown files on filesystem** — no database. Scoped paths (household-migrated layout, see `core/src/services/data-store/paths.ts` `resolveScopedDataDir`): `data/households/<hh>/users/<userId>/<appId>/`, `data/households/<hh>/shared/<appId>/`, `data/households/<hh>/spaces/<spaceId>/<appId>/`, `data/system/` (legacy `data/users/...` paths are refused once HouseholdService is wired)
 - Atomic writes via temp file + rename (with Windows retry for EPERM). History never deleted — archive operations preserve content
 - **YAML frontmatter** on all generated .md files for Obsidian compatibility. Use `stripFrontmatter()` before processing for LLM/eval. `appendWithFrontmatter()` for atomic create-or-append
 - **Shared data spaces** — named membership groups (`/space` command). `DataStore.forSpace(spaceId, userId)` checks membership
