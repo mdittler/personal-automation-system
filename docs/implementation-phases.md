@@ -3707,6 +3707,8 @@ Tests: `pnpm test` — 574 test files, 12458 passed, 3 skipped, 1 todo, zero fai
 > **Status: PLANNED, not yet implemented.** These are forward-looking phase definitions, not completed-work records like the sections above. They are derived from the nine-pass audit in `docs/superpowers/plans/2026-06-11-ux-review-findings-and-fix-plan.md`; every finding cited below was confirmed against code (passes 4–9 during the 2026-07-06 audit sessions; the anchor findings of passes 1–3 re-verified 2026-07-06). Per-item actionables live in `docs/open-items.md`.
 >
 > **Before implementing any phase here:** invoke `superpowers:writing-plans` to produce the detailed task-by-task plan under `docs/superpowers/plans/`, route it through Codex review, then execute subagent-driven per `feedback_always_subagent_execution`. Each phase's **Doc footprint** lists the URS / open-items / CLAUDE.md updates that are part of its definition of done.
+>
+> **Ordering:** these phases are Track A of the **Master Execution Order** at the top of `docs/open-items.md` "Phase Sequence" — consult it before choosing which phase to start; it carries the cross-track hard gates (e.g. PP-1..PP-3 before the repo goes public).
 
 The audit surfaced ~45 confirmed findings across six areas. They group into seven planned phases plus the already-queued **UX Hardening Phase** (below). Ordering reflects the audit's cross-cutting priority: the highest-leverage items across the whole series are **INST-1** (fresh-install boot crash), **SEC-1** (PII scrub + history decision), **DEP-1/DEP-2** (dependency refresh + CI), and **BKP-1** (enable backups) — distributed across PP-1, PP-2, PP-3, and PP-5.
 
@@ -3862,6 +3864,12 @@ Codex review before implementation; the source docs carry the full analysis, iss
 **Already shipped from this set:** AG-1 — the graduated-autonomy doctrine is adopted and
 recorded at `docs/agentic-autonomy-doctrine.md`, including the AG-8 standing decision (no
 OpenClaw-style resident agent in core; three-condition revisit gate).
+
+> **Ordering:** SR/AG phases slot into Tracks B and C of the **Master Execution Order** at
+> the top of `docs/open-items.md` "Phase Sequence" — consult it before starting anything
+> here. The binding gates: SR-1 design pass before T2a; AG-3 inside T2a; SR-2 before
+> T5.notes; AG-2 after T3; AG-5 after AG-2 + ≥1 month of traces; SR-3 after PP-1..PP-7;
+> SR-4 after SR-3; SR-1 Tier C before any public app registry.
 
 ## SR-1 — App Isolation & Shared-App Trust Model
 
