@@ -7164,12 +7164,14 @@ The `/gui/llm` page must display a Live section with active household count and 
 - `llm-usage.test.ts` > `Per-Household Breakdown rendering — Chunk D` > pctOfCap rounding boundary: cost/cap=0.995 rounds to 100 but overCap=false (no OVER CAP label)
 - `llm-usage.test.ts` > `buildPerHouseholdRows — Chunk D (via GET /gui/llm)` > cost exactly equal to cap → overCap=false (strict >, not >=)
 - `llm-usage.test.ts` > `buildPerHouseholdRows — Chunk D (via GET /gui/llm)` > cost slightly above cap → overCap=true
+- `llm-usage.test.ts` > `buildPerHouseholdRows — Chunk D (via GET /gui/llm)` > Calls (month) column is scoped to the current month, not all-time
 - `message-rate-tracker-wiring.integration.test.ts` > MessageRateTracker production wiring > disposes the tracker through the runtime shutdown path
 
 **Fixes:**
 - **D1 (2026-04-21):** `overCap` used `pctOfCap >= 100` (rounded percentage) instead of `monthlyCost > cap` (strict dollar comparison). Any cost ≥ 99.5% of cap could round pctOfCap to 100 and falsely show "OVER CAP". Fixed to `monthlyCost > cap`. CL: `review/d5c-chunk-d`.
 - **D3 (2026-04-21):** `MessageRateTracker` duplicated the platform sentinel as a module-local constant instead of importing `PLATFORM_SYSTEM_HOUSEHOLD_ID` from `core/src/types/auth-actor.ts`. The local constant matched the canonical value but was a maintenance hazard. Fixed by removing the duplicate and importing from the single source of truth. CL: `review/d5c-chunk-d`.
 - **Stage 2 review remediation (2026-04-23):** Composition-root integration coverage now proves the runtime router records household traffic into `MessageRateTracker` and that runtime teardown disposes it through the real shutdown path.
+- **Live-verification (2026-07-07), A2:** `buildPerHouseholdRows` sourced the "Calls (month)" column from `parseUsageMarkdown(...).perHousehold` — an ALL-TIME aggregate — while the same row's cost came from `costTracker.getMonthlyHouseholdCost()` (month-scoped), so the two numbers didn't share a time window. Fixed by filtering the usage-log markdown to current-month rows (by leading timestamp cell) before aggregating call counts. CL: A2-fix.
 
 ### REQ-LLM-029: Test-composable runtime
 
@@ -11999,22 +12001,33 @@ The login page explains WHY a session ended: `?reason=expired` (session cookie p
 **Standard tests:**
 - `login-reasons.test.ts` > Login page sign-out explanations (I4, I7) > (a) an expired session cookie redirects to reason=expired
 - `login-reasons.test.ts` > Login page sign-out explanations (I4, I7) > (b) GET /gui/login?reason=expired explains the session expired
+- `home.test.ts` > GET /gui/login (unauthenticated chrome — C5 fix) > renders neither the sidebar nav nor the Logout button for an unauthenticated visitor
+- `home.test.ts` > GET /gui/login (unauthenticated chrome — C5 fix) > still renders the brand and theme toggle for an unauthenticated visitor
 
 **Edge case tests:**
 - `login-reasons.test.ts` > Login page sign-out explanations (I4, I7) > (c) a stale-sessionVersion cookie redirects to reason=session-invalidated, which explains itself
 - `login-reasons.test.ts` > Login page sign-out explanations (I4, I7) > (d) exceeding the login rate limit names the real wait window and says try again
 
+**Fixes:**
+- **Live-verification (2026-07-07), C5:** `layout.eta` always rendered the full app chrome (sidebar nav + Logout form) regardless of authentication state, so an unauthenticated visitor on `/gui/login` saw the whole sidebar (links to pages they couldn't reach yet) and the Logout button was the first submit button in the DOM. All 6 `login.eta` render call sites in `auth.ts` now pass `isLoginPage: true`; `layout.eta` gates the sidebar and Logout form on it (brand + theme toggle stay visible). Gating on `isLoginPage` rather than `it.currentUser` was necessary because legacy shared-token sessions also have no `request.user` yet must still see the full chrome. CL: C5-fix.
+
 ---
 
 ### REQ-GUI-UX-004 — Nav regroup, confirmations, aria-labels (M4, M7)
 
-The sidebar nav is reorganized into task-oriented sections with plain-language labels (Home, Automations, People and sharing, Your data, System) instead of raw route/technology names; System-section items (Apps, Scheduler, Logs, Backups, etc.) are hidden from non-admin members. Destructive actions carry `data-confirm-delete` confirmation text. Icon-only controls and radiogroup scope selectors carry `aria-label`s.
+The sidebar nav is reorganized into task-oriented sections with plain-language labels (Home, Automations, People and sharing, Your data, System) instead of raw route/technology names; System-section items (Apps, Scheduler, Logs, Backups, etc.) are hidden from non-admin members. The "Your data" section's Files item is also platform-admin-only (mirroring `data.ts`'s route guard) — members would only get a 403 on click. Destructive actions carry `data-confirm-delete` confirmation text. Icon-only controls and radiogroup scope selectors carry `aria-label`s. The topbar's Home link matches the sidebar nav's "Home" label (not the legacy "Dashboard" wording).
 
 **Standard tests:**
 - `nav-regroup.test.ts` > nav regroup > shows plain-language sections to an admin
+- `nav-regroup.test.ts` > nav regroup > shows Files to an admin (still platform-admin-only, gated same as System)
+- `home.test.ts` > GET /gui/ (home) > topbar link labels itself "Home", not "Dashboard" (C3 fix — nav already says Home)
 
 **Edge case tests:**
 - `nav-regroup.test.ts` > nav regroup > hides the System section items from a non-admin member
+
+**Fixes:**
+- **Live-verification (2026-07-07), C3:** the topbar link read "Dashboard" while the sidebar nav for the same destination already said "Home" — renamed the topbar label to match. CL: C3-fix.
+- **Live-verification (2026-07-07), C7:** the regrouped sidebar's "Your data" section showed "Files" (`/gui/data`) to every authenticated user, but `data.ts`'s route guard (a pre-existing deliberate data-boundary decision, unchanged here) denies non-platform-admins with a 403. Gated the Files nav item behind `it.isPlatformAdmin`, same pattern as the System section. Member-scoped file browsing is tracked separately in `docs/open-items.md`. CL: C7-fix.
 
 ---
 
@@ -12050,15 +12063,19 @@ Home renders zero or more attention banners (backup disabled, spend-vs-household
 
 ### REQ-GUI-HOME-002 — Glance metrics, member-scoped by default
 
-Home's glance cards (AI spend this month, messages this week, active alerts, next scheduled report) are member-scoped: each member sees only their own message count and usage-derived spend, never another member's. A missing chat transcript index degrades to a 0-messages glance card, not an error. User-controlled names rendered in the recent-activity snippet are HTML-escaped.
+Home's glance cards (AI spend this month, messages this week, active alerts, next scheduled report) are member-scoped: each member sees only their own message count and usage-derived spend, never another member's. A missing chat transcript index degrades to a 0-messages glance card, not an error. User-controlled names rendered in the recent-activity snippet are HTML-escaped. The recent-activity snippet always leads with the truly newest entry by timestamp, regardless of the underlying change-log's append order.
 
 **Standard tests:**
 - `home.test.ts` > GET /gui/ (home) > renders glance cards: AI spend this month, messages this week, active alerts, next report
+- `home.test.ts` > GET /gui/ (home) > recent-activity snippet shows the truly newest entry first, regardless of raw JSONL append order
 
 **Edge case tests:**
 - `home.test.ts` > GET /gui/ (home) > shows only the requesting member's own message count in "Messages this week"
 - `home.test.ts` > GET /gui/ (home) > handles a missing chat transcript index by showing 0 messages, not an error
 - `home.test.ts` > GET /gui/ (home) > escapes user-controlled names in the recent-activity list
+
+**Fixes:**
+- **Live-verification (2026-07-07), A3:** the recent-activity snippet was built via `changes.entries.slice(-5).reverse()`, which only shows newest-first when the underlying JSONL happens to be chronological — `collectChanges` preserves raw append order with no sort guarantee. Fixed by sorting by timestamp descending before taking the top 5 (in `dashboard.ts`; `collectChanges`'s own contract is unchanged). CL: A3-fix.
 
 ---
 
@@ -12152,16 +12169,30 @@ Chart.js 4.4.9 is vendored locally (pinned version + source URL + SHA-256 record
 - `schedule-presets.test.ts` > schedule-presets > round-trips: cronToPresetId(presetToCron(x)) === x for parameterized presets
 - `schedule-presets.test.ts` > schedule-presets > nextRunPreview renders a human sentence
 - `schedule-presets.test.ts` > schedule-presets > PRESETS has exactly the four documented ids
+- `schedule-presets.test.ts` > hourLabel12h (C6 fix — plain-language time select) > renders midnight as 12:00 AM
+- `schedule-presets.test.ts` > hourLabel12h (C6 fix — plain-language time select) > renders morning hours in AM
+- `schedule-presets.test.ts` > hourLabel12h (C6 fix — plain-language time select) > renders noon as 12:00 PM
+- `schedule-presets.test.ts` > hourLabel12h (C6 fix — plain-language time select) > renders afternoon/evening hours in PM
+- `schedule-presets.test.ts` > weekdayLabel (C6 fix — plain-language weekday select) > maps 0-6 to Sunday..Saturday
+- `report-wizard.test.ts` > Step 2: plain-language time/weekday selects (C6 fix) > renders a time <select> with 12h labels instead of the "Hour (0-23)" numeric input
+- `report-wizard.test.ts` > Step 2: plain-language time/weekday selects (C6 fix) > renders a weekday <select> (Sunday…Saturday) instead of the "Day of week (0=Sun..6=Sat" numeric input
+- `report-wizard.test.ts` > Step 2: plain-language time/weekday selects (C6 fix) > time/weekday selects still submit the same numeric values the cron-mapping contract expects
+- `alert-wizard.test.ts` > Step 2: plain-language time/weekday selects (C6 fix) > renders a time <select> with 12h labels instead of the "Hour (0-23)" numeric input
+- `alert-wizard.test.ts` > Step 2: plain-language time/weekday selects (C6 fix) > renders a weekday <select> (Sunday…Saturday) instead of the "Day of week (0=Sun..6=Sat" numeric input
+- `alert-wizard.test.ts` > Step 2: plain-language time/weekday selects (C6 fix) > time/weekday selects still submit the same numeric values the cron-mapping contract expects
 
 **Edge case tests:**
 - `schedule-presets.test.ts` > schedule-presets > returns null presetId for a cron that matches no preset (custom)
 - `schedule-presets.test.ts` > schedule-presets > nextRunPreview handles an invalid cron gracefully
 
+**Fixes:**
+- **Live-verification (2026-07-07), C6:** report/alert wizard step 2 asked for "Hour (0-23)" and "Day of week (0=Sun..6=Sat, weekly only)" as raw numeric inputs — programmer-speak for a nontechnical audience. New `hourLabel12h`/`weekdayLabel` helpers back `<select>` dropdowns with 12h time labels ("7:00 AM") and weekday names in both wizards, submitting the exact same `preset_hour`/`preset_weekday` numeric values the `presetToCron` contract already expects — no contract change. CL: C6-fix.
+
 ---
 
 ### REQ-GUI-WIZARD-002 — Rule-builder mapped 1:1 to the deterministic condition grammar
 
-`core/src/gui/utils/rule-builder.ts` exposes exactly six patterns matching `evaluateDeterministic` (`empty`, `not empty`, `contains "X"`, `not contains "X"`, `line count > N`, `line count < N`) via `buildExpression`/`parseExpression`, with no seventh pattern and no drift from the evaluator's grammar. Unrecognized/legacy expressions parse to `null` and render as Advanced free text rather than being silently mis-mapped.
+`core/src/gui/utils/rule-builder.ts` exposes exactly six patterns matching `evaluateDeterministic` (`empty`/`is empty`, `not empty`/`is not empty`, `contains "X"`, `not contains "X"`, `line count > N`, `line count < N`) via `buildExpression`/`parseExpression`, with no seventh pattern and no drift from the evaluator's grammar — including the evaluator's bare `"empty"`/`"not empty"` synonyms alongside the `"is ..."` forms. Unrecognized/legacy expressions parse to `null` and render as Advanced free text rather than being silently mis-mapped.
 
 **Standard tests:**
 - `rule-builder.test.ts` > RULE_PATTERNS > has exactly six entries with plain-language labels
@@ -12169,12 +12200,16 @@ Chart.js 4.4.9 is vendored locally (pinned version + source URL + SHA-256 record
 - `rule-builder.test.ts` > buildExpression > round-trips every pattern through parseExpression
 - `rule-builder.test.ts` > parseExpression > parses all six recognized forms
 - `rule-builder.test.ts` > parseExpression > is whitespace/case tolerant like evaluateDeterministic
+- `describe-automation.test.ts` > describeAlert > renders proper grammar for the bare "empty"/"not empty" synonyms the evaluator also accepts (C1 fix)
 
 **Edge case tests:**
 - `rule-builder.test.ts` > buildExpression > rejects unquotable text (embedded double quote) with a friendly error
 - `rule-builder.test.ts` > buildExpression > rejects empty contains/not_contains text
 - `rule-builder.test.ts` > buildExpression > rejects negative or non-integer N for line-count patterns
 - `rule-builder.test.ts` > parseExpression > returns null for anything else (renders as Advanced)
+
+**Fixes:**
+- **Live-verification (2026-07-07), C1:** `parseExpression` only recognized `"is empty"`/`"is not empty"` — the evaluator also accepts the bare `"empty"`/`"not empty"` synonyms (see `evaluator.ts`'s own doc comment, and the alert-edit.eta "Not empty" quick-insert button, which inserts the bare form). A legacy/Advanced alert using the bare form fell through to `describeAlert`'s raw-expression fallback, producing the ungrammatical "if it not empty". Both bare forms now map to the same rule-builder pattern as their "is ..." counterparts. CL: C1-fix.
 
 ---
 
@@ -12217,7 +12252,15 @@ The report wizard (`/gui/reports/new`, `/gui/reports/new/step`) is admin-only en
 - `report-wizard.test.ts` > POST /gui/reports/new/step > valid step-1 POST returns step 2 with step-1 values as hidden fields
 - `report-wizard.test.ts` > Review step contract > review step renders hidden fields matching the existing POST contract
 - `report-wizard.test.ts` > Review step contract > CONTRACT: submitting the review form creates a report identical to one created via the legacy form fields
+- `report-wizard.test.ts` > Review step contract > B2: wizard save redirects to the reports LIST page, not the legacy edit form
+- `report-wizard.test.ts` > Review step contract > B2: legacy form save is unchanged — still redirects to the per-report edit page
 - `report-wizard.test.ts` > Review step contract > edit-wizard prefills from an existing definition, including custom cron → Advanced
+- `report-wizard.test.ts` > Step 3: report ID is optional and auto-slugified from the name (B1 live-verification fix) > step 3 renders the ID field as optional (no `required` attribute) inside an Advanced disclosure
+- `report-wizard.test.ts` > Step 3: report ID is optional and auto-slugified from the name (B1 live-verification fix) > blank id auto-generates a slug from the report name
+- `report-wizard.test.ts` > Step 3: report ID is optional and auto-slugified from the name (B1 live-verification fix) > auto-generated slug gets a collision suffix when the base slug is already taken
+- `report-wizard.test.ts` > Step 3: report ID is optional and auto-slugified from the name (B1 live-verification fix) > a hand-typed custom id is still honored (not overridden by the slug)
+- `slugify-id.test.ts` > slugifyForId > lowercases and hyphenates spaces
+- `slugify-id.test.ts` > uniqueSlugForId > appends -2 when the base slug is taken
 
 **Edge case tests:**
 - `report-wizard.test.ts` > GET /gui/reports/new (wizard entry) > returns 403 for a member (creation is admin-only)
@@ -12226,9 +12269,15 @@ The report wizard (`/gui/reports/new`, `/gui/reports/new/step`) is admin-only en
 - `report-wizard.test.ts` > POST /gui/reports/new/step > invalid step POST re-renders the SAME step with values intact and a styled error
 - `report-wizard.test.ts` > POST /gui/reports/new/step > requires auth + CSRF on every wizard POST
 - `report-wizard.test.ts` > POST /gui/reports/new/step > wizard step POSTs are admin-only (member → 403)
+- `report-wizard.test.ts` > Step 3: report ID is optional and auto-slugified from the name (B1 live-verification fix) > an invalid hand-typed custom id is rejected server-side with a styled inline error (not silently blocked)
+- `slugify-id.test.ts` > slugifyForId > prefixes with "r" when the slug would not start with a letter (e.g. leads with a digit)
+- `slugify-id.test.ts` > slugifyForId > falls back to a generic id when the name has no sluggable characters
+- `slugify-id.test.ts` > uniqueSlugForId > keeps incrementing the suffix until a free slug is found
 
 **Fixes:**
 - **Final Codex review round (2026-07-06), Important:** submitting a step with two "Send to" recipients selected posted `delivery_user` as a `string[]` (Fastify's JSON body parser preserves repeated keys as arrays), which `hiddenFields()`'s `escapeHtml(v)` 500'd on since it assumed a string. Fixed by a shared `core/src/gui/utils/wizard-body.ts` `normalizeBody()` that consumes `delivery_user` into a computed `delivery` array (comma-joined) and drops it from the echoed body; any other unexpected array value is joined with `", "` rather than dropped. Test: `report-wizard.test.ts` > Review step contract > two-recipient step-3 submission (repeated delivery_user) renders review correctly and produces comma-separated delivery on final submit (Codex final round, Important).
+- **Live-verification (2026-07-07), B1:** step 3 required a hand-typed "Report ID (lowercase, hyphens)" field with HTML5 `pattern`/`required` validation that silently blocked Next with no visible error. The ID field now lives inside an optional "Custom ID (optional)" `<details>` disclosure; a blank id auto-slugifies from the name (new `core/src/gui/utils/slugify-id.ts`: `slugifyForId` + `uniqueSlugForId` with a `-2`/`-3` collision suffix via `reportService.getReport` lookups), and an invalid hand-typed id is now rejected server-side with a styled inline error instead of relying only on client-side validation. CL: B1-fix.
+- **Live-verification (2026-07-07), B2:** saving the wizard's Review step redirected to the legacy per-report edit form (`/gui/reports/:id/edit`), dropping a nontechnical admin who just finished the guided wizard into the raw technical editor. The Review form now carries a hidden `from=wizard` field; `POST /gui/reports` branches on it to redirect to the list page instead. Legacy form saves (no `from` field) are unaffected. CL: B2-fix.
 
 ---
 
@@ -12241,6 +12290,8 @@ The alert wizard (`/gui/alerts/new`, `/gui/alerts/new/step`) covers all six acti
 - `alert-wizard.test.ts` > GET /gui/alerts/new (wizard entry) > data-source picker organizes entries by scope with friendly names, never raw paths
 - `alert-wizard.test.ts` > Review step contract > review step renders hidden fields matching the existing POST contract
 - `alert-wizard.test.ts` > Review step contract > CONTRACT: submitting the review form creates an alert identical to one created via the legacy form fields
+- `alert-wizard.test.ts` > Review step contract > B2: wizard save redirects to the alerts LIST page, not the legacy edit form
+- `alert-wizard.test.ts` > Review step contract > B2: legacy form save is unchanged — still redirects to the per-alert edit page
 - `alert-wizard.test.ts` > Review step contract > cooldown UI emits the human string contract for every unit
 - `alert-wizard.test.ts` > Review step contract > edit-wizard prefills from an existing definition; unmappable legacy expression falls back to Advanced
 - `alert-wizard.test.ts` > Step 4 action picker (Critical 1) > renders all six action-type picker cards with humanized labels
@@ -12249,6 +12300,10 @@ The alert wizard (`/gui/alerts/new`, `/gui/alerts/new/step`) covers all six acti
 - `alert-wizard.test.ts` > Lossless edit prefill (Critical 2) > editing a webhook alert through the wizard and saving preserves the webhook action deep-equal
 - `alert-wizard.test.ts` > Lossless edit prefill (Critical 2) > editing a 2-action alert carries both actions through unchanged (multi-action passthrough notice)
 - `alert-wizard.test.ts` > Collaboration-scope data sources (Minor 2) > includes collaboration-scope FileIndexEntry entries in the data-source picker, grouped under their space
+- `alert-wizard.test.ts` > Step 4: alert ID is optional and auto-slugified from the name (B1 live-verification fix) > step 4 renders the ID field as optional (no `required` attribute)
+- `alert-wizard.test.ts` > Step 4: alert ID is optional and auto-slugified from the name (B1 live-verification fix) > blank id auto-generates a slug from the alert name
+- `alert-wizard.test.ts` > Step 4: alert ID is optional and auto-slugified from the name (B1 live-verification fix) > auto-generated slug gets a collision suffix when the base slug is already taken
+- `alert-wizard.test.ts` > Step 4: alert ID is optional and auto-slugified from the name (B1 live-verification fix) > a hand-typed custom id is still honored (not overridden by the slug)
 
 **Edge case tests:**
 - `alert-wizard.test.ts` > GET /gui/alerts/new (wizard entry) > returns 403 for a member (creation is admin-only)
@@ -12262,9 +12317,12 @@ The alert wizard (`/gui/alerts/new`, `/gui/alerts/new/step`) covers all six acti
 - `alert-wizard.test.ts` > Step 4 action picker (Critical 1) > defaults to telegram_message fields when no action type has been chosen yet
 - `alert-wizard.test.ts` > Step 4 action picker (Critical 1) > changing action type re-renders step 4 with that type's fields (webhook)
 - `alert-wizard.test.ts` > Step 4 action picker (Critical 1) > echoes attacker-supplied values through escapeHtml in attribute contexts
+- `alert-wizard.test.ts` > Step 4: alert ID is optional and auto-slugified from the name (B1 live-verification fix) > an invalid hand-typed custom id is rejected server-side with a styled inline error
 
 **Fixes:**
 - **Final Codex review round (2026-07-06), Important:** the same `delivery_user` array-value bug as REQ-GUI-WIZARD-004 (step 4's "Send to" checkbox group), fixed identically via the shared `normalizeBody()` helper. Test: `alert-wizard.test.ts` > Review step contract > two-recipient step-4 submission (repeated delivery_user) renders review correctly and produces comma-separated delivery on final submit (Codex final round, Important).
+- **Live-verification (2026-07-07), B1:** the same "Alert ID (lowercase, hyphens)" required-field pattern as REQ-GUI-WIZARD-004, fixed identically — optional "Custom ID (optional)" disclosure, auto-slugify from name via the shared `slugify-id.ts` helpers, and server-side pattern validation for a hand-typed id. CL: B1-fix.
+- **Live-verification (2026-07-07), B2:** the same legacy-edit-form redirect bug as REQ-GUI-WIZARD-004, fixed identically — the Review form carries a hidden `from=wizard` field; `POST /gui/alerts` branches on it to redirect to the alerts list page instead of `/gui/alerts/:id/edit`. CL: B2-fix.
 
 ---
 
@@ -12373,6 +12431,7 @@ The spaces pages (`spaces.eta`, `space-edit.eta`) are reframed in plain language
 
 **Standard tests:**
 - `backups.test.ts` > Backups (/gui/backups) > disabled state: shows the exact pas.yaml snippet and no Back up now button
+- `backups.test.ts` > Backups (/gui/backups) > enabled state: shows a human-readable cron description, not the raw cron expression (C2 fix)
 - `backups.test.ts` > Backups (/gui/backups) > enabled state: lists archives (name, size, date) newest first and shows last-backup freshness
 - `backups.test.ts` > Backups (/gui/backups) > POST /gui/backups/run creates a backup via BackupService and reports the archive name; CSRF required
 
@@ -12381,6 +12440,9 @@ The spaces pages (`spaces.eta`, `space-edit.eta`) are reframed in plain language
 - `backups.test.ts` > Backups (/gui/backups) > POST /gui/backups/run is also admin-only (member → 403)
 - `backups.test.ts` > Backups (/gui/backups) > backup failure renders a styled error, not a 500
 - `admin-route-guards.test.ts` > GUI admin route guards > returns 403 for member access to %s (`/gui/backups` among the parametrized admin-only routes)
+
+**Fixes:**
+- **Live-verification (2026-07-07), C2:** the backups page showed the raw cron expression in parens (e.g. `( 0 3 * * * )`). The route now passes `scheduleDescription` (via the existing `describeCron` helper — never reimplemented) and the template renders that instead ("At 03:00 AM, every day"). CL: C2-fix.
 
 ---
 
@@ -12392,12 +12454,18 @@ The spaces pages (`spaces.eta`, `space-edit.eta`) are reframed in plain language
 - `activity.test.ts` > Activity feed (/gui/activity) > member sees only their own entries, household-shared entries, and their space entries
 - `activity.test.ts` > Activity feed (/gui/activity) > admin sees all entries
 - `activity.test.ts` > Activity feed (/gui/activity) > entries are humanized (app + basename + verb, never full paths) and grouped by day
+- `activity.test.ts` > Activity feed (/gui/activity) > append operations read naturally, not as a dangling "was added to" (C4 fix)
+- `activity.test.ts` > Activity feed (/gui/activity) > day header shows the UTC calendar day, not the previous day in server-local time
 
 **Edge case tests:**
 - `activity.test.ts` > Activity feed (/gui/activity) > member does NOT see another member's own-scoped entries or another space's entries
 - `activity.test.ts` > Activity feed (/gui/activity) > empty state is an invitation, not an apology
 - `activity.test.ts` > Activity feed (/gui/activity) > escapes hostile path strings
 - `activity.test.ts` > Activity feed (/gui/activity) > clamps ?days= to 1-30
+
+**Fixes:**
+- **Live-verification (2026-07-07), A1:** the day header parsed a UTC `YYYY-MM-DD` string with `new Date(day.date)` (midnight UTC), then rendered it via `toLocaleDateString(undefined, ...)` in the server's LOCAL timezone — a server behind UTC at midnight rendered the previous calendar day (e.g. `2026-07-06` showed "Sunday, July 5"). Fixed by parsing with an explicit `Z` suffix and rendering with `timeZone: 'UTC'`. CL: A1-fix.
+- **Live-verification (2026-07-07), C4:** `VERB_BY_OPERATION` mapped `append` to the bare verb `"added to"`, which combined with the template's fixed `"{file} was {verb}"` produced the dangling "log.md was added to". Verbs are now full "was/had ..." clauses (`append` → `"had items added"`) rendered without the template's fixed "was" prefix, so every operation reads as a complete sentence. CL: C4-fix.
 
 ---
 
@@ -12545,7 +12613,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-025 | household-llm-limiter.test.ts, rate-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts | 10 | 18 | Implemented |
 | REQ-LLM-026 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, llm-household-governance.integration.test.ts, natural-language-household-governance.test.ts, cost-tracker.test.ts, compose-runtime.smoke.integration.test.ts | 10 | 13 | Implemented |
 | REQ-LLM-027 | household-llm-limiter.test.ts, llm-guard.test.ts, system-llm-guard.test.ts, natural-language-household-governance.test.ts, compose-runtime.smoke.integration.test.ts | 10 | 11 | Implemented |
-| REQ-LLM-028 | message-rate-tracker.test.ts, message-rate-tracker-wiring.integration.test.ts, llm-usage.test.ts | 8 | 15 | Implemented |
+| REQ-LLM-028 | message-rate-tracker.test.ts, message-rate-tracker-wiring.integration.test.ts, llm-usage.test.ts | 8 | 16 | Implemented |
 | REQ-LLM-029 | compose-runtime.smoke.integration.test.ts, shutdown.test.ts | 10 | 0 | Implemented |
 | REQ-LLM-030 | load-test.test.ts | 10 | 4 | Implemented |
 | REQ-LLM-031 | dispatch.test.ts, route-dispatch.test.ts, natural-language-route-dispatch.test.ts | 18 | 28 | Implemented |
@@ -13030,29 +13098,29 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-PROACTIVE-BRIDGE-011 | proactive-send-guard.test.ts | 1 | 1 | Implemented |
 | REQ-GUI-UX-001 | humanize.test.ts | 2 | 1 | Implemented |
 | REQ-GUI-UX-002 | error-fragment.test.ts | 1 | 3 | Implemented |
-| REQ-GUI-UX-003 | login-reasons.test.ts | 2 | 2 | Implemented |
-| REQ-GUI-UX-004 | nav-regroup.test.ts | 1 | 1 | Implemented |
+| REQ-GUI-UX-003 | login-reasons.test.ts, home.test.ts | 4 | 2 | Implemented |
+| REQ-GUI-UX-004 | nav-regroup.test.ts, home.test.ts | 3 | 1 | Implemented |
 | REQ-GUI-UX-005 | routes.test.ts | 1 | 0 | Implemented |
 | REQ-GUI-UX-006 | — | — | — | Implemented |
 | REQ-GUI-HOME-001 | home.test.ts | 3 | 4 | Implemented |
-| REQ-GUI-HOME-002 | home.test.ts | 1 | 3 | Implemented |
+| REQ-GUI-HOME-002 | home.test.ts | 2 | 3 | Implemented |
 | REQ-GUI-HOME-003 | metrics.test.ts | 3 | 2 | Implemented |
 | REQ-GUI-HOME-004 | metrics.test.ts, alert-history-stats.test.ts | 4 | 6 | Implemented |
 | REQ-GUI-CHARTS-001 | list-queries.test.ts | 6 | 5 | Implemented |
 | REQ-GUI-CHARTS-002 | registry.test.ts, server.test.ts | 5 | 2 | Implemented |
-| REQ-GUI-WIZARD-001 | schedule-presets.test.ts | 4 | 2 | Implemented |
-| REQ-GUI-WIZARD-002 | rule-builder.test.ts | 5 | 4 | Implemented |
+| REQ-GUI-WIZARD-001 | schedule-presets.test.ts, report-wizard.test.ts, alert-wizard.test.ts | 15 | 2 | Implemented |
+| REQ-GUI-WIZARD-002 | rule-builder.test.ts, describe-automation.test.ts | 6 | 4 | Implemented |
 | REQ-GUI-WIZARD-003 | describe-automation.test.ts, reports.test.ts, alerts.test.ts | 10 | 10 | Implemented |
-| REQ-GUI-WIZARD-004 | report-wizard.test.ts | 6 | 6 | Implemented |
-| REQ-GUI-WIZARD-005 | alert-wizard.test.ts | 13 | 11 | Implemented |
+| REQ-GUI-WIZARD-004 | report-wizard.test.ts, slugify-id.test.ts | 13 | 10 | Implemented |
+| REQ-GUI-WIZARD-005 | alert-wizard.test.ts | 17 | 12 | Implemented |
 | REQ-GUI-WIZARD-006 | report-wizard.test.ts, d5b5-auth.test.ts | 3 | 6 | Implemented |
 | REQ-GUI-WIZARD-007 | alert-wizard.test.ts, d5b5-auth.test.ts | 3 | 6 | Implemented |
 | REQ-GUI-HOUSEHOLD-001 | household.test.ts | 4 | 3 | Implemented |
 | REQ-GUI-HOUSEHOLD-002 | household.test.ts, admin-route-guards.test.ts | 2 | 2 | Implemented |
 | REQ-GUI-HOUSEHOLD-003 | d5b5-auth.test.ts | 2 | 0 | Implemented |
 | REQ-GUI-SURFACE-001 | sessions.test.ts | 2 | 4 | Implemented |
-| REQ-GUI-SURFACE-002 | backups.test.ts, admin-route-guards.test.ts | 3 | 4 | Implemented |
-| REQ-GUI-SURFACE-003 | activity.test.ts | 3 | 4 | Implemented |
+| REQ-GUI-SURFACE-002 | backups.test.ts, admin-route-guards.test.ts | 4 | 4 | Implemented |
+| REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **421 test files** | **2897** | **2835** | **5732 tests** |
+| **Totals** | **445 test files** | **2946** | **2860** | **5806 tests** |
