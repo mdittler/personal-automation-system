@@ -173,7 +173,16 @@ export async function registerGuiRoutes(
 			}
 
 			// Content routes
-			registerDashboardRoutes(gui, { registry, scheduler, config, modelSelector, dataDir, logger });
+			registerDashboardRoutes(gui, {
+				registry,
+				scheduler,
+				config,
+				modelSelector,
+				dataDir,
+				logger,
+				alertService,
+				reportService,
+			});
 			registerMetricsRoutes(gui, {
 				dataDir,
 				chatTranscriptIndex: options.chatTranscriptIndex,

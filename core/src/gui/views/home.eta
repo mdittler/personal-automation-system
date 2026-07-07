@@ -1,0 +1,77 @@
+<div class="page-header">
+  <h1>Home</h1>
+</div>
+
+<!-- Zone 1: attention banners (admin-only system health) -->
+<% if (it.isAdmin) { %>
+  <% if (it.noAttentionNeeded) { %>
+    <div class="alert-banner alert-banner-success" role="status">
+      All systems normal.
+    </div>
+  <% } else { %>
+    <% it.banners.forEach(function(b) { %>
+      <div class="alert-banner alert-banner-<%= b.kind %>" role="alert">
+        <strong><%= b.message %></strong>
+        <% if (b.hint) { %>
+          <pre style="white-space:pre-wrap;margin-top:0.5rem"><%= b.hint %></pre>
+        <% } %>
+      </div>
+    <% }); %>
+  <% } %>
+<% } %>
+
+<!-- Zone 2: glance metrics (scoped to the requesting member unless admin) -->
+<div class="stat-grid">
+  <div class="stat-card">
+    <h3>AI spend this month</h3>
+    <div class="value">$<%= it.monthCost %></div>
+  </div>
+  <div class="stat-card">
+    <h3>Active alerts</h3>
+    <div class="value"><%= it.activeAlertsCount %></div>
+  </div>
+  <div class="stat-card">
+    <h3>Next report</h3>
+    <div class="value" style="font-size:1rem"><%~ it.nextReportLine %></div>
+  </div>
+  <% if (it.isAdmin) { %>
+  <div class="stat-card">
+    <h3>Loaded apps</h3>
+    <div class="value"><%= it.appCount %></div>
+  </div>
+  <% } %>
+</div>
+
+<!-- Charts (declarative registry — see docs/GUI_CHARTS.md) -->
+<% if (it.charts && it.charts.length > 0) { %>
+<div class="card">
+  <% it.charts.forEach(function(c) { %>
+    <div class="pas-chart-card">
+      <h3><%= c.title %></h3>
+      <div
+        class="pas-chart-slot"
+        data-pas-chart="<%= c.id %>"
+        data-endpoint="<%= c.endpoint %>"
+        data-type="<%= c.type %>"
+        data-title="<%= c.title %>"
+        data-height="<%= c.height || 240 %>"
+        data-series='<%~ JSON.stringify(c.series) %>'
+      ></div>
+    </div>
+  <% }); %>
+</div>
+<% } %>
+
+<!-- Zone 3: recent activity snippet -->
+<div class="card">
+  <h2>Recent activity</h2>
+  <% if (it.activity.length === 0) { %>
+    <p class="empty-state">Nothing here yet — activity will show up as data changes.</p>
+  <% } else { %>
+    <ul>
+      <% it.activity.forEach(function(a) { %>
+        <li><%= a.app %>: <%= a.file %> <%= a.verb %></li>
+      <% }); %>
+    </ul>
+  <% } %>
+</div>
