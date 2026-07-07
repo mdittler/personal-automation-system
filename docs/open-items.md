@@ -5,7 +5,32 @@ User manual actions are tracked separately in `user_actions.md`.
 
 ---
 
-## Phase Sequence (ordered — "next phase" = first unchecked item)
+## Phase Sequence (ordered — read the Master Execution Order first)
+
+### ⚠️ Master Execution Order — all pending work (2026-07-07)
+
+**This is the canonical ordering for everything pending in this project. Read it before picking any next phase.** The numbered table below covers only the chatbot-primary / T7 / HTML tracks; the full pending set spans four tracks (audit remediation PP-1..PP-7 + UX Hardening live in `docs/implementation-phases.md` "Planned Phases" sections; SR/AG under Confirmed Phases below). Tracks may interleave; **within a track the order is binding, and the hard gates must never be reordered past.**
+
+**Hard gates (violating any of these creates rework or an unreviewable design — do not skip):**
+
+1. **SR-1 design pass before T2a (#6).** Tier A capability names, T2a `capabilities.tools[]`, and the AG-3 metadata share one manifest surface — built once or built twice.
+2. **AG-3 rider lands inside T2a itself** (see the amended #6 row): per-tool risk class, `agentAllowed`, confirmation requirement, cost hint. Retrofitting risk classes onto shipped tools is the expensive path.
+3. **SR-2 interface before T5.notes (#12)** so each T5 app slice migrates once (fallback: fold into T6b, accepted only if T5 starts before SR-2 is planned).
+4. **AG-2 only after T3 (#9)** — shadow-mode telemetry is the evidence the loop substrate behaves. **AG-5 only after AG-2 + ≥1 month of real session traces** — the traces are the design input for the routine format; earlier is guessing.
+5. **PP-1, PP-2, PP-3 complete before the repo goes public** (SEC-1's history decision is irreversible once published). **SR-3 only after PP-1..PP-7.**
+6. **SR-1 Tier C (process isolation) before any public app registry ships.**
+7. **PP-7 batch 4 only while the T-track remains distant** — its targets (route verification, per-purpose classifier overrides) are deleted in T6b.
+
+**Recommended sequence by track:**
+
+- **Track A — reliability & UX (independent; start anytime, highest near-term leverage):** UX Hardening Batches 1 → 3 → 4 → 5 (Batch 2 already shipped in the GUI UX Redesign) interleaved with **PP-1 → PP-2 → PP-3** (the publication gate trio, containing INST-1 / SEC-1 / DEP-1/2) → **PP-5** (BKP-1 backups) → **PP-4 → PP-6 → PP-7** (PP-7 batches 1–2 are free wins, anytime; batch 4 per gate 7).
+- **Track B — chatbot-primary + agentic (the numbered table, with confirmed insertions):** **SR-1 design pass** → #4 T1a → #5 T1 → **#6 T2a (+AG-3 rider)** → #7 T2b → #8 T2c → #9 T3 → **AG-2 (+AG-6 GUI timeline, +AG-7 agent bucket; admin-only)** → #10 T3b → #11 T4 → **SR-2 interface** → #12–17 T5.* → #18 T6a → #19 T6b → **AG-5 routines** (per gate 4).
+- **Track C — publication (after Track A completes):** **SR-3** (absorbs PP-6/DOC remainder; ships `APP_TRUST_MODEL.md` regardless of SR-1 tier progress) → **SR-4** (harness extraction — lowest urgency).
+- **Track D — non-blocking, additive:** #20–25 T7 slices (activate on post-T6b recall telemetry only); #26–28 HTML-A/B/C.
+
+*Already done from the confirmed SR/AG set: AG-1 — doctrine adopted at `docs/agentic-autonomy-doctrine.md` (includes the AG-8 standing decision: no resident light-harness agent in core).*
+
+---
 
 | # | Phase | Sessions | What it delivers |
 |---|---|---|---|
