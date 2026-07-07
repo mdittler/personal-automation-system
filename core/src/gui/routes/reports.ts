@@ -93,8 +93,9 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 		});
 	});
 
-	// --- New form ---
-	server.get('/reports/new', async (request: FastifyRequest, reply: FastifyReply) => {
+	// --- New form (legacy/advanced — the wizard at GET /reports/new is the default
+	// admin path; this route stays reachable via the list page's "Advanced" link) ---
+	server.get('/reports/new/legacy', async (request: FastifyRequest, reply: FastifyReply) => {
 		// D5b-5: only platform-admin can create reports.
 		if (request.user && !request.user.isPlatformAdmin) {
 			return reply.status(403).viewAsync('403', { title: '403 Forbidden — PAS' });

@@ -1,8 +1,11 @@
 <div class="page-header">
   <h1>Reports</h1>
+  <% if (it.isPlatformAdmin) { %>
   <div class="actions">
-    <a href="/gui/reports/new" role="button">Create Report</a>
+    <a href="/gui/reports/new" role="button">Set up a report</a>
+    <a href="/gui/reports/new/legacy" class="outline" role="button">Advanced</a>
   </div>
+  <% } %>
 </div>
 
 <% if (it.reports.length === 0) { %>

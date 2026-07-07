@@ -48,6 +48,7 @@ import { registerLlmUsageRoutes } from './routes/llm-usage.js';
 import { registerLogsRoutes } from './routes/logs.js';
 import { registerMetricsRoutes } from './routes/metrics.js';
 import { registerRegressionRoutes } from './routes/regression.js';
+import { registerReportWizardRoutes } from './routes/report-wizard.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerSchedulerRoutes } from './routes/scheduler.js';
 import { registerSettingsRoutes } from './routes/settings.js';
@@ -310,6 +311,16 @@ export async function registerGuiRoutes(
 					userManager,
 					registry,
 					spaceService,
+					dataDir,
+					timezone: config.timezone,
+					logger,
+				});
+				// Batch 3: guided report wizard — same reportService/registry, submits
+				// the existing POST /gui/reports contract via reports.ts's own handler.
+				registerReportWizardRoutes(gui, {
+					reportService,
+					userManager,
+					registry,
 					dataDir,
 					timezone: config.timezone,
 					logger,

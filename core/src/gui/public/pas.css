@@ -525,6 +525,32 @@ table tbody tr:nth-child(even):hover {
 	}
 }
 
+/* ----- 9d. Report/alert wizard steps (Batch 3/4) ----- */
+/* Single-column stacking + >=44px touch targets at all widths, per the
+   responsive rules that bind every batch. */
+.pas-wizard-card {
+	border: 1px solid var(--pas-border);
+	border-radius: var(--pas-radius-sm);
+	padding: 0.75rem 1rem;
+	margin-bottom: 0.75rem;
+}
+
+.pas-wizard-card summary {
+	cursor: pointer;
+}
+
+.pas-wizard-card label,
+.pas-wizard-card input,
+.pas-wizard-card select,
+.pas-wizard-card textarea {
+	min-height: 44px;
+}
+
+.pas-describe-sentence {
+	display: block;
+	font-style: italic;
+}
+
 button[aria-busy="true"],
 input[aria-busy="true"] {
 	opacity: 0.7;

@@ -422,7 +422,7 @@ describe('operator GUI templates surface user.name, not user.id', () => {
 
 	it('report-edit delivery checkboxes show name as label text, not numeric id', async () => {
 		const cookies = await loginAsAdmin(built.app);
-		const res = await built.app.inject({ method: 'GET', url: '/gui/reports/new', cookies });
+		const res = await built.app.inject({ method: 'GET', url: '/gui/reports/new/legacy', cookies });
 		expect(res.statusCode).toBe(200);
 		const labels = extractDeliveryCbLabels(res.body);
 		expect(labels.length).toBeGreaterThanOrEqual(1);
