@@ -60,6 +60,7 @@ Thumbs.db
 !.claude/commands/
 !.claude/hooks/
 !.claude/settings.json
+!.claude/launch.json
 
 # Logs
 *.log
@@ -74,3 +75,6 @@ Thumbs.db
 # Superpowers brainstorm sessions
 .superpowers/
 .worktrees/
+
+# GUI verify-harness runtime artifact (expected-numbers snapshot, regenerated per run)
+scripts/.gui-verify-expected.json

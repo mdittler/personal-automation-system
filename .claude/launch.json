@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "gui-verify",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["exec", "tsx", "scripts/gui-verify-harness.ts"],
+      "port": 3777
+    }
+  ]
+}
