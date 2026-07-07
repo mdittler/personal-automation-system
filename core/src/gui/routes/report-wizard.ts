@@ -40,6 +40,7 @@ import {
 	nextRunPreview,
 	presetToCron,
 } from '../utils/schedule-presets.js';
+import { normalizeBody } from '../utils/wizard-body.js';
 
 export interface ReportWizardRoutesOptions {
 	reportService: ReportService;
@@ -69,11 +70,26 @@ function forbidden(reply: FastifyReply): Promise<FastifyReply> {
 		.viewAsync('403', { title: '403 Forbidden — PAS' }) as unknown as Promise<FastifyReply>;
 }
 
-/** Hidden `<input type="hidden">` for every entry in `values`, skipping `step` (rendered separately). */
-function hiddenFields(values: Record<string, string>, exclude: Set<string> = new Set()): string {
+/**
+ * Hidden `<input type="hidden">` for every entry in `values`, skipping `step`
+ * (rendered separately). Defensively tolerates array values (a repeated form
+ * key that reached this function despite `normalizeBody` — e.g. a future
+ * caller that doesn't route through the step-POST boundary) by emitting one
+ * hidden input per array element instead of throwing inside `escapeHtml`.
+ */
+function hiddenFields(
+	values: Record<string, string | string[]>,
+	exclude: Set<string> = new Set(),
+): string {
 	return Object.entries(values)
 		.filter(([k]) => !exclude.has(k))
-		.map(([k, v]) => `<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v)}" />`)
+		.flatMap(([k, v]) => {
+			const name = escapeHtml(k);
+			const list = Array.isArray(v) ? v : [v];
+			return list.map(
+				(item) => `<input type="hidden" name="${name}" value="${escapeHtml(item)}" />`,
+			);
+		})
 		.join('\n');
 }
 
@@ -433,17 +449,14 @@ export function registerReportWizardRoutes(
 			}
 
 			if (step === 3) {
-				const deliveryUsers = ([] as string[]).concat(
-					(body as unknown as { delivery_user?: string | string[] }).delivery_user ?? [],
-				);
-				const delivery = deliveryUsers.filter(Boolean);
-				if (!body.name || !body.id) {
+				const { body: normalized, delivery } = normalizeBody(body);
+				if (!normalized.name || !normalized.id) {
 					return reply
 						.status(400)
 						.type('text/html')
 						.send(
 							renderStep3(
-								{ ...body, delivery: delivery.join(', ') },
+								{ ...normalized, delivery: delivery.join(', ') },
 								getUsers(),
 								csrfToken,
 								'Give this report a name and an ID.',
@@ -456,14 +469,14 @@ export function registerReportWizardRoutes(
 						.type('text/html')
 						.send(
 							renderStep3(
-								{ ...body, delivery: delivery.join(', ') },
+								{ ...normalized, delivery: delivery.join(', ') },
 								getUsers(),
 								csrfToken,
 								'Choose at least one person to send it to.',
 							),
 						);
 				}
-				const next = { ...body, step: '4', delivery: delivery.join(', ') };
+				const next = { ...normalized, step: '4', delivery: delivery.join(', ') };
 				return reply.type('text/html').send(renderStep4(next, csrfToken, timezone));
 			}
 

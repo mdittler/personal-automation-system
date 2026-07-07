@@ -628,6 +628,85 @@ describe('Review step contract', () => {
 		expect(body).toContain('pas-describe-sentence');
 	});
 
+	it('two-recipient step-4 submission (repeated delivery_user) renders review correctly and produces comma-separated delivery on final submit (Codex final round, Important)', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+
+		const step1 = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/new/step',
+			cookies,
+			payload: {
+				_csrf: csrfToken,
+				step: '1',
+				ds_app_id_0: 'food',
+				ds_scope_0: 'user',
+				ds_user_id_0: ADMIN_USER.id,
+				ds_path_0: 'pantry.md',
+			},
+		});
+		const s1 = extractHiddenFields(step1.body);
+
+		const step2 = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/new/step',
+			cookies,
+			payload: {
+				...s1,
+				_csrf: csrfToken,
+				trigger_type: 'scheduled',
+				schedule_advanced: '0 7 * * *',
+			},
+		});
+		const s2 = extractHiddenFields(step2.body);
+
+		const step3 = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/new/step',
+			cookies,
+			payload: { ...s2, _csrf: csrfToken, rule_pattern: 'contains', rule_text: 'expired' },
+		});
+		const s3 = extractHiddenFields(step3.body);
+
+		// Two recipients selected — Fastify parses the repeated form key as an
+		// array, which previously reached hiddenFields()'s escapeHtml(v) call
+		// assuming a string and 500'd.
+		const step4 = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts/new/step',
+			cookies,
+			payload: {
+				...s3,
+				_csrf: csrfToken,
+				id: 'wizard-alert-two-recipients',
+				name: 'Wizard Alert Two Recipients',
+				delivery_user: [ADMIN_USER.id, MEMBER_USER.id],
+				action_type_0: 'telegram_message',
+				action_message_0: 'Check it out: {data}',
+				cooldown_n: '4',
+				cooldown_unit: 'hours',
+			},
+		});
+		expect(step4.statusCode).toBe(200);
+		const s4 = extractHiddenFields(step4.body);
+		expect(s4.step).toBe('5');
+		// Deterministic policy: join with ", " (documented in normalizeBody).
+		expect(s4.delivery).toBe(`${ADMIN_USER.id}, ${MEMBER_USER.id}`);
+		expect(s4.delivery_user).toBeUndefined();
+
+		const finalSubmit = await app.inject({
+			method: 'POST',
+			url: '/gui/alerts',
+			cookies,
+			payload: { ...s4, _csrf: csrfToken },
+		});
+		expect(finalSubmit.statusCode).toBe(302);
+
+		const saved = await alertService.getAlert('wizard-alert-two-recipients');
+		expect(saved).not.toBeNull();
+		expect(saved?.delivery).toEqual([ADMIN_USER.id, MEMBER_USER.id]);
+	});
+
 	it('edit-wizard prefills from an existing definition; unmappable legacy expression falls back to Advanced', async () => {
 		await alertService.saveAlert({
 			id: 'existing-alert',

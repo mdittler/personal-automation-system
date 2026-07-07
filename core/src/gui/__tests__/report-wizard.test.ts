@@ -492,6 +492,71 @@ describe('Review step contract', () => {
 		expect(normalize(wizardReport)).toEqual(normalize(legacyReport));
 	});
 
+	it('two-recipient step-3 submission (repeated delivery_user) renders review correctly and produces comma-separated delivery on final submit (Codex final round, Important)', async () => {
+		const loginCookies = await login(ADMIN_USER.id, ADMIN_PASS);
+		const { cookies, csrfToken } = await getCsrf(loginCookies);
+
+		const step1 = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: {
+				_csrf: csrfToken,
+				step: '1',
+				section_type_0: 'changes',
+				section_label_0: 'Recent changes',
+				section_lookback_0: '24',
+			},
+		});
+		expect(step1.statusCode).toBe(200);
+		const s1 = extractHiddenFields(step1.body);
+
+		const step2 = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: { ...s1, _csrf: csrfToken, schedule_advanced: '0 7 * * *' },
+		});
+		expect(step2.statusCode).toBe(200);
+		const s2 = extractHiddenFields(step2.body);
+
+		// Two recipients selected — Fastify parses the repeated form key as an
+		// array, which previously reached hiddenFields()'s escapeHtml(v) call
+		// assuming a string and 500'd.
+		const step3 = await app.inject({
+			method: 'POST',
+			url: '/gui/reports/new/step',
+			cookies,
+			payload: {
+				...s2,
+				_csrf: csrfToken,
+				delivery_user: [ADMIN_USER.id, MEMBER_USER.id],
+				llm_enabled: 'false',
+				id: 'wizard-two-recipients',
+				name: 'Wizard Two Recipients',
+			},
+		});
+		expect(step3.statusCode).toBe(200);
+		const s3 = extractHiddenFields(step3.body);
+		expect(s3.step).toBe('4');
+		// Deterministic policy: join with ", " (documented in normalizeBody).
+		expect(s3.delivery).toBe(`${ADMIN_USER.id}, ${MEMBER_USER.id}`);
+		// delivery_user itself must not survive as a stray hidden field.
+		expect(s3.delivery_user).toBeUndefined();
+
+		const finalSubmit = await app.inject({
+			method: 'POST',
+			url: '/gui/reports',
+			cookies,
+			payload: { ...s3, _csrf: csrfToken },
+		});
+		expect(finalSubmit.statusCode).toBe(302);
+
+		const saved = await reportService.getReport('wizard-two-recipients');
+		expect(saved).not.toBeNull();
+		expect(saved?.delivery).toEqual([ADMIN_USER.id, MEMBER_USER.id]);
+	});
+
 	it('edit-wizard prefills from an existing definition, including custom cron → Advanced', async () => {
 		await reportService.saveReport({
 			id: 'existing-report',
