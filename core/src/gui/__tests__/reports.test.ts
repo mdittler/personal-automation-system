@@ -212,6 +212,13 @@ describe('Report GUI Routes', () => {
 			expect(res.body).toContain('Monday');
 			expect(res.body).toContain('1'); // section count
 		});
+
+		it('shows a human-readable describeReport sentence per row', async () => {
+			await createReport();
+			const res = await authenticatedGet('/gui/reports');
+			expect(res.body).toContain('pas-describe-sentence');
+			expect(res.body).toContain('Intro');
+		});
 	});
 
 	// --- New form ---

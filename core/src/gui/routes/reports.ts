@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { isDeliveryVisible } from '../../gui/guards/resolve-viewer-scope.js';
+import { describeReport } from '../../gui/utils/describe-automation.js';
 import { sendErrorFragment } from '../../gui/utils/error-fragment.js';
 import type { ReportService } from '../../services/reports/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
@@ -78,6 +79,7 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 					id: r.id,
 					name: r.name ?? r.id,
 					description: r.description,
+					descriptionSentence: describeReport(r),
 					schedule,
 					humanSchedule: describeCron(schedule),
 					nextRun: nextRun ? formatDateTime(nextRun, timezone) : null,

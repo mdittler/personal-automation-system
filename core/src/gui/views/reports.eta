@@ -31,6 +31,7 @@
             <% if (report.description) { %>
               <br><small><%= report.description %></small>
             <% } %>
+            <br><small class="pas-describe-sentence"><%= report.descriptionSentence %></small>
           </td>
           <td><%= report.humanSchedule %></td>
           <td>
