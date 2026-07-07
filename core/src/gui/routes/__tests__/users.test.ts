@@ -139,6 +139,6 @@ describe('User GUI routes', () => {
 		expect(res.statusCode).toBe(200);
 		expect(res.body).toContain('/gui/users/111/reset-password');
 		expect(res.body).toContain('/gui/users/222/reset-password');
-		expect(res.body).toContain('Reset Password');
+		expect(res.body).toContain('Reset password');
 	});
 });

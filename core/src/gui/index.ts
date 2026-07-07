@@ -20,6 +20,7 @@ import type { ContextStoreServiceImpl } from '../services/context-store/index.js
 import type { CredentialService } from '../services/credentials/index.js';
 import type { FileIndexService } from '../services/file-index/index.js';
 import type { HouseholdService } from '../services/household/index.js';
+import type { InviteService } from '../services/invite/index.js';
 import type { CostTracker } from '../services/llm/cost-tracker.js';
 import type { LLMServiceImpl } from '../services/llm/index.js';
 import type { ModelCatalog } from '../services/llm/model-catalog.js';
@@ -125,6 +126,12 @@ export interface GuiOptions {
 	 * other route).
 	 */
 	fileIndex?: Pick<FileIndexService, 'getEntries'>;
+	/**
+	 * Batch 5 (GUI UX redesign): invite service, used by the Household hub's
+	 * guided invite flow (Task 5.1). Optional — when absent, the invite POST
+	 * responds with a styled error rather than erroring.
+	 */
+	inviteService?: InviteService;
 }
 
 /**
@@ -374,6 +381,8 @@ export async function registerGuiRoutes(
 					userMutationService,
 					registry,
 					spaceService,
+					householdService: options.householdService,
+					inviteService: options.inviteService,
 					logger,
 				});
 			}

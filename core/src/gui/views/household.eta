@@ -1,0 +1,184 @@
+<div class="page-header">
+  <h1>Household</h1>
+</div>
+
+<% if (it.isReadOnly) { %>
+  <!-- Member read-only view: own household only, no invite form, no mutation controls. -->
+  <p style="color:var(--pico-muted-color)">
+    <% if (it.household) { %>
+      Who's in <strong><%= it.household.name %></strong>.
+    <% } else { %>
+      You're not currently assigned to a household.
+    <% } %>
+  </p>
+
+  <% if (it.users.length === 0) { %>
+    <p class="empty-state">No other members yet.</p>
+  <% } else { %>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Apps</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% for (const user of it.users) { %>
+            <tr>
+              <td>
+                <strong><%= user.name %></strong><br><small><%= user.id %></small>
+              </td>
+              <td><%= user.roleLabel %></td>
+              <td><%= user.appLabels.join(', ') || '—' %></td>
+            </tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+<% } else { %>
+  <!-- Admin view: full management + guided invite flow. -->
+  <details style="margin-bottom:1.5rem" id="invite-details">
+    <summary role="button" class="outline">Invite someone new</summary>
+    <div style="padding:1rem 0.25rem">
+      <form hx-post="/gui/users/invite" hx-target="#invite-result" hx-swap="innerHTML">
+        <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+        <div class="grid">
+          <label>
+            Name
+            <input type="text" name="name" placeholder="e.g., Sarah" required />
+          </label>
+          <label>
+            Role
+            <select name="role">
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+        </div>
+        <% if (it.households && it.households.length > 1) { %>
+          <label>
+            Household
+            <select name="householdId">
+              <% for (const hh of it.households) { %>
+                <option value="<%= hh.id %>"><%= hh.name %></option>
+              <% } %>
+            </select>
+          </label>
+        <% } %>
+        <button type="submit">Create invite</button>
+      </form>
+      <div id="invite-result" style="margin-top:1rem"></div>
+    </div>
+  </details>
+
+  <% if (it.pendingInvites && it.pendingInvites.length > 0) { %>
+    <h3>Pending invites</h3>
+    <div style="overflow-x:auto;margin-bottom:1.5rem">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Expires</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% for (const invite of it.pendingInvites) { %>
+            <tr>
+              <td><%= invite.name %></td>
+              <td><%= invite.role %></td>
+              <td><%= invite.expired ? 'Expired' : new Date(invite.expiresAt).toLocaleString() %></td>
+            </tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+
+  <% if (it.users.length === 0) { %>
+    <p class="empty-state">No users registered. Invite someone above to get started.</p>
+  <% } else { %>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Apps</th>
+            <th>Spaces</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% for (const user of it.users) { %>
+            <tr id="user-row-<%= user.id %>">
+              <td>
+                <strong><%= user.name %></strong><br><small><%= user.id %></small>
+                <% if (user.isAdmin) { %>
+                  <br><small><%= user.roleLabel %></small>
+                <% } %>
+              </td>
+              <td>
+                <form hx-post="/gui/users/<%= user.id %>/apps"
+                      hx-target="#user-row-<%= user.id %>"
+                      hx-swap="outerHTML"
+                      style="margin:0">
+                  <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+                  <% for (const app of it.apps) { %>
+                    <label style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.25rem;font-weight:normal">
+                      <input type="checkbox"
+                             name="app_<%= app.id %>"
+                             <% if (user.enabledApps && (user.enabledApps[0] === '*' || user.enabledApps.includes(app.id))) { %>checked<% } %>
+                             onchange="this.form.requestSubmit()"
+                             style="margin:0" />
+                      <%= app.name %>
+                    </label>
+                  <% } %>
+                </form>
+              </td>
+              <td id="groups-<%= user.id %>">
+                <% if (it.spaces.length === 0) { %>
+                  <span style="font-size:0.85rem;color:var(--pas-text-muted)">No spaces — <a href="/gui/spaces">create one</a></span>
+                <% } else { %>
+                  <form hx-post="/gui/users/<%= user.id %>/groups"
+                        hx-target="#groups-<%= user.id %>"
+                        hx-swap="innerHTML"
+                        style="margin:0">
+                    <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+                    <% for (const space of it.spaces) { %>
+                      <label style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.25rem;font-weight:normal;font-size:0.85rem;">
+                        <input type="checkbox"
+                               name="space_<%= space.id %>"
+                               <% if (user.sharedScopes && user.sharedScopes.includes(space.id)) { %>checked<% } %>
+                               onchange="this.form.requestSubmit()"
+                               style="margin:0" />
+                        <%= space.name %>
+                      </label>
+                    <% } %>
+                  </form>
+                <% } %>
+              </td>
+              <td>
+                <a href="/gui/users/<%= user.id %>/reset-password" role="button" class="outline secondary toggle-btn">Reset password</a>
+                <% if (user.isAdmin && it.adminCount <= 1) { %>
+                  <button class="outline secondary toggle-btn" style="opacity:0.4;cursor:not-allowed;margin-left:0.35rem" disabled title="Cannot remove the sole admin">Remove</button>
+                <% } else { %>
+                  <form hx-post="/gui/users/<%= user.id %>/remove"
+                        hx-target="#user-row-<%= user.id %>"
+                        hx-swap="delete"
+                        hx-confirm="Remove user <%= user.name %>? This cannot be undone."
+                        style="margin:0;display:inline-block;margin-left:0.35rem">
+                    <% if (it.csrfToken) { %><input type="hidden" name="_csrf" value="<%= it.csrfToken %>" /><% } %>
+                    <button type="submit" class="outline secondary toggle-btn">Remove</button>
+                  </form>
+                <% } %>
+              </td>
+            </tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+<% } %>

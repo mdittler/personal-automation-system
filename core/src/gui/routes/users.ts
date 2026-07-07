@@ -1,19 +1,27 @@
 /**
- * User management routes.
+ * Household hub routes (Batch 5, Tasks 5.1 + 5.2).
  *
- * GUI for viewing users, managing app access, shared scopes, and removal.
+ * GUI for viewing household members, managing app access, shared scopes,
+ * removal, and inviting new members (admin). Task 5.2 deliberately opens
+ * `GET /users` to any authenticated user: platform admins see the full
+ * management view (all users, invite form, mutation controls); members see
+ * a read-only view scoped to their OWN household only. All mutation POSTs
+ * (apps, groups, remove, invite) remain platform-admin-only.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { requirePlatformAdmin } from '../../gui/guards/require-platform-admin.js';
 import type { AppRegistry } from '../../services/app-registry/index.js';
+import type { HouseholdService } from '../../services/household/index.js';
+import type { InviteService } from '../../services/invite/index.js';
 import type { SpaceService } from '../../services/spaces/index.js';
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { UserMutationService } from '../../services/user-manager/user-mutation-service.js';
 import type { SpaceDefinition } from '../../types/spaces.js';
 import type { RegisteredUser } from '../../types/users.js';
 import { sendErrorFragment } from '../utils/error-fragment.js';
+import { humanizeLabel } from '../utils/humanize.js';
 
 export interface UserRoutesOptions {
 	userManager: UserManager;
@@ -21,6 +29,17 @@ export interface UserRoutesOptions {
 	registry: AppRegistry;
 	spaceService: SpaceService;
 	logger: Logger;
+	/**
+	 * Required for the Task 5.2 member-scoped read-only view and the Task 5.1
+	 * invite flow's household resolution. Optional only for legacy test
+	 * harnesses that never exercise the member branch or invite POST.
+	 */
+	householdService?: Pick<
+		HouseholdService,
+		'getHouseholdForUser' | 'listHouseholds' | 'getHousehold' | 'getMembers'
+	>;
+	/** Required for the invite flow (Task 5.1). Optional for legacy test harnesses. */
+	inviteService?: InviteService;
 }
 
 function escapeHtml(str: string): string {
@@ -32,31 +51,158 @@ function escapeHtml(str: string): string {
 		.replace(/'/g, '&#39;');
 }
 
+/** Build the friendly app-label list for a user (mirrors the enabledApps → label mapping in users.ts's row builder). */
+function friendlyAppLabels(
+	user: Pick<RegisteredUser, 'enabledApps'>,
+	registry: AppRegistry,
+): string[] {
+	if (user.enabledApps.includes('*')) {
+		return registry.getLoadedAppIds().map((id) => registry.getApp(id)?.manifest.app.name ?? id);
+	}
+	return user.enabledApps.map((id) => registry.getApp(id)?.manifest.app.name ?? id);
+}
+
 export function registerUserRoutes(server: FastifyInstance, options: UserRoutesOptions): void {
-	const { userManager, userMutationService, registry, spaceService, logger } = options;
+	const {
+		userManager,
+		userMutationService,
+		registry,
+		spaceService,
+		logger,
+		householdService,
+		inviteService,
+	} = options;
 
 	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
 
-	// --- List all users ---
-	server.get('/users', platformAdminOnly, async (_request: FastifyRequest, reply: FastifyReply) => {
-		const users = userManager.getAllUsers();
-		const appIds = registry.getLoadedAppIds();
-		const apps = appIds.map((id) => ({
-			id,
-			name: registry.getApp(id)?.manifest.app.name ?? id,
-		}));
-		const spaces = spaceService.listSpaces();
-		const adminCount = users.filter((u) => u.isAdmin).length;
+	// --- Household hub: admin sees full management view, member sees read-only own-household view ---
+	server.get('/users', async (request: FastifyRequest, reply: FastifyReply) => {
+		const actor = request.user;
+		if (!actor) {
+			return reply.status(403).viewAsync('403', { title: '403 Forbidden — PAS' });
+		}
 
-		return reply.viewAsync('users', {
-			title: 'Users — PAS',
+		if (actor.isPlatformAdmin) {
+			const users = userManager.getAllUsers();
+			const appIds = registry.getLoadedAppIds();
+			const apps = appIds.map((id) => ({
+				id,
+				name: registry.getApp(id)?.manifest.app.name ?? id,
+			}));
+			const spaces = spaceService.listSpaces();
+			const adminCount = users.filter((u) => u.isAdmin).length;
+
+			const households = householdService?.listHouseholds() ?? [];
+			const invites = inviteService ? await inviteService.listInvites() : {};
+			const pendingInvites = Object.entries(invites)
+				.filter(([, invite]) => invite.usedBy === null)
+				.map(([code, invite]) => ({
+					code,
+					name: invite.name,
+					role: humanizeLabel(invite.role),
+					expiresAt: invite.expiresAt,
+					expired: new Date(invite.expiresAt) <= new Date(),
+				}));
+
+			return reply.viewAsync('household', {
+				title: 'Household — PAS',
+				activePage: 'users',
+				isReadOnly: false,
+				users: users.map((u) => ({
+					...u,
+					roleLabel: humanizeLabel(u.isAdmin ? 'admin' : 'member'),
+					appLabels: friendlyAppLabels(u, registry),
+				})),
+				apps,
+				spaces,
+				adminCount,
+				households,
+				pendingInvites,
+			});
+		}
+
+		// --- Member: read-only view of their OWN household only ---
+		if (!householdService) {
+			return reply.status(403).viewAsync('403', { title: '403 Forbidden — PAS' });
+		}
+		const hhId = householdService.getHouseholdForUser(actor.userId);
+		const members = hhId ? householdService.getMembers(hhId) : [];
+		const household = hhId ? householdService.getHousehold(hhId) : null;
+
+		return reply.viewAsync('household', {
+			title: 'Household — PAS',
 			activePage: 'users',
-			users,
-			apps,
-			spaces,
-			adminCount,
+			isReadOnly: true,
+			household,
+			users: members.map((u) => ({
+				...u,
+				roleLabel: humanizeLabel(u.isAdmin ? 'admin' : 'member'),
+				appLabels: friendlyAppLabels(u, registry),
+			})),
 		});
 	});
+
+	// --- Create invite (admin) ---
+	server.post(
+		'/users/invite',
+		platformAdminOnly,
+		async (request: FastifyRequest, reply: FastifyReply) => {
+			if (!inviteService) {
+				return sendErrorFragment(reply, 500, 'Invites are not configured on this system.');
+			}
+			const actor = request.user;
+			if (!actor) {
+				return sendErrorFragment(reply, 403, "You don't have permission to do that.");
+			}
+
+			const body = request.body as { name?: string; role?: string; householdId?: string };
+			const name = (body.name ?? '').trim();
+			if (!name) {
+				return sendErrorFragment(reply, 400, 'A name is required to create an invite.');
+			}
+
+			const role = body.role === 'admin' ? 'admin' : 'member';
+
+			// Resolve the household: an explicit picker value (platform admin, multiple
+			// households) takes precedence; otherwise default to the admin's own household.
+			const resolvedHouseholdId =
+				(body.householdId?.trim() || undefined) ??
+				householdService?.getHouseholdForUser(actor.userId) ??
+				undefined;
+
+			if (!resolvedHouseholdId) {
+				return sendErrorFragment(
+					reply,
+					400,
+					"We couldn't figure out which household to add them to. Ask a system administrator to check the household setup.",
+				);
+			}
+
+			let code: string;
+			try {
+				code = await inviteService.createInvite(name, actor.userId, {
+					householdId: resolvedHouseholdId,
+					role,
+				});
+			} catch (err) {
+				const message = err instanceof Error ? err.message : 'Could not create the invite.';
+				return sendErrorFragment(reply, 400, message);
+			}
+
+			logger.info({ name, role, householdId: resolvedHouseholdId }, 'Invite created via GUI');
+
+			const safeName = escapeHtml(name);
+			const safeCode = escapeHtml(code);
+			return reply.type('text/html').send(
+				`<div class="pas-invite-card" role="status">
+					<p>Invite created for <strong>${safeName}</strong>.</p>
+					<p>Send this to them in Telegram: <code>/start ${safeCode}</code></p>
+					<p><small>Expires in 24 hours.</small></p>
+					<p><small>Then set their password below (optional) — once they've registered, use <a href="/gui/users">Reset Password</a> on their row.</small></p>
+				</div>`,
+			);
+		},
+	);
 
 	// --- Update user app access (htmx partial) ---
 	server.post(
