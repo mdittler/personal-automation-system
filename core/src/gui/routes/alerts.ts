@@ -316,6 +316,15 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 			if (!alert) {
 				return reply.code(404).send('Alert not found');
 			}
+			// Scoping gap (final Codex review round, Critical): the delivery-visibility
+			// check applied to the list/edit views must also gate history access — a
+			// member not in the delivery list must not be able to read an alert's fire
+			// history. 404 (not 403) matches the sessions-route precedent, which avoids
+			// leaking whether a given alert id exists to actors who can't see it.
+			const actor = request.user;
+			if (actor && !isDeliveryVisible(alert.delivery ?? [], actor)) {
+				return reply.code(404).send('Alert not found');
+			}
 
 			const historyDir = join(
 				resolve(options.dataDir),
@@ -359,6 +368,18 @@ export function registerAlertRoutes(server: FastifyInstance, options: AlertRoute
 			// Validate alert ID format
 			if (!ALERT_ID_PATTERN.test(id)) {
 				return reply.code(400).send('Invalid alert ID');
+			}
+
+			// Scoping gap (final Codex review round, Critical): same delivery-visibility
+			// gate as the history list route, applied before any filesystem access.
+			// Unknown ids and non-visible ids both 404 identically (no existence leak).
+			const alert = await alertService.getAlert(id);
+			if (!alert) {
+				return reply.code(404).send('Alert not found');
+			}
+			const actor = request.user;
+			if (actor && !isDeliveryVisible(alert.delivery ?? [], actor)) {
+				return reply.code(404).send('Alert not found');
 			}
 
 			// Validate file name: must be .md, no path traversal

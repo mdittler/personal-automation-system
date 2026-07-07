@@ -558,6 +558,58 @@ describe('D5b-5: reports actor-based authorization', () => {
 		const res = await csrfPost(cookies, '/gui/reports/rpt-visible/preview');
 		expect(res.statusCode).toBe(403);
 	});
+
+	// --- History scoping (final Codex review round, Critical) ---
+
+	it('non-admin GET /gui/reports/:id/history for a non-delivered report → 404', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/reports/rpt-hidden/history',
+			cookies,
+		});
+		expect(res.statusCode).toBe(404);
+	});
+
+	it('non-admin GET /gui/reports/:id/history/:file for a non-delivered report → 404', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/reports/rpt-hidden/history/2026-01-01_000000.md',
+			cookies,
+		});
+		expect(res.statusCode).toBe(404);
+	});
+
+	it('non-admin GET /gui/reports/:id/history for an unknown report id → 404', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/reports/rpt-does-not-exist/history',
+			cookies,
+		});
+		expect(res.statusCode).toBe(404);
+	});
+
+	it('non-admin GET /gui/reports/:id/history for a delivered report → 200', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/reports/rpt-visible/history',
+			cookies,
+		});
+		expect(res.statusCode).toBe(200);
+	});
+
+	it('admin GET /gui/reports/:id/history for any report → 200', async () => {
+		const cookies = await loginAs(ADMIN_ID, ADMIN_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/reports/rpt-hidden/history',
+			cookies,
+		});
+		expect(res.statusCode).toBe(200);
+	});
 });
 
 // ─── Alerts filtering tests ───────────────────────────────────────────────────
@@ -644,17 +696,73 @@ describe('D5b-5: alerts actor-based authorization', () => {
 		await rm(tempDir, { recursive: true, force: true });
 	});
 
-	it('non-admin GET /gui/alerts → list filtered to delivery-list membership', async () => {
-		const loginRes = await app.inject({
+	async function loginAs(userId: string, password: string) {
+		const res = await app.inject({
 			method: 'POST',
 			url: '/gui/login',
-			payload: { userId: MEMBER_ID, password: MEMBER_PASSWORD },
+			payload: { userId, password },
 		});
-		const cookies = collectCookies(loginRes);
+		return collectCookies(res);
+	}
+
+	it('non-admin GET /gui/alerts → list filtered to delivery-list membership', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
 		const res = await app.inject({ method: 'GET', url: '/gui/alerts', cookies });
 		expect(res.statusCode).toBe(200);
 		expect(res.body).toContain('Visible Alert');
 		expect(res.body).not.toContain('Hidden Alert');
+	});
+
+	// --- History scoping (final Codex review round, Critical) ---
+
+	it('non-admin GET /gui/alerts/:id/history for a non-delivered alert → 404', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/alerts/alrt-hidden/history',
+			cookies,
+		});
+		expect(res.statusCode).toBe(404);
+	});
+
+	it('non-admin GET /gui/alerts/:id/history/:file for a non-delivered alert → 404', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/alerts/alrt-hidden/history/2026-01-01_000000.md',
+			cookies,
+		});
+		expect(res.statusCode).toBe(404);
+	});
+
+	it('non-admin GET /gui/alerts/:id/history for an unknown alert id → 404', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/alerts/alrt-does-not-exist/history',
+			cookies,
+		});
+		expect(res.statusCode).toBe(404);
+	});
+
+	it('non-admin GET /gui/alerts/:id/history for a delivered alert → 200', async () => {
+		const cookies = await loginAs(MEMBER_ID, MEMBER_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/alerts/alrt-visible/history',
+			cookies,
+		});
+		expect(res.statusCode).toBe(200);
+	});
+
+	it('admin GET /gui/alerts/:id/history for any alert → 200', async () => {
+		const cookies = await loginAs(ADMIN_ID, ADMIN_PASSWORD);
+		const res = await app.inject({
+			method: 'GET',
+			url: '/gui/alerts/alrt-hidden/history',
+			cookies,
+		});
+		expect(res.statusCode).toBe(200);
 	});
 });
 

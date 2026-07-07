@@ -291,6 +291,15 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 			if (!report) {
 				return reply.code(404).send('Report not found');
 			}
+			// Scoping gap (final Codex review round, Critical): the delivery-visibility
+			// check applied to the list/edit views must also gate history access — a
+			// member not in the delivery list must not be able to read a report's run
+			// history. 404 (not 403) matches the sessions-route precedent, which avoids
+			// leaking whether a given report id exists to actors who can't see it.
+			const actor = request.user;
+			if (actor && !isDeliveryVisible(report.delivery ?? [], actor)) {
+				return reply.code(404).send('Report not found');
+			}
 
 			const historyDir = join(
 				resolve(options.dataDir),
@@ -330,6 +339,18 @@ export function registerReportRoutes(server: FastifyInstance, options: ReportRou
 			reply: FastifyReply,
 		) => {
 			const { id, file } = request.params;
+
+			// Scoping gap (final Codex review round, Critical): same delivery-visibility
+			// gate as the history list route, applied before any filesystem access.
+			// Unknown ids and non-visible ids both 404 identically (no existence leak).
+			const report = await reportService.getReport(id);
+			if (!report) {
+				return reply.code(404).send('Report not found');
+			}
+			const actor = request.user;
+			if (actor && !isDeliveryVisible(report.delivery ?? [], actor)) {
+				return reply.code(404).send('Report not found');
+			}
 
 			// Validate file name: must be .md, no path traversal
 			if (

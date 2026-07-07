@@ -473,6 +473,7 @@ describe('Alert GUI Routes', () => {
 		});
 
 		it('rejects non-.md files', async () => {
+			await createAlert();
 			const res = await authenticatedGet('/gui/alerts/test-alert/history/file.txt');
 			expect(res.statusCode).toBe(400);
 		});

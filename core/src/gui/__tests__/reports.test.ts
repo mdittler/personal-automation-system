@@ -457,6 +457,7 @@ describe('Report GUI Routes', () => {
 		});
 
 		it('rejects non-.md files', async () => {
+			await createReport();
 			const res = await authenticatedGet('/gui/reports/test-report/history/file.txt');
 			expect(res.statusCode).toBe(400);
 		});
