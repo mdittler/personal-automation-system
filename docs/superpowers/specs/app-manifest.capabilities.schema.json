@@ -1,0 +1,174 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://pas.local/schemas/proposals/app-manifest.capabilities.json",
+	"title": "PROPOSAL — PAS App Manifest capabilities surface (SR-1 / T2a / AG-3)",
+	"description": "PROPOSAL ONLY — not wired into production. Companion to docs/superpowers/specs/2026-07-07-sr-1-app-isolation-trust-model.md. Defines the UNIFIED capability + tool + per-tool risk-metadata surface so T2a's ToolRegistry (identity/invocation fields), AG-3's agent policy (risk fields), and SR-1's trust tiers (requiresCapabilities) all read ONE object shape. When adopted, these definitions merge into core/src/schemas/app-manifest.schema.json under capabilities.* — they intentionally mirror that file's conventions (additionalProperties:false, lowercase-hyphen ids, handler-relative-path). This file is a design artifact; do not $ref it from runtime code.",
+	"type": "object",
+	"$comment": "Root here models ONLY the additions to the existing manifest.capabilities object. Existing capabilities.{messages,schedules,rules,events} are unchanged and omitted for clarity; the two new members are `capabilities.declared[]` (Tier A vocabulary) and `capabilities.tools[]` (unified tool + risk surface).",
+	"properties": {
+		"declared": {
+			"type": "array",
+			"description": "Tier A capability vocabulary the app requests. Closed enum; each entry is an operator-visible permission the runtime enforces at inject-time (Tier A), import-time (Tier B), and RPC-boundary-time (Tier C). Absence of a capability = the narrowest default (see design §2.1). This is the least-privilege refinement layer over the coarse requirements.services[] enum.",
+			"items": { "$ref": "#/$defs/capability" },
+			"uniqueItems": true
+		},
+		"net": {
+			"type": "object",
+			"description": "Network egress policy. Only meaningful when `net:fetch` is in `declared`. Host allowlist is Tier-B/C ENFORCED (Tier A records it as a truthful permission prompt only).",
+			"additionalProperties": false,
+			"properties": {
+				"allow": {
+					"type": "array",
+					"description": "Allowed outbound hosts (exact hostnames, no scheme, no path). Empty or absent with `net:fetch` declared = no hosts permitted until Tier B lands (fail-closed).",
+					"items": {
+						"type": "string",
+						"pattern": "^[a-z0-9.-]+$",
+						"minLength": 1
+					},
+					"uniqueItems": true
+				}
+			}
+		},
+		"tools": {
+			"type": "array",
+			"description": "THE UNIFIED SURFACE. One object per tool. T2a's ToolRegistry reads identity/invocation fields; AG-3/AG-2 read the agent metadata fields; SR-1 trust tiers read requiresCapabilities[]. There is no second array — risk metadata is co-located, not joined by name.",
+			"items": { "$ref": "#/$defs/toolDef" }
+		}
+	},
+	"additionalProperties": true,
+	"$defs": {
+		"capability": {
+			"type": "string",
+			"description": "A named Tier A capability. Closed enum plus one parameterized family (secrets:<id>, per design §2.1). Extending this enum is a deliberate, reviewed core change. NOTE: reply-scoped messaging is the IMPLICIT baseline, NOT a declared token — any app injected the messenger (requirements.services[] contains 'telegram') may reply to the triggering user without declaring anything, so there is deliberately no `messaging:reply` here (design §2.1). Each declared capability MUST be consistent with requirements.services[] — a normative services<->capabilities validator (design §2.1) rejects a manifest declaring a capability whose backing service is absent, or injecting a privileged service with no declared capability.",
+			"anyOf": [
+				{
+					"enum": [
+						"messaging:any-user",
+						"messaging:proactive",
+						"data:user",
+						"data:shared",
+						"net:fetch",
+						"schedule:register",
+						"events:emit",
+						"events:subscribe",
+						"audio:play"
+					]
+				},
+				{
+					"type": "string",
+					"pattern": "^secrets:[a-z][a-z0-9-]*$",
+					"$comment": "secrets:<externalApiId> — grants ONE declared external-API secret via SecretsService. The <id> must match a requirements.external_apis[].id. process.env is never exposed (design §6)."
+				}
+			]
+		},
+		"toolDef": {
+			"type": "object",
+			"description": "A single tool. One object shape read by all three consumers (design §3.2).",
+			"required": ["name", "description", "parameters", "handler", "riskClass"],
+			"additionalProperties": false,
+			"properties": {
+				"name": {
+					"type": "string",
+					"pattern": "^[a-z][a-z0-9-]*:[a-z][a-z0-9_-]*$",
+					"description": "Namespaced tool id `app:verb` (e.g. `food:add-grocery-item`). App-id prefix must match the manifest app.id; unique within the app.",
+					"$comment": "T2a / ToolRegistry — invocation identity."
+				},
+				"description": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Model-facing tool specification. This is the text the LLM sees; it is FENCED as untrusted app-shipped content in the agent context (doctrine injection posture).",
+					"$comment": "T2a / ToolRegistry — model-facing spec."
+				},
+				"parameters": {
+					"type": "object",
+					"description": "JSON Schema (draft 2020-12) for the tool's arguments. REQUIRED — T2a's ToolRegistry and the confirmation-gate argument rendering both need a schema-shaped argument spec, so a tool may not omit it. A no-argument tool declares the empty object schema `{\"type\":\"object\",\"additionalProperties\":false}` explicitly (Codex Major: omitted parameters previously left the ToolRegistry contract without an arg schema).",
+					"$comment": "T2a / ToolRegistry — argument schema. Required. Left as an open object here (a nested JSON Schema); the implementer may tighten to a $ref of a schema-of-schemas."
+				},
+				"handler": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Handler file path relative to app root, mirroring schedule.handler / eventSubscribe.handler conventions in the live schema.",
+					"$comment": "T2a / ToolRegistry — dispatch target."
+				},
+				"requiresCapabilities": {
+					"type": "array",
+					"description": "The subset of capabilities.declared[] this tool exercises. ToolPolicy REFUSES to register a tool whose requiresCapabilities are not all present in capabilities.declared[] (a tool cannot exceed its app's declared surface). SR-1 trust tiers enforce this same set when the tool runs. Empty = a pure in-memory tool needing no capability.",
+					"items": { "$ref": "#/$defs/capability" },
+					"uniqueItems": true,
+					"default": [],
+					"$comment": "SR-1 trust tiers — the link between a tool and the capability model."
+				},
+				"riskClass": {
+					"type": "string",
+					"enum": ["read", "write", "external-effect"],
+					"description": "AG-3 risk ladder (doctrine item 4). `read` = no state change; `write` = mutates PAS-owned data; `external-effect` = observable side effect outside PAS (send message, HTTP, audio). REQUIRED at authoring so no tool ships unclassified (AG-3: retrofitting risk classes is the expensive path).",
+					"$comment": "AG-3 — required-at-authoring, drives confirmation default."
+				},
+				"agentAllowed": {
+					"type": "boolean",
+					"default": false,
+					"description": "May a bounded agent session (AG-2) call this tool at all. SAFE DEFAULT false — a tool is not agent-callable until deliberately opted in. Structured (non-agent) T2a tool calls ignore this field.",
+					"$comment": "AG-3 — agent policy filter. Default false = opt-in."
+				},
+				"requiresConfirmation": {
+					"type": "boolean",
+					"description": "Must the confirmation gate render this tool's ARGUMENTS before execution (doctrine item 4). If omitted, defaults by riskClass: write & external-effect => true, read => false. Config (agent.require_confirmation) may TIGHTEN but never loosen a manifest `true` (per-tool override only via manifest).",
+					"$comment": "AG-3 — confirmation gate. Explicit value overrides the riskClass-derived default."
+				},
+				"costHint": {
+					"type": "string",
+					"enum": ["none", "low", "high"],
+					"default": "low",
+					"description": "Advisory cost signal surfaced in the agent's escalation 'estimated budget' offer. Never an enforcement input (budget enforcement is CostTracker-owned).",
+					"$comment": "AG-3 — advisory only."
+				}
+			},
+			"allOf": [
+				{
+					"$comment": "Confirmation default derivation is documented, not schema-enforced: a validator/loader applies `requiresConfirmation ??= (riskClass !== 'read')`. Encoding the derivation as an if/then would make the field required, defeating the 'defaulted-at-read' design (§3.2). Left to the loader.",
+					"if": false,
+					"then": {}
+				}
+			]
+		}
+	},
+	"examples": [
+		{
+			"$comment": "Illustrative — a grocery app's capabilities block under the proposed surface. Reply-scoped messaging is implicit (the app declares 'telegram' in requirements.services[]); only the widenings beyond baseline appear in declared[]. `messaging:any-user` here is the explicit grant that food:notify-household needs.",
+			"declared": ["data:user", "data:shared", "messaging:any-user"],
+			"tools": [
+				{
+					"name": "food:list-grocery-items",
+					"description": "List the current grocery items for the requesting user or their shared space.",
+					"handler": "tools/list-grocery.js",
+					"parameters": { "type": "object", "properties": { "scope": { "enum": ["user", "shared"] } } },
+					"requiresCapabilities": ["data:user", "data:shared"],
+					"riskClass": "read",
+					"agentAllowed": true,
+					"costHint": "none"
+				},
+				{
+					"name": "food:add-grocery-item",
+					"description": "Add an item to the grocery list.",
+					"handler": "tools/add-grocery.js",
+					"parameters": { "type": "object", "required": ["item"], "properties": { "item": { "type": "string" } } },
+					"requiresCapabilities": ["data:user"],
+					"riskClass": "write",
+					"agentAllowed": true,
+					"costHint": "none"
+				},
+				{
+					"name": "food:notify-household",
+					"description": "Message every household member that the grocery run is happening.",
+					"handler": "tools/notify.js",
+					"parameters": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } },
+					"requiresCapabilities": ["messaging:any-user"],
+					"riskClass": "external-effect",
+					"agentAllowed": false,
+					"requiresConfirmation": true,
+					"costHint": "low"
+				}
+			]
+		}
+	]
+}
