@@ -1,0 +1,22 @@
+<div class="page-header">
+  <h1>Activity</h1>
+</div>
+
+<p style="color:var(--pico-muted-color);max-width:60ch">
+  What's changed recently — yours, anything shared with the household, and anything in the spaces you're part of.
+</p>
+
+<% if (it.days.length === 0) { %>
+  <p class="empty-state">Nothing here yet. Once something is added or changed, it'll show up here.</p>
+<% } else { %>
+  <% for (const day of it.days) { %>
+    <article style="margin-bottom:1rem">
+      <header><strong><%= new Date(day.date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) %></strong></header>
+      <ul style="margin:0.5rem 0 0">
+        <% for (const entry of day.entries) { %>
+          <li><%= entry.app %>: <%= entry.file %> was <%= entry.verb %></li>
+        <% } %>
+      </ul>
+    </article>
+  <% } %>
+<% } %>

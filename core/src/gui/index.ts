@@ -38,6 +38,7 @@ import type { AppConfigService, LLMSafeguardsConfig, SystemConfig } from '../typ
 import { describeCron } from '../utils/cron-describe.js';
 import { registerAuth } from './auth.js';
 import { registerCsrfProtection } from './csrf.js';
+import { registerActivityRoutes } from './routes/activity.js';
 import { registerAlertWizardRoutes } from './routes/alert-wizard.js';
 import { registerAlertRoutes } from './routes/alerts.js';
 import { registerApiKeyRoutes } from './routes/api-keys.js';
@@ -152,6 +153,12 @@ export interface GuiOptions {
 	 * tarred alongside `dataDir` by the Backups page's own BackupService.
 	 */
 	configDir?: string;
+	/**
+	 * Batch 6 (GUI UX redesign): absolute path to the change-log JSONL file
+	 * (ChangeLog.getLogPath()), used by the scoped Activity feed (Task 6.3).
+	 * Optional — when absent, the Activity routes are not registered at all.
+	 */
+	changeLogPath?: string;
 }
 
 /**
@@ -249,6 +256,16 @@ export async function registerGuiRoutes(
 					backupConfig: options.backupConfig,
 					dataDir,
 					configDir: options.configDir ?? resolve('config'),
+					logger,
+				});
+			}
+			// Batch 6, Task 6.3: scoped Activity feed. Registered only when the
+			// change-log path + household/space services are present.
+			if (options.changeLogPath && options.householdService && spaceService) {
+				registerActivityRoutes(gui, {
+					logPath: options.changeLogPath,
+					householdService: options.householdService,
+					spaceService,
 					logger,
 				});
 			}
