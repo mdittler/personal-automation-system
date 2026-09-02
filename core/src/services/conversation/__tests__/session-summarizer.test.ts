@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
+import type { LLMFinishReason } from '../../../types/llm.js';
 import type { SessionTurn } from '../../conversation-session/chat-session-store.js';
 import { sanitizeSummaryOutput, summarizeSession } from '../session-summarizer.js';
 
@@ -6,9 +8,9 @@ function turn(role: 'user' | 'assistant', content: string): SessionTurn {
 	return { role, content, timestamp: '2026-05-01T12:00:00Z' };
 }
 
-function mkDeps(llmResponse: string) {
+function mkDeps(llmResponse: string, finishReason: LLMFinishReason = 'stop') {
 	return {
-		llm: { complete: vi.fn().mockResolvedValue(llmResponse) },
+		llm: withCompleteWithMeta({ complete: vi.fn().mockResolvedValue(llmResponse) }, finishReason),
 		logger: { warn: vi.fn() },
 	};
 }
@@ -246,5 +248,49 @@ describe('sanitizeSummaryOutput', () => {
 		const long = 'x'.repeat(2000);
 		const out = sanitizeSummaryOutput(long);
 		expect(out?.length).toBeLessThanOrEqual(1500);
+	});
+});
+
+// ─── Truncation at the output cap ────────────────────────────────────────────
+//
+// The system prompt asks for prose "under 1200 characters" against a 400-token
+// (~1600-character) budget, so a compliant-but-wordy model sits near the cap.
+
+describe('summarizeSession — truncated output', () => {
+	const TURNS = [turn('user', 'I prefer oat milk'), turn('assistant', 'Noted.')];
+	const TRUNCATED = '{"summary": "The user prefers oat milk and has decided to';
+
+	it('still returns null (contract unchanged)', async () => {
+		const deps = mkDeps(TRUNCATED, 'length');
+		expect(await summarizeSession(TURNS, deps)).toBeNull();
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('logs truncation naming the cap, not "invalid JSON"', async () => {
+		const deps = mkDeps(TRUNCATED, 'length');
+		await summarizeSession(TURNS, deps);
+		const [, msg] = deps.logger.warn.mock.calls[0] as [unknown, string];
+		expect(msg).toContain('truncated');
+		expect(msg).toContain('400-token');
+		expect(msg).not.toMatch(/invalid JSON/i);
+	});
+
+	it('keeps the invalid-JSON diagnostic for a complete but malformed reply', async () => {
+		const deps = mkDeps(TRUNCATED, 'stop');
+		expect(await summarizeSession(TURNS, deps)).toBeNull();
+		const [, msg] = deps.logger.warn.mock.calls[0] as [unknown, string];
+		expect(msg).toMatch(/invalid JSON/i);
+	});
+
+	it('parse-first: a complete summary still succeeds when finishReason is "length"', async () => {
+		const deps = mkDeps('{"summary": "User prefers oat milk."}', 'length');
+		expect(await summarizeSession(TURNS, deps)).toBe('User prefers oat milk.');
+	});
+
+	it('passes maxTokens 400 on the completeWithMeta call', async () => {
+		const deps = mkDeps('{"summary": "User prefers oat milk."}');
+		await summarizeSession(TURNS, deps);
+		const options = deps.llm.complete.mock.calls[0]?.[1];
+		expect(options).toMatchObject({ maxTokens: 400 });
 	});
 });

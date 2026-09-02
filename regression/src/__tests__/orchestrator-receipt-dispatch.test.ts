@@ -248,3 +248,126 @@ describe('runSuite — receipt bucket dispatch', () => {
 		expect(second.results[0]!.source).toBe('cached');
 	});
 });
+
+/**
+ * Receipt-bucket cost metering + run-budget enforcement.
+ *
+ * Before this suite existed, `runReceiptCase` derived `RunResult.costUsd`
+ * from a projection built with `{tokenIn: 0, tokenOut: 0}` — structurally $0
+ * for every model. Every receipt case therefore reported `costUsd: 0` despite
+ * genuine remote spend, and `runBudget.add(0)` meant the whole-run ceiling
+ * could never stop a receipt sweep no matter how long it ran.
+ */
+describe('runSuite — receipt bucket cost metering + run budget', () => {
+	/** CostTracker stand-in whose totals advance on every metered dispatch. */
+	function chargingMeter(perCallUsd: number, perCallTokens = { input: 2165, output: 976 }) {
+		let cost = 0;
+		let input = 0;
+		let output = 0;
+		return {
+			charge: () => {
+				cost += perCallUsd;
+				input += perCallTokens.input;
+				output += perCallTokens.output;
+			},
+			getMonthlyTotalCost: () => cost,
+			getTokenUsageTotals: () => ({ input, output }),
+		};
+	}
+
+	function chargingReceiptLlm(meter: { charge: () => void }, text: string) {
+		const complete = vi.fn().mockImplementation(async () => {
+			meter.charge();
+			return text;
+		});
+		const completeWithMeta = vi.fn().mockImplementation(async () => {
+			meter.charge();
+			return { text, finishReason: 'stop' as const };
+		});
+		return { complete, completeWithMeta };
+	}
+
+	async function stageReceiptCases(ids: readonly string[]): Promise<void> {
+		const photo = join(fixturesDir, 'p.png');
+		const sidecar = join(fixturesDir, 'p.expected.json');
+		await writeFile(photo, Buffer.from('FAKE_PNG'));
+		await writeFile(sidecar, happyPathSidecar);
+		for (const id of ids) {
+			await writeFile(join(casesDir, `${id}.case.ts`), oneReceiptCase(id, photo, sidecar));
+		}
+	}
+
+	it('records the real CostTracker delta, not the pre-charge projection', async () => {
+		await stageReceiptCases(['r-cost']);
+		const meter = chargingMeter(0.021);
+		const receiptLlm = chargingReceiptLlm(meter, happyPathReceiptJson);
+
+		const { results, summary } = await runSuite(
+			baseOpts({
+				receiptLlm,
+				costTracker: meter,
+				timezone: 'America/New_York',
+				// A deliberately WRONG projection: if the runner charged the
+				// projection instead of the delta, cost would be 0.004, not 0.021.
+				estimateUsd: () => 0.004,
+			}),
+		);
+
+		expect(results).toHaveLength(1);
+		expect(results[0]!.verdict).toBe(VERDICT.pass);
+		expect(results[0]!.costUsd).toBeCloseTo(0.021, 6);
+		expect(results[0]!.tokenCounts).toEqual({ input: 2165, output: 976 });
+		expect(summary.totalCostUsd).toBeCloseTo(0.021, 6);
+	});
+
+	it('reports $0 for a receipt case whose model never bills (all-local run)', async () => {
+		await stageReceiptCases(['r-local']);
+		// A local model's CostTracker delta is genuinely zero — the meter never
+		// advances — so $0 here is a measurement, not the old structural zero.
+		const meter = chargingMeter(0);
+		const receiptLlm = chargingReceiptLlm(meter, happyPathReceiptJson);
+
+		const { results } = await runSuite(
+			baseOpts({
+				receiptLlm,
+				costTracker: meter,
+				timezone: 'America/New_York',
+				estimateUsd: () => 0,
+			}),
+		);
+		expect(results[0]!.verdict).toBe(VERDICT.pass);
+		expect(results[0]!.costUsd).toBe(0);
+		expect(receiptLlm.completeWithMeta).toHaveBeenCalledTimes(1);
+	});
+
+	it('run-budget ceiling aborts a receipt sweep once accumulated spend exceeds it', async () => {
+		await stageReceiptCases(['r-a', 'r-b', 'r-c']);
+		// Ceiling $0.06; each case really bills $0.03; per-case pre-flight
+		// estimate $0.02.
+		//   case 1 → canAfford(0.02) with 0.00 spent ✓ → spends 0.03
+		//   case 2 → canAfford(0.02) with 0.03 spent ✓ → spends 0.06
+		//   case 3 → 0.06 + 0.02 > 0.06 ✗ → budget-exceeded, no dispatch
+		// With the old always-$0 accounting all three would have dispatched.
+		const meter = chargingMeter(0.03);
+		const receiptLlm = chargingReceiptLlm(meter, happyPathReceiptJson);
+
+		const { results } = await runSuite(
+			baseOpts({
+				receiptLlm,
+				costTracker: meter,
+				timezone: 'America/New_York',
+				maxRunBudgetUsd: 0.06,
+				estimateUsd: () => 0.02,
+			}),
+		);
+
+		expect(results).toHaveLength(3);
+		const skipped = results.filter((r) => r.verdict === VERDICT.budgetExceeded);
+		expect(skipped).toHaveLength(1);
+		expect(receiptLlm.completeWithMeta).toHaveBeenCalledTimes(2);
+		// The skipped case carries one synthetic error verdict per input so
+		// downstream gates count it rather than silently ignoring it.
+		expect(skipped[0]!.oracleVerdicts).toHaveLength(1);
+		expect(skipped[0]!.oracleVerdicts[0]!.verdict).toBe(VERDICT.error);
+	});
+});

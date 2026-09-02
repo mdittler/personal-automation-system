@@ -98,13 +98,28 @@ export function createMockCoreServices(overrides?: MockOverrides): CoreServices 
 		...overrides?.data,
 	};
 
+	const llmOverrides = (overrides?.llm ?? {}) as Partial<LLMService>;
+	// Resolved before the object literal so `completeWithMeta` below closes over
+	// the caller's `complete` when one was supplied, not over the default.
+	const complete = llmOverrides.complete ?? vi.fn().mockResolvedValue('');
 	const llm: LLMService = {
-		complete: vi.fn().mockResolvedValue(''),
-		completeWithMeta: vi.fn().mockResolvedValue({ text: '', finishReason: 'stop' }),
 		classify: vi.fn().mockResolvedValue({ category: 'unknown', confidence: 0 }),
 		extractStructured: vi.fn().mockResolvedValue({}),
 		getModelForTier: vi.fn().mockReturnValue('anthropic/mock-model'),
-		...overrides?.llm,
+		...llmOverrides,
+		complete,
+		// Delegates to the `complete` mock rather than being a second independent
+		// mock. Tests overwhelmingly script behaviour through `llm.complete`
+		// (`vi.mocked(services.llm.complete).mockResolvedValueOnce(...)`), and
+		// several services now call `completeWithMeta` so they can tell a reply
+		// truncated at their token cap from a malformed one; an independent mock
+		// would silently hand those services an empty string.
+		completeWithMeta:
+			llmOverrides.completeWithMeta ??
+			vi.fn(async (prompt: string, options?: unknown) => ({
+				text: await complete(prompt, options as never),
+				finishReason: 'stop' as const,
+			})),
 	};
 
 	const scheduler: SchedulerService = {

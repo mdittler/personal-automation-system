@@ -28,6 +28,7 @@ import type { MessageRateTracker } from '../../services/metrics/message-rate-tra
 import type { UserManager } from '../../services/user-manager/index.js';
 import type { LLMSafeguardsConfig } from '../../types/config.js';
 import type { ModelRef, ModelTier } from '../../types/llm.js';
+import { isValidModelId } from '../../utils/model-id.js';
 import { sendErrorFragment } from '../utils/error-fragment.js';
 
 export interface LlmUsageOptions {
@@ -303,7 +304,6 @@ function buildPerHouseholdRows(
 	return rows.sort((a, b) => b.monthlyCost - a.monthlyCost);
 }
 
-const MODEL_ID_PATTERN = /^[a-zA-Z0-9._:-]{1,100}$/;
 const PROVIDER_ID_PATTERN = /^[a-zA-Z0-9_-]{1,50}$/;
 const VALID_TIERS: ReadonlySet<string> = new Set(['fast', 'standard', 'reasoning']);
 
@@ -515,7 +515,7 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 			return sendErrorFragment(reply, 400, "That provider isn't valid.");
 		}
 
-		if (!model || typeof model !== 'string' || !MODEL_ID_PATTERN.test(model.trim())) {
+		if (!model || typeof model !== 'string' || !isValidModelId(model.trim())) {
 			return sendErrorFragment(reply, 400, "That model isn't valid.");
 		}
 
@@ -550,7 +550,7 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 		const { standardModel, fastModel } = request.body;
 
 		if (standardModel && typeof standardModel === 'string' && standardModel.trim()) {
-			if (!MODEL_ID_PATTERN.test(standardModel.trim())) {
+			if (!isValidModelId(standardModel.trim())) {
 				return sendErrorFragment(reply, 400, "That model isn't valid.");
 			}
 			await modelSelector.setStandardModel(standardModel.trim());
@@ -558,7 +558,7 @@ export function registerLlmUsageRoutes(server: FastifyInstance, options: LlmUsag
 		}
 
 		if (fastModel && typeof fastModel === 'string' && fastModel.trim()) {
-			if (!MODEL_ID_PATTERN.test(fastModel.trim())) {
+			if (!isValidModelId(fastModel.trim())) {
 				return sendErrorFragment(reply, 400, "That model isn't valid.");
 			}
 			await modelSelector.setFastModel(fastModel.trim());

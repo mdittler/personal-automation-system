@@ -2728,23 +2728,25 @@ User-controlled text in Telegram messages (command names, app names, description
 
 **Phase:** 8 | **Status:** Implemented
 
-Model IDs submitted via the GUI must match `/^[a-zA-Z0-9._:-]{1,100}$/`. This prevents injection into API parameters and XSS via model ID display.
+Model IDs submitted via the GUI must pass `isValidModelId` (`core/src/utils/model-id.ts`): fully anchored `/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$/`, plus explicit rejection of `..`, `//` and a trailing `/`. This prevents injection into API parameters and XSS via model ID display. The test block imports the real validator rather than copying the pattern, so the two cannot drift.
 
 **Standard tests:**
 - `security-measures.test.ts` > MODEL_ID_PATTERN > accepts claude-sonnet-4-20250514
 - `security-measures.test.ts` > MODEL_ID_PATTERN > accepts gpt-4o
 - `security-measures.test.ts` > MODEL_ID_PATTERN > accepts gemini-2.0-flash
 - `security-measures.test.ts` > MODEL_ID_PATTERN > accepts o3-mini
+- `security-measures.test.ts` > MODEL_ID_PATTERN > accepts namespaced model ID with slashes
 
 **Edge case tests:**
 - `security-measures.test.ts` > MODEL_ID_PATTERN > rejects model ID with spaces
-- `security-measures.test.ts` > MODEL_ID_PATTERN > rejects model ID with slashes
 - `security-measures.test.ts` > MODEL_ID_PATTERN > rejects model ID with angle brackets (XSS)
-- `security-measures.test.ts` > MODEL_ID_PATTERN > rejects model ID over 100 chars
+- `security-measures.test.ts` > MODEL_ID_PATTERN > rejects model ID over 192 chars
 - `security-measures.test.ts` > MODEL_ID_PATTERN > rejects empty string
 - `security-measures.test.ts` > MODEL_ID_PATTERN > rejects model ID with backticks
+- `security-measures.test.ts` > MODEL_ID_PATTERN > rejects traversal sequences even though slashes are allowed
 
-**Fixes:** None
+**Fixes:**
+- **(2026-09-02):** `/` is now accepted, so namespaced ids (`meta-llama/Llama-3.3-70B-Instruct-Turbo`, `hf.co/bartowski/Foo-GGUF:Q4_K_M`) validate on every surface instead of only on the regression path — see REQ-SEC-013 for the downstream-consumer audit that made the widening safe. The first character must now be alphanumeric (a tightening: the old pattern allowed a leading `-`, `.`, `_` or `:`), the bound rises from 100 to 192 chars, and traversal/empty-segment/trailing-separator shapes are rejected separately. The duplicated pattern in `security-measures.test.ts` is replaced by an import of the real `isValidModelId`. CL: `model-id-alignment`.
 
 ### REQ-SEC-011: GUI POST parameter format validation
 
@@ -10377,6 +10379,9 @@ The regression workspace is registered as a pnpm package but not listed in the r
 
 **Standard tests:** verified by composition (root vitest config + workspace exclusion).
 
+**Fixes:**
+- **(2026-09-01, Regression Run Unblock):** the exclusion was found to cover more than it was written for. `cd regression && pnpm test` had accumulated **17 pre-existing failures** that nothing was watching — 13 from the receipt date rot now fixed under REQ-REG-020, and 4 from `loadSystemConfig`'s envalid validation calling `process.exit(1)` on a missing required var (the repo ships only `.env.example`, so those 4 passed solely on the maintainer's primary checkout and died in any worktree, fresh clone, or CI). The chatbot-environment test now stubs the two required vars plus one provider key (`buildLLMConfig` refuses a config with no usable provider); dotenv does not override already-set vars, so the stubs win where a real `.env` exists, and the values are inert (the runtime is wired to `fakeTelegramService`, no LLM call is dispatched). The exclusion itself was **deliberately left in place** — changing the root `projects` array would contradict this requirement's text. The underlying question (this requirement's cost concern is the CLI harness `pnpm test:regression`, which vitest never invokes; the excluded workspace is 660+ fully-mocked unit tests costing ~5s and zero network) is recorded as a proposal in `docs/open-items.md` and would need an amendment here before the exclusion is narrowed. CL: `regression-test-rot`.
+
 ---
 
 ### REQ-REG-002 — Each persona case MUST declare a `coverage` array of repo-relative file paths; the cache key MUST include their git blob hashes
@@ -12492,6 +12497,440 @@ Every redesigned or new page (Home, wizards, Household hub, Conversations, Backu
 
 ---
 
+## Regression Run Unblock — Model Capability Guards + Live Progress (2026-09-01)
+
+**Context.** A live `pnpm test:regression` sweep returned 100% `error` verdicts across the chatbot and routing buckets while the systems under test were answering correctly. Two independent infrastructure root causes were responsible: (1) `claude-opus-5` rejects `temperature` outright (``400 invalid_request_error: `temperature` is deprecated for this model.``) and the rubric judge sends `temperature: 0`, so every chatbot case died at the judge call; (2) thinking-capable Ollama models default to thinking ON and spend the entire `num_predict` budget inside the SDK's separate `thinking` field, returning `response: ''` with `done_reason: 'length'`, so every routing case failed with `JSON parse failed: Unexpected end of JSON input`. Both surfaced as *malformed output* rather than as what they actually were — a recurring defect class in which a fixed `maxTokens` budget feeding a structured-output parse reports truncation as a broken model. Two further instances of that class (the rubric judge at its 400-token cap, the Food shadow classifier at its 80-token cap) were diagnosed and fixed in the same phase, and a latent wall-clock time bomb in the receipt oracle was found alongside them.
+
+### REQ-LLM-037 — Models that reject a `temperature` parameter MUST NOT receive one; unknown models MUST default permissive and self-heal
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+`core/src/services/llm/model-capabilities.ts` is a per-model capability registry mirroring `model-pricing.ts`: `ModelCapabilities` / `MODEL_CAPABILITIES` / `getModelCapabilities()` / `supportsTemperature()`. The table is seeded from a live probe of the Anthropic catalog (2026-09-01): `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8` and `claude-opus-4-7` reject the parameter; `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-sonnet-4-5(-20250929)`, `claude-opus-4-5-20251101` and `claude-haiku-4-5(-20251001)` accept it. The Anthropic, OpenAI-compatible and Google providers spread `temperature` conditionally on `supportsTemperature(model)`, matching the existing `systemPrompt` / `responseFormat` style; the Ollama provider is unchanged (local models accept the parameter). Models absent from the table default to **supported**, so nothing unprobed changes behaviour; `getModelCapabilities` uses an `Object.hasOwn` guard so a model id like `constructor` cannot resolve through `Object.prototype`. When an unlisted model turns out to reject the parameter, `BaseProvider.completeWithTemperatureFallback` retries **exactly once** with the field stripped and emits a `logger.warn` carrying the provider and model id so a table entry can be added. The strip-and-retry is narrower than the general parameter-rejection classifier on purpose — it fires only when the 400 message names `temperature`, and only when the caller actually supplied one.
+
+**Standard tests:**
+- `model-capabilities.test.ts` > model-capabilities > getModelCapabilities > returns the record for a known model
+- `model-capabilities.test.ts` > model-capabilities > supportsTemperature > returns false for a probed model that rejects temperature
+- `model-capabilities.test.ts` > model-capabilities > supportsTemperature > returns true for a probed model that accepts temperature
+- `model-capabilities.test.ts` > model-capabilities > MODEL_CAPABILITIES table > lists every entry with an explicit boolean flag
+- `model-capabilities.test.ts` > model-capabilities > MODEL_CAPABILITIES table > marks the Claude 5 family as not supporting temperature
+- `anthropic-provider.test.ts` > AnthropicProvider > temperature capability gate > omits temperature entirely for a model that rejects it
+- `anthropic-provider.test.ts` > AnthropicProvider > temperature capability gate > still sends temperature for a model that supports it
+- `google-provider.test.ts` > GoogleProvider — temperature capability gate > omits temperature from config for a model that rejects it
+- `google-provider.test.ts` > GoogleProvider — temperature capability gate > still sends temperature for a model that supports it
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — temperature capability gate > omits temperature entirely for a model that rejects it
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — temperature capability gate > still sends temperature for a model that supports it
+- `base-provider.test.ts` > BaseProvider > temperature strip-and-retry fallback > retries once without temperature when the model rejects the parameter
+
+**Edge case tests:**
+- `model-capabilities.test.ts` > model-capabilities > getModelCapabilities > returns null for an unknown model
+- `model-capabilities.test.ts` > model-capabilities > supportsTemperature > defaults to true for an unknown model so behaviour is unchanged
+- `model-capabilities.test.ts` > model-capabilities > supportsTemperature > defaults to true for an empty model id
+- `anthropic-provider.test.ts` > AnthropicProvider > temperature capability gate > still sends temperature for an unprobed model (default is supported)
+- `google-provider.test.ts` > GoogleProvider — temperature capability gate > still sends temperature for an unprobed model (default is supported)
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — temperature capability gate > still sends temperature for an unprobed model (default is supported)
+- `base-provider.test.ts` > BaseProvider > temperature strip-and-retry fallback > does not swallow the error when the retry without temperature also fails
+- `base-provider.test.ts` > BaseProvider > temperature strip-and-retry fallback > does not retry when no temperature was requested
+- `base-provider.test.ts` > BaseProvider > temperature strip-and-retry fallback > rethrows unrelated errors unchanged without stripping temperature
+- `base-provider.test.ts` > BaseProvider > temperature strip-and-retry fallback > does not strip temperature for a 400 naming a different parameter
+
+**Security tests:**
+- `model-capabilities.test.ts` > model-capabilities > supportsTemperature > does not resolve inherited Object.prototype keys as capability entries
+
+---
+
+### REQ-LLM-038 — Deterministic provider rejections MUST NOT be retried
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+`classifyLLMError` gains a `parameter-rejection` category, matched from a table of provider message shapes (`is deprecated for this model`, `Unsupported parameter`, `Unrecognized request argument`, `Unknown name "temperature"`, `Extra inputs are not permitted`) and gated on HTTP 400 so the same wording on a 500 still classifies as `overloaded`. It is checked after the existing billing 400 so billing errors are not hijacked. The category is **non-retryable** and its user message states the real reason ("the selected AI model rejected one of the request settings… retrying will not help") rather than the generic "try again later". `withRetry` gains an optional `shouldRetry(error): boolean` predicate — default unchanged (retry everything) — and `BaseProvider` passes `err => !isParameterRejectionError(err)`, so a deterministic 400 fails out immediately instead of burning the 1s + 2s backoff schedule before the useful strip-and-retry. The same predicate also skips retries for `LLMEmptyOutputError` (REQ-LLM-039): re-exhausting the identical budget is as pointless as re-sending a rejected parameter.
+
+**Standard tests:**
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > classifies the observed Anthropic temperature deprecation as parameter-rejection
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > is NOT retryable — the same request fails identically every time
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > states the real reason rather than telling the user to try again later
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > isParameterRejectionError is true for a parameter 400 and false otherwise
+- `retry.test.ts` > withRetry > shouldRetry predicate > fails fast without burning the backoff schedule when shouldRetry returns false
+- `retry.test.ts` > withRetry > shouldRetry predicate > keeps retrying while shouldRetry returns true
+- `retry.test.ts` > withRetry > shouldRetry predicate > retries every error when no predicate is supplied (unchanged default)
+
+**Edge case tests:**
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > only applies to status 400 — the same wording on a 500 stays overloaded
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > does not hijack the billing 400, which is checked first
+- `retry.test.ts` > withRetry > shouldRetry predicate > passes a normalized Error to the predicate for non-Error throws
+- `base-provider.test.ts` > BaseProvider > empty-output errors are not retried > is attempted exactly once — exhausting the same budget again cannot help
+- `base-provider.test.ts` > BaseProvider > empty-output errors are not retried > is not retried even when a temperature was requested (no strip-and-retry pass)
+
+---
+
+### REQ-LLM-039 — Ollama requests MUST suppress the thinking phase by default, and empty output at the budget MUST raise a descriptive error
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+`LLMCompletionOptions.thinking` is a new opt-in flag defaulting **OFF**. `OllamaProvider` sends `think: options?.thinking === true` **unconditionally** — not as a conditional spread — because `think: false` has to reach the wire: thinking-capable models (`qwen3.8:27b-mlx`, `muse-glimmer:30b-mlx`) default to thinking ON and spend the whole `num_predict` allowance inside the separate `thinking` field, returning `response: ''`. Non-thinking models (`gemma4:31b`, `gemma4:e4b`) accept and ignore the flag. The flag is deliberately **not** gated on `responseFormat === 'json'` — the tightest budget in the repo (`pas-classifier`, `maxTokens: 10`) declares no `responseFormat` — and not set per call site, because opt-out defaults are how this class of bug recurs. A caller that wants a reasoning phase sets `thinking: true` **and** raises `maxTokens`. When Ollama returns empty text with `finishReason === 'length'`, the provider throws `LLMEmptyOutputError` naming the model, the provider, the `num_predict` budget and the thinking-block length, instead of silently returning `""`. The guard is keyed on empty + truncated rather than on a thinking block being present, so a model that burns its budget without reporting `thinking` is caught too; empty + `stop` still returns `""` (the pre-existing Gemma ambiguity that the shadow and recall classifiers already retry themselves). The error classifies as the non-retryable `empty-output` category (REQ-LLM-038), and its message is carried through `ShadowResult`'s `llm-error` variant into the regression harness's `MeteredError` so a report says what broke instead of "food-shadow infrastructure error: unknown".
+
+**Standard tests:**
+- `ollama-provider.test.ts` > OllamaProvider — thinking flag (defaults OFF) > sends think: false by default — an omitted field would leave thinking ON
+- `ollama-provider.test.ts` > OllamaProvider — thinking flag (defaults OFF) > sends think: true when options.thinking === true
+- `ollama-provider.test.ts` > OllamaProvider — thinking flag (defaults OFF) > sends think even when responseFormat is unset — the flag is NOT gated on JSON mode
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > throws a diagnostic naming the model, the budget and the thinking length
+- `llm-errors.test.ts` > classifyLLMError > empty output > classifies LLMEmptyOutputError as empty-output
+- `llm-errors.test.ts` > classifyLLMError > empty output > is NOT retryable — the same request exhausts the same budget every time
+- `llm-errors.test.ts` > classifyLLMError > empty output > states the real reason rather than telling the user to try again later
+- `llm-errors.test.ts` > classifyLLMError > empty output > isEmptyOutputError is true for that error and false otherwise
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — llm-error message passthrough > carries the underlying error message so callers can report something useful
+- `dispatch.test.ts` > foodShadow adapter — throws on llm-error > includes the underlying error message and a non-zero meter
+
+**Edge case tests:**
+- `ollama-provider.test.ts` > OllamaProvider — thinking flag (defaults OFF) > treats thinking: false the same as omitted
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > throws even when the model reports no thinking block (empty + length is enough)
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > still resolves to "" for empty + done_reason stop (Gemma ambiguity, handled upstream)
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > resolves normally for truncated-but-non-empty output (the oracle judges that)
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > also fires on the older-Ollama path where length is inferred from eval_count
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > is attempted exactly once — the failure is deterministic, not transient
+- `llm-errors.test.ts` > classifyLLMError > empty output > does not classify by message text — only the error name counts
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — llm-error message passthrough > does NOT trigger the empty-output repair retry — a throw bypasses parseShadowResponse
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — llm-error message passthrough > stringifies non-Error throws rather than dropping them
+
+**Fixes:**
+- **(2026-09-02):** Systemic-coverage assessment. The `think` flag itself is fully systemic — it is sent unconditionally and consults no per-model table, so a brand-new thinking-capable model is protected on its first call with no per-model work. The *empty-output guard* was not: it existed on `OllamaProvider` only, while the other local-serving path (`OpenAICompatibleProvider`, and `LlamaCppProvider` which inherits it) still returned a silent `''`. Closed under REQ-LLM-042. CL: `openai-compatible-empty-output`.
+
+---
+
+### REQ-LLM-040 — A structured-output call that fails to parse at `finishReason === 'length'` MUST be reported as truncation naming the cap
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+Where a fixed `maxTokens` budget feeds a structured-output parse, an unparseable reply at `finishReason === 'length'` MUST be reported as budget exhaustion — naming the cap, the constant to raise, and a bounded prefix of the raw reply — never as malformed model output. Two call sites implement this:
+
+- **Rubric judge** (`regression/src/oracles/rubric.ts`). `JUDGE_MAX_TOKENS` is 1024 (was 400 — the old comment assumed frontier judges reply in ~100 tokens, which a 2026-09-01 live run disproved; 1024 matches core's provider-default `max_tokens` and costs nothing when the judge stops at its own EOS). The oracle calls `completeWithMeta` and, on `finishReason === 'length'`, returns `verdict: 'error'` naming the cap and echoing a 200-char raw prefix. The check runs **before** parsing: a cap-truncated reply is untrusted even when its prefix happens to parse. Genuinely malformed but complete output still falls through to the generic parse-failure verdict, and `CallMeter` accounting in the `finally` is unchanged so spend on throws is still captured. `RubricJudgeLLM` (`complete` + `completeWithMeta`) replaces the `Pick<LLMService, 'complete'>` narrow at every judge construction site.
+- **Food shadow classifier** (`apps/food/src/routing/shadow-classifier.ts`). `SHADOW_MAX_TOKENS` stays 80 and now records why (the good path is 15–24 tokens on both models in use, so a reply needing 369+ characters is misbehaviour to report, not to fund). `callLLM` goes through `completeWithMeta`; the new `interpret()` parses first — a reply satisfying the schema is complete by construction — and only on a parse failure does `finishReason` decide *which* failure to report, returning `{kind: 'llm-error', category: 'truncated-output', message}` plus a `logger.warn`. The raw prefix is `JSON.stringify`-escaped so the diagnostic stays one log line. Truncation is terminal (no retry: the same prompt against the same cap cuts the same way), while empty output still takes its one repair retry. Production callers keep failing open — `dispatchShadow` falls through for every non-`ok` kind and `computeVerdict` already maps `llm-error` to `error` — so a truncated shadow reply lands in the regex cascade exactly as the old parse-failure did.
+
+**Standard tests:**
+- `rubric-oracle.test.ts` > runRubricOracle > reports truncation (not a parse failure) when finishReason is "length"
+- `rubric-oracle.test.ts` > runRubricOracle > gives the judge a 1024-token output budget
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > unparseable + finishReason "length" → llm-error naming the token cap, no retry
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > the classifier call carries maxTokens 80 through completeWithMeta
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > logs a warn naming the cap so the truncation is visible outside the return value
+- `dispatch.test.ts` > foodShadow adapter — throws on llm-error > reports a cap-truncated reply as truncation, not as a JSON parse failure
+
+**Edge case tests:**
+- `rubric-oracle.test.ts` > runRubricOracle > errors on finishReason "length" even when the truncated prefix parses
+- `rubric-oracle.test.ts` > runRubricOracle > keeps the generic parse-failure verdict for malformed-but-complete output
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > the truncation diagnostic is a single line even when the raw reply has newlines
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > unparseable + finishReason "stop" keeps parse-failed and its no-retry policy
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > empty + finishReason "stop" still takes the one repair retry (unchanged)
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > a retry that comes back truncated is reported as truncation (2 calls)
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > a valid reply still parses even when finishReason is "length" (schema is complete)
+
+**Fixes:**
+- **(2026-09-02):** The two call sites named above were the first two instances of a defect class with ten members. The classification logic is extracted into the shared `classifyStructuredOutput` helper and both sites migrate onto it with no behaviour change beyond a standardised raw preview; the remaining eight sites migrate at the same time. The deliberate disagreement between them — `check-length-first` for the rubric judge, `parse-first` for the Food shadow classifier — becomes the helper's required `order` option, with no default, so neither policy can be silently regressed. See REQ-LLM-041. CL: `classify-structured-output`.
+
+---
+
+### REQ-REG-019 — The suite MUST complete without infrastructure `error` verdicts when the judge rejects `temperature` or the fast-tier model is thinking-capable
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+A regression run's verdicts must reflect the behaviour of the system under test, not the request shape the harness happens to send. Two harness-side infrastructure failures previously converted every case into an `error`: a judge model that rejects `temperature` (all 10 chatbot cases errored at the judge while the chatbot answered correctly), and a thinking-capable fast-tier model that returns empty text (all 16 routing cases errored on `Unexpected end of JSON input`). The requirement is satisfied by the guards in REQ-LLM-037..040; this entry records the suite-level contract and the real-run evidence for it.
+
+**Verification (real `pnpm test:regression` runs, 2026-09-01):**
+
+| Run | Result |
+|-----|--------|
+| `--bucket=routing --model-matrix=fast=ollama/qwen3.8:27b-mlx` | 37 cases, 34 pass / 3 fail / **0 error**, routing accuracy **98.11%**, REQ-REG-011 gate PASSED, $0.00, 697s |
+| `--bucket=routing --model-matrix=fast=ollama/muse-glimmer:30b-mlx` | 37 cases, 22 pass / 14 fail / 1 error, routing accuracy **79.25%**, gate FAILED on genuine accuracy, $0.00, 610s — the single error was the shadow-classifier truncation subsequently fixed under REQ-LLM-040 |
+| `--bucket=chatbot --judge-model=anthropic/claude-opus-5` (before the judge-truncation fix) | 10 cases, 3 pass / 6 fail / 1 error (judge truncation), $0.307 |
+| same, after the judge-truncation fix | 10 cases, 3 pass / 7 fail / **0 error**, $0.305 |
+
+Before the fixes the same suite reported 0 pass / 26 error. `muse-glimmer:30b-mlx` failing the REQ-REG-011 accuracy gate is a legitimate model-quality finding, not a defect — which is exactly the distinction this requirement exists to preserve.
+
+**Standard tests:**
+- `dispatch.test.ts` > foodShadow adapter — throws on llm-error > includes the underlying error message and a non-zero meter
+- `dispatch.test.ts` > foodShadow adapter — throws on llm-error > reports a cap-truncated reply as truncation, not as a JSON parse failure
+
+---
+
+### REQ-REG-020 — Receipt case expectations MUST model the parser's date-acceptance window so ground-truth fixtures do not rot
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+`parseReceiptFromPhoto` refuses a receipt date older than `MAX_RECEIPT_AGE_DAYS` (90), overwriting `date` with today and preserving the model's reading in `rawExtractedDate`. `buildExpectation` in `regression/src/runner/case-runners/receipt-runner.ts` asserted the sidecar date verbatim on `date`, so every date-bearing receipt case went red exactly 90 days after the receipt was issued — a wall-clock time bomb that hit real `pnpm test:regression` runs against a *perfect* model, not only the mocked unit tests (`receipt-costco-long` crossed the line on 2026-07-26, `receipt-trader-joes-correction` on 2026-08-10). Photo fixtures carry an immutable real-world date, so the failure was never going to resolve itself. `buildExpectation` now branches on `isValidReceiptDate(sidecar.date, today)`: in-window dates are asserted verbatim on `date` (unchanged path); an aged-out date pins `date` to the today-fallback and asserts the ground-truth date on `rawExtractedDate` instead. Assertion strength is **preserved, not relaxed** — the model must still read the exact date off the photo — and both branches are pinned by clock-frozen tests including mutation checks, since which branch runs would otherwise depend on how long ago the date literals were authored.
+
+**Standard tests:**
+- `receipt-runner.test.ts` > runReceiptCase — sidecar date acceptance window > in-window sidecar date is asserted verbatim on the parsed date
+- `receipt-runner.test.ts` > runReceiptCase — sidecar date acceptance window > aged-out sidecar date expects the today-fallback and pins rawExtractedDate
+
+**Edge case tests:**
+- `receipt-runner.test.ts` > runReceiptCase — sidecar date acceptance window > in-window sidecar date fails when the parser reads a different in-window date
+- `receipt-runner.test.ts` > runReceiptCase — sidecar date acceptance window > aged-out sidecar date still fails when the parser reads the wrong date
+
+---
+
+### REQ-REG-GUI-V2-027 — The live run view MUST show case-completion progress, server-computed and absolute on every frame
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+The live-run banner renders a native `<progress>` element plus a `completed / total cases` label. Counts are computed **in the run registry, not the client**: `RunProgress {completed, total}` rides every dispatched event, `RunState` gains `totalCases` (0 = unknown) and a monotonic `completedCases` incremented on `case-result` only, and each `eventLog` entry carries its own `{id, event, progress}` snapshot so a `Last-Event-ID` replay reports historical counts rather than stamping every replayed frame with the final one. The counter is monotonic state rather than an `eventLog` scan, because the ring buffer evicts entries past `MAX_EVENT_LOG_ENTRIES` (REQ-REG-GUI-V2-022) and a scan would plateau at the buffer size. Counts are therefore absolute on every `case-completed` frame and reconnect-safe. The denominator is the **bucket-filtered** case count: `--rerun` forces a cache miss (`regression/src/runner/index.ts:171`) but does not narrow selection (the bucket filter is at `:134-136`), so every bucket-filtered case still reports a result; the bucket filter is hoisted out of the `forceFresh` block and `totalCases` rides `createRun` and the 202 body. `GET /gui/regression/estimate` is deliberately untouched — its rerun-narrowing is correct for cost. Client-side, `setProgress()` writes element properties and `textContent` only (never `innerHTML` — the frame carries two numbers, no new XSS surface), clamps the bar with `Math.min` while the text keeps the true count, and runs before the row fetch so the bar advances even if the row partial 404s; terminal handlers leave the final count in place. The `<progress>` element is styled from PAS tokens (`pas.css` section 9b).
+
+**Standard tests:**
+- `run-registry.test.ts` > run-registry — progress counters > createRun stores totalCases
+- `run-registry.test.ts` > run-registry — progress counters > completedCases increments on case-result only
+- `run-registry.test.ts` > run-registry — progress counters > attach replays the per-entry snapshot to listeners
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — progress denominator > 202 body reports totalCases for an all-bucket run
+- `regression-routes-write.test.ts` > GET /gui/regression/runs/:runId/events — progress frames > case-completed frames carry completed/total
+- `regression-routes.test.ts` > GET /gui/regression — client wiring (Codex P1) > page carries the progress-bar wiring (server-computed counts)
+- `regression-routes.test.ts` > pas.css — terminal banner state styling > the live-run progress bar is styled from PAS tokens
+
+**Edge case tests:**
+- `run-registry.test.ts` > run-registry — progress counters > omitting totalCases defaults to 0 (unknown denominator)
+- `run-registry.test.ts` > run-registry — progress counters > each event log entry carries its own progress snapshot (1 then 2, not 2 then 2)
+- `run-registry.test.ts` > run-registry — progress counters > counter survives ring-buffer eviction (monotonic, not an eventLog scan)
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — progress denominator > rerun does NOT narrow the denominator — bucket count wins
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — progress denominator > forceFresh on a bucket keeps the bucket denominator
+- `regression-routes-write.test.ts` > GET /gui/regression/runs/:runId/events — progress frames > replayed frames carry their historical counts, not the final one
+
+---
+
+### REQ-REG-GUI-V2-028 — `activeRunId` MUST be threaded to every regression render path
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+All six `/gui/regression` render paths previously passed `activeRunId: null`, leaving the `data-runid` attribute, the client bootstrap's reattach, and the compare summary bar's "a run is already going" submit guard as dead code — the live banner vanished on page reload. The registry exposes `getActiveRunId()` (null before the first run, null after a terminal event, and null after a rejecting `runFactory` so no phantom active run is reported), and every renderer threads it through its deps. The "view live" link drops the `?runId=` query nobody parsed, and compare's three estimate literals gain the missing `totalCases` / `totalInputs`.
+
+**Standard tests:**
+- `run-registry.test.ts` > run-registry — getActiveRunId > returns the active runId while a run is in flight
+- `run-registry.test.ts` > run-registry — getActiveRunId > returns null after a terminal event
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=overview renders data-runid for the active run
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=run renders data-runid for the active run
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=compare renders data-runid for the active run
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > compare summary-bar submit is disabled during an active run
+
+**Edge case tests:**
+- `run-registry.test.ts` > run-registry — getActiveRunId > returns null after a rejecting runFactory (no phantom active run)
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=overview renders an empty data-runid when no run is active
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=run renders an empty data-runid when no run is active
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=compare renders an empty data-runid when no run is active
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > compare summary-bar submit is enabled when no run is active
+
+**Known gap:** `regression-tab-run.eta`'s own submit button does not consult `activeRunId` (only the compare tab's summary bar does), so it is not disabled during an active run. Tracked in `docs/open-items.md`.
+
+---
+
+## Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02)
+
+**Context.** This phase closes the defect class opened by the 2026-09-01 phase above — *a fixed `maxTokens` budget feeding a structured-output parse, where truncation is reported as malformed output*. That phase fixed four instances one at a time (Ollama empty output, the rubric judge, the Food shadow classifier, and the judge budget); this one extracts the classification into a single helper and migrates ten call sites onto it, then closes the two remaining systemic gaps the same investigation exposed: the OpenAI-compatible/llama.cpp serving path had neither the thinking suppression nor the empty-output guard, and three *cost estimators* silently priced free local models at frontier rates.
+
+**Systemic assessment recorded here because it is the reason the phase exists.** The Ollama thinking fix from `9f9f2fb` is fully systemic: `think: options?.thinking === true` is sent unconditionally, no per-model table is consulted, so a brand-new thinking-capable model is protected on its first call, forever, with no per-model work. It was *not* systemic across local serving — `OpenAICompatibleProvider`, and `LlamaCppProvider` which inherits it, had neither guard and ignored `reasoning_content`, the field LM Studio / vLLM / SGLang / llama-server use for reasoning models. `docs/open-items.md` item L4 recommends moving the fast tier onto the llama.cpp provider, which before this phase would have silently reintroduced the original bug.
+
+---
+
+### REQ-LLM-041 — Structured-output truncation MUST be classified by one shared helper whose parse/length ordering is an explicit caller choice
+
+**Phase:** Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02) | **Status:** Implemented
+
+Every call site that feeds an LLM reply into a structured-output parse under a fixed `maxTokens` budget MUST classify the outcome through `classifyStructuredOutput` in `core/src/utils/json-strip-fences.ts` — the file whose header already claimed to be the canonical home for local-model quirks. The helper takes an `LLMCompletionMeta`-shaped `{text, finishReason}` plus the cap, and returns exactly one of `ok | truncated | empty | unparseable`. It **classifies only**: every call site keeps its own policy, because their result types and retry semantics all differ. `formatRawPreview` standardises the diagnostic preview as `JSON.stringify(raw.slice(0, 200))` so a multi-line or control-character-bearing reply cannot break a log line, a `MeteredError` message, or a regression-report verdict detail.
+
+The parse/length **ordering is a required option with no default**. The two sites fixed under REQ-LLM-040 deliberately disagree and both are right: `check-length-first` (the rubric judge) distrusts a cap-truncated reply even when its prefix parses, because the cut lands inside `explanation`; `parse-first` (the Food shadow classifier) accepts it, because the schema is closed by construction. A helper that picked one silently would have regressed the other, so there is no default and the type requires the caller to state it. `message-segmenter` is the strongest argument for `check-length-first`: its payload is an ARRAY, so a reply cut between elements still parses into a *shorter valid* `segments` list — a silent, confident drop of the user's last request. `empty` is decided first and stays distinct under both orderings, so the retry-on-empty policies in `recall-classifier`, the Food shadow classifier and `weakness-summarizer` keep firing untouched.
+
+Ten sites are migrated, each widening its narrow LLM interface to require `completeWithMeta` and each pinning its existing policy in tests: `recall-classifier` (parse-first, cap 150, `reason: 'truncated'` built as a fresh object rather than a spread of the shared non-frozen `RECALL_SAFE_DEFAULT`, retries still only on empty with a hard cap of 2 calls), `message-segmenter` (check-length-first, cap 400, truncation is a log-only signal with no retry added), `title-generator` (60), `session-summarizer` (400), `session-control-classifier` (80, `reason: 'truncated'` replaces the misleading `'parse error'`), `data-query` file selection (50 — the returned ids are deliberately unchanged, because the prose fallback turns `[0, 3, ` into a plausible but *short* file list), `route-verifier` (no cap of ours; fail-open behaviour is byte-identical, only the log line is honest now), `weakness-summarizer` (1500; its persisted `errorMessage` is GUI-visible), plus `regression/src/oracles/rubric.ts` and `apps/food/src/routing/shadow-classifier.ts`, which move onto the helper with no behaviour change beyond the standardised raw preview. `./utils/json-strip-fences` is added to the `@pas/core` exports so `apps/food` can import it.
+
+**Test-stub hazard closed by the same commit.** Several test stubs hand a `complete`-only object over with `as unknown as`, so a missing `completeWithMeta` surfaces at *runtime*, not at compile time — and in `classifySessionControl` the resulting `TypeError` was swallowed by the surrounding `try/catch`, returned the safe default, and made `regression/src/__tests__/dispatch.test.ts` silently assert the wrong intent. `core/src/testing/llm-meta-stub.ts#withCompleteWithMeta` delegates to the same `complete` mock so existing call-count and prompt assertions stay meaningful, and `createMockCoreServices` now delegates too instead of returning an independent always-empty `completeWithMeta`. The underlying reason this was invisible — no tsconfig in the repo typechecks test files — is tracked in `docs/open-items.md`.
+
+**Verification note:** the truncation branch is verified by unit tests under **both** orderings, not by a live reproduction. A 2026-09-02 `--bucket=routing --model-matrix=fast=ollama/muse-glimmer:30b-mlx` rerun of the case that truncated on 2026-09-01 (`food-user-wants-to-log-an-unfamiliar-meal-with-a-free-text-description`) returned complete output on all three inputs and failed honestly on content; no truncation diagnostic appeared anywhere in that run's 35 results. The error verdict is gone, which is consistent with the fix, but the run does not by itself demonstrate the truncated branch executing.
+
+**Standard tests:**
+- `json-strip-fences.test.ts` > classifyStructuredOutput > order=check-length-first > parses a complete valid reply
+- `json-strip-fences.test.ts` > classifyStructuredOutput > order=parse-first > parses a complete valid reply
+- `json-strip-fences.test.ts` > classifyStructuredOutput > order=check-length-first > classifies unparseable + finishReason "length" as truncated, not unparseable
+- `json-strip-fences.test.ts` > classifyStructuredOutput > order=parse-first > classifies unparseable + finishReason "length" as truncated, not unparseable
+- `json-strip-fences.test.ts` > classifyStructuredOutput > a cap-truncated reply whose prefix DOES parse > check-length-first distrusts it — a judge's cut-off reply is not a grade
+- `json-strip-fences.test.ts` > classifyStructuredOutput > a cap-truncated reply whose prefix DOES parse > parse-first accepts it — the closed schema is complete by construction
+- `json-strip-fences.test.ts` > formatRawPreview > quotes and escapes so a multi-line reply stays on one line
+- `recall-classifier.test.ts` > classifyRecallIntent — truncated output vs malformed output > unparseable + finishReason "length" → reason "truncated", no retry
+- `message-segmenter.test.ts` > segmentMessage — truncated output > returns the single-segment fallback when the reply parses but was cut at the cap
+- `title-generator.test.ts` > generateTitle — truncated output > logs truncation naming the cap, not "invalid JSON"
+- `session-summarizer.test.ts` > summarizeSession — truncated output > logs truncation naming the cap, not "invalid JSON"
+- `session-control-classifier.test.ts` > classifySessionControl — truncated output > returns the safe default with reason "truncated" and makes exactly one call
+- `data-query.test.ts` > DataQueryService — truncated file-selection reply > warns that the list may be short rather than staying silent
+- `route-verifier.test.ts` > RouteVerifier > logs truncation rather than claiming an unparseable response
+- `weakness-summarizer.test.ts` > createWeaknessSummarizer — truncated LLM output > persists status "error" whose message names the cap, not invalid JSON
+
+**Edge case tests:**
+- `json-strip-fences.test.ts` > classifyStructuredOutput > order=check-length-first > classifies an empty reply as empty even when finishReason is "length"
+- `json-strip-fences.test.ts` > classifyStructuredOutput > order=parse-first > classifies an empty reply as empty even when finishReason is "length"
+- `json-strip-fences.test.ts` > classifyStructuredOutput > order=check-length-first > treats a fences-only reply as unparseable, not empty (it has content)
+- `json-strip-fences.test.ts` > classifyStructuredOutput > order=check-length-first > omits maxTokens from a truncated result when the caller passed none
+- `json-strip-fences.test.ts` > classifyStructuredOutput > check-length-first does not parse at all when the reply was cut at the cap
+- `json-strip-fences.test.ts` > classifyStructuredOutput > tolerates a provider that reports no text at all
+- `json-strip-fences.test.ts` > formatRawPreview > escapes control characters rather than emitting them raw
+- `recall-classifier.test.ts` > classifyRecallIntent — truncated output vs malformed output > does not return the shared RECALL_SAFE_DEFAULT object on the truncated path
+- `recall-classifier.test.ts` > classifyRecallIntent — truncated output vs malformed output > empty + finishReason "length" still takes the one repair retry
+- `recall-classifier.test.ts` > classifyRecallIntent — truncated output vs malformed output > a retry that comes back truncated reports truncation after exactly 2 calls
+- `message-segmenter.test.ts` > segmentMessage — truncated output > adds no retry — truncation costs exactly one LLM call
+- `message-segmenter.test.ts` > segmentMessage — truncated output > keeps the unparseable diagnostic for a complete but malformed reply
+- `message-segmenter.test.ts` > segmentMessage — truncated output > tolerates a missing logger on the truncation path
+- `session-control-classifier.test.ts` > classifySessionControl — truncated output > keeps reason "parse error" for a complete but malformed reply
+- `data-query.test.ts` > DataQueryService — truncated file-selection reply > returns the same ids the prose fallback would (behaviour unchanged)
+- `data-query.test.ts` > DataQueryService — truncated file-selection reply > makes exactly one LLM call — no retry is added
+- `route-verifier.test.ts` > RouteVerifier > degrades gracefully (unchanged) when the verifier reply is cut at the cap
+- `route-verifier.test.ts` > RouteVerifier > returns fallback in strict mode when the verifier reply is cut at the cap
+- `weakness-summarizer.test.ts` > createWeaknessSummarizer — truncated LLM output > does NOT retry a truncated reply — re-asking hits the same cap
+- `weakness-summarizer.test.ts` > createWeaknessSummarizer — truncated LLM output > still retries once on empty output, even when finishReason is "length"
+
+---
+
+### REQ-LLM-042 — OpenAI-compatible and llama.cpp providers MUST NOT return a silent `''`; empty output at the cap MUST raise a descriptive non-retryable error, and `reasoning_content` MUST NOT be substituted for an answer
+
+**Phase:** Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02) | **Status:** Implemented
+
+REQ-LLM-039 fixed the thinking-model empty-output regression in `OllamaProvider` only. The other local-serving path — `OpenAICompatibleProvider`, and `LlamaCppProvider` which inherits it — had neither guard: `content ?? ''` turned a budget-exhausted reasoning model into a silent empty string, indistinguishable from a model that legitimately had nothing to say. LM Studio, vLLM, SGLang and llama-server all serve reasoning models that emit the chain of thought in the non-standard `message.reasoning_content` field.
+
+- `message.reasoning_content` is read through a narrow cast, the same way `OllamaProvider` reads `done_reason`. It is used **only as evidence in the diagnostic and never substituted for the answer**: reasoning text is prose, and returning it would feed narration to every `responseFormat: 'json'` caller — a quieter failure than the `''` it replaced.
+- Empty text plus `finishReason === 'length'` throws `LLMEmptyOutputError`, naming provider, model, the token cap actually sent on the wire, and the length of the reasoning block. `isEmptyOutputError()` already classifies it non-retryable, so no new retry plumbing is required — the failure is deterministic, and re-asking burns the same budget the same way.
+- Empty text plus `'stop'` still resolves to `''` unchanged, because callers' retry-on-empty logic depends on it. A reasoning block on that path logs a warning so the case is not silent to the operator.
+- The 1024 provider default cap is hoisted so the diagnostic names the value actually sent, not a guess.
+
+`LlamaCppProvider` needs no changes of its own and is covered by tests that fail if anyone re-implements `doComplete` on the subclass.
+
+**Standard tests:**
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — empty output after budget exhaustion > throws a diagnostic naming the model, the budget and the reasoning length
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — empty output after budget exhaustion > names the provider default cap when the caller supplied none
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — empty output after budget exhaustion > ignores reasoning_content entirely when content is present
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — inherits the empty-output guard > throws the diagnostic when a reasoning model burns its budget
+
+**Edge case tests:**
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — empty output after budget exhaustion > throws even when the model reports no reasoning block (empty + length is enough)
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — empty output after budget exhaustion > still resolves to "" for empty content + finish_reason stop (callers retry that themselves)
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — empty output after budget exhaustion > still resolves to "" for empty content + reasoning_content + finish_reason stop
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — empty output after budget exhaustion > resolves normally for truncated-but-non-empty output (the oracle judges that)
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — empty output after budget exhaustion > is attempted exactly once — the failure is deterministic, not transient
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — inherits the empty-output guard > still resolves to "" for empty content + finish_reason stop
+
+**Known gap:** the `reasoning_content` read covers only that field name on the non-streaming path; some servers use `message.reasoning`, or nest the field under `delta` when streaming. Unverified against a live server — tracked in `docs/open-items.md`.
+
+---
+
+### REQ-LLM-043 — Models served by a local provider MUST estimate $0 in every estimator, not only in recorded spend
+
+**Phase:** Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02) | **Status:** Implemented
+
+Local models run on the operator's own hardware and are always free; adding a new Ollama model must never require a pricing entry. Recorded spend already honoured that — `CostTracker.record` passes `providerType` and `estimateCallCost` short-circuits a local provider to $0. Three *estimators* did not, because they dropped `providerType`, and **a model id alone is never enough**: a local model such as `qwen3.8:27b-mlx` has no `MODEL_PRICING` entry, so it falls through to `DEFAULT_REMOTE_PRICING` ($3/$15 per Mtok) and is quoted at frontier rates.
+
+- **Regression pre-flight estimator.** `resolveTierRefs` now returns the full `ModelRef` per tier; `buildTierPricingRefs` pairs each with its `providerType` from the same `ProviderRegistry` the LLM service dispatches through; `makeTierAwareEstimator` prices a call on the tier it will actually run on (see REQ-REG-021). `TierModelSnapshot` and its `cache-key.ts` serialization are untouched, so no cached result is invalidated — provider info rides alongside the snapshot, not inside it.
+- **GUI confirm dialog.** `estimateRunCostUsd` took only `{caseId, bucket}`, so an all-Ollama matrix showed the same figure as an all-Opus one — ~$0.19 for a 37-case routing run that costs nothing. It now takes `localTiers`, charges $0 for a bucket whose tier is local, and returns `allLocal` so the Run-tab banner and the confirm dialog say "all-local run" rather than a bare $0.00 that reads like a bug. Remote constants are unchanged; numeric recalibration remains a separate open item.
+- **Two narrower gaps.** `estimateGuardCost` no longer invents a `defaultReservationUsd` charge for an unresolvable tier when every configured provider is local (and says why when it does fall back); `SystemInfoService.getModelPricing` takes an optional provider id and returns `null` for a local one, so a GGUF served under the id `gpt-4o` no longer displays remote admin pricing.
+
+**Standard tests:**
+- `estimator.test.ts` > estimateRunCostUsd — local tiers are free > an all-local model matrix estimates $0.00
+- `estimator.test.ts` > estimateRunCostUsd — local tiers are free > a 37-case all-local routing sweep estimates $0.00
+- `local-model-estimate.test.ts` > runner pre-flight estimator — local models are free > an all-local model matrix estimates $0.00 for every bucket
+- `local-model-estimate.test.ts` > runner pre-flight estimator — local models are free > llama.cpp is local too
+- `regression-routes.test.ts` > regression GUI — local-model cost estimate > GET /estimate reports $0.00 and allLocal for an all-local install
+- `regression-routes.test.ts` > regression GUI — local-model cost estimate > Run tab banner says "all-local run" instead of a bare $0.00
+- `estimate-guard-cost.test.ts` > estimateGuardCost > unresolvable tier on an all-local install > estimates $0 when no configured provider bills per token
+- `estimate-guard-cost.test.ts` > estimateGuardCost > unresolvable tier on an all-local install > a resolvable local tier still prices at $0 through priceFor
+
+**Edge case tests:**
+- `local-model-estimate.test.ts` > runner pre-flight estimator — local models are free > regression guard: without providerType a local model prices at frontier rates
+- `local-model-estimate.test.ts` > runner pre-flight estimator — local models are free > a mixed matrix prices only the remote tier
+- `estimator.test.ts` > estimateRunCostUsd — local tiers are free > a mixed matrix prices only the buckets served by a remote tier
+- `estimator.test.ts` > estimateRunCostUsd — local tiers are free > a local standard tier zeroes receipt + chatbot but not routing
+- `estimator.test.ts` > estimateRunCostUsd — local tiers are free > allLocal is false for an empty selection (nothing to run is not a free run)
+- `estimator.test.ts` > estimateRunCostUsd > omitting localTiers keeps the legacy remote constants
+- `regression-routes.test.ts` > regression GUI — local-model cost estimate > GET /estimate prices only the remote tier on a mixed install
+- `regression-routes.test.ts` > regression GUI — local-model cost estimate > GET /estimate keeps remote constants when provider locality is unknown
+- `regression-routes.test.ts` > regression GUI — local-model cost estimate > Run tab banner omits the all-local note on a remote install
+- `estimate-guard-cost.test.ts` > estimateGuardCost > unresolvable tier on an all-local install > keeps the default reservation when a remote provider IS configured
+- `estimate-guard-cost.test.ts` > estimateGuardCost > unresolvable tier on an all-local install > keeps the default reservation when the lookup cannot answer
+- `system-info.test.ts` > getModelPricing > returns null for a local provider even when the model id collides with a priced model
+- `system-info.test.ts` > getModelPricing > returns null for every priced model id served locally
+- `system-info.test.ts` > getModelPricing > an unregistered provider id makes no locality claim (pricing preserved)
+
+---
+
+### REQ-REG-021 — A regression cost estimate MUST price each bucket against the tier that actually serves it
+
+**Phase:** Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02) | **Status:** Implemented
+
+`build-deps` priced every call as `modelIds.fast` with no provider, so a chatbot or receipt bucket running on the standard tier was quoted at fast-tier rates and vice versa — the estimate answered a question about a model nobody was going to call. `BUCKET_ESTIMATE` now gives each bucket its own token count *and* its tier (routing/recall → fast, receipt/chatbot → standard), and the estimator resolves pricing for that tier. The mapping is asserted against what the case-runners actually dispatch on, so the two cannot drift apart silently. The reasoning slot falls back to standard when unset, matching `ModelSelector`.
+
+**Standard tests:**
+- `local-model-estimate.test.ts` > runner pre-flight estimator — local models are free > prices the tier a case actually runs on, not always `fast`
+- `local-model-estimate.test.ts` > runner pre-flight estimator — local models are free > every bucket estimate carries a tier and non-zero tokens
+- `estimator.test.ts` > estimateRunCostUsd — local tiers are free > bucket → tier map matches what the case-runners actually dispatch on
+
+**Edge case tests:**
+- `local-model-estimate.test.ts` > runner pre-flight estimator — local models are free > the reasoning slot falls back to standard when unset
+- `local-model-estimate.test.ts` > runner pre-flight estimator — local models are free > a receipt projection on a remote standard tier fits inside the per-case budget
+
+---
+
+### REQ-REG-022 — The receipt bucket MUST meter real cost so the run-budget ceiling binds
+
+**Phase:** Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02) | **Status:** Implemented
+
+`runReceiptCase` charged its budget through `estimateUsd({tokenIn: 0, tokenOut: 0})`, which is structurally `$0` for every model. That zero was then recorded as the case's `costUsd` *and* added to the accumulated run spend, so **the run-budget ceiling could not stop a receipt sweep** no matter how much it really cost — the one bucket that sends multi-thousand-token vision payloads was the one bucket that reported nothing. The runner now meters a real `getMonthlyTotalCost()` delta the way every other case-runner does, and gates the pre-charge check on a realistic `RECEIPT_ESTIMATE_TOKENS` projection instead of on zero.
+
+**Verification (real `pnpm test:regression` runs):** the identical `--bucket=receipt` sweep (all 5 cases `--rerun`, forced fresh dispatch, standard tier `claude-sonnet-4-6`) reported **$0.000000 on 2026-09-01** and **$0.070911 on 2026-09-02** — about $0.014/case, consistent with the measured 2165 input / 976 output tokens per case. Verdicts are unchanged at 1 pass / 4 fail / 0 error, so the pre-existing line-item extraction gap is untouched and only the accounting moved.
+
+**Standard tests:**
+- `orchestrator-receipt-dispatch.test.ts` > runSuite — receipt bucket cost metering + run budget > records the real CostTracker delta, not the pre-charge projection
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > passes when LLM extraction matches sidecar exactly
+
+**Edge case tests:**
+- `orchestrator-receipt-dispatch.test.ts` > runSuite — receipt bucket cost metering + run budget > run-budget ceiling aborts a receipt sweep once accumulated spend exceeds it
+- `orchestrator-receipt-dispatch.test.ts` > runSuite — receipt bucket cost metering + run budget > reports $0 for a receipt case whose model never bills (all-local run)
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > aborts with verdict=budget-exceeded before any LLM call when first call would exceed budget
+- `receipt-runner.test.ts` > runReceiptCase — production parser integration > 8. charges budget only once per dispatch even with two oracles
+
+---
+
+### REQ-SEC-013 — Model-id validation MUST accept namespaced ids and MUST be the same rule on every operator surface
+
+**Phase:** Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02) | **Status:** Implemented
+
+PAS validated operator-supplied model ids with two patterns that disagreed. The GUI (`gui/routes/llm-usage.ts`) and the chatbot `<switch-model>` path (`services/system-info/index.ts`) used `/^[a-zA-Z0-9._:-]{1,100}$/`, which excludes `/`; the regression parser (`services/regression/model-spec.ts`) used a form that allows `/` and explicitly documents namespaced ids. The consequence was a two-answer system: an Ollama model pulled from HuggingFace (`hf.co/bartowski/Foo-GGUF:Q4_K_M`) could be regression-tested but could not be assigned to a tier through `POST /gui/llm/tiers` or `SystemInfoService.setTierModel`.
+
+All three now import `isValidModelId` from `core/src/utils/model-id.ts`, the single source of truth. The shared rule is the permissive form, with the security properties kept and one tightened:
+
+- `MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$/` — fully anchored and length-bounded (192 chars).
+- The first character MUST be alphanumeric. This is a *tightening* relative to the old GUI pattern, which permitted a leading `-`, `.`, `_` or `:`.
+- Because `/` is meaningful only as a namespace separator, the shapes it enables are rejected separately: `..` traversal, `//` empty segments, and a trailing `/`.
+
+Widening was verified safe against every downstream consumer of a model id before being made: the only filesystem use is the model journal, which runs ids through `slugifyModelId()` (`[^a-z0-9-]` → `-`) and then re-validates the result against `MODEL_SLUG_PATTERN`; `ModelSelector.save()` writes the id as a YAML *value*, not a key path; the GUI renders it through `escapeHtml()` and inside `hx-vals` JSON that is itself escaped; `CostTracker.appendUsageRow` strips `|`, `\r` and `\n` before writing the markdown table row; the regression CLI is spawned as an argv array with no shell; providers pass the id to their SDK as a request-body field. No consumer requires `/` to be excluded.
+
+**Standard tests:**
+- `model-id.test.ts` > isValidModelId > accepts real-world model ids > accepts a plain vendor id
+- `model-id.test.ts` > isValidModelId > accepts real-world model ids > accepts dots and colons (Ollama tag syntax)
+- `model-id.test.ts` > isValidModelId > accepts real-world model ids > accepts a HuggingFace-namespaced id
+- `model-id.test.ts` > isValidModelId > accepts real-world model ids > accepts an Ollama-from-HuggingFace id with host, namespace and quant tag
+- `model-id.test.ts` > isValidModelId > accepts real-world model ids > accepts a Google "models/" prefixed id
+- `llm-usage.test.ts` > POST /gui/llm/tiers > accepts a namespaced model id (Ollama-from-HuggingFace)
+- `system-info.test.ts` > setTierModel > accepts a namespaced model ID
+- `security-measures.test.ts` > MODEL_ID_PATTERN > accepts namespaced model ID with slashes
+
+**Edge case tests:**
+- `model-id.test.ts` > isValidModelId > accepts real-world model ids > accepts exactly the maximum length
+- `model-id.test.ts` > isValidModelId > rejects malformed input > rejects a non-string
+- `model-id.test.ts` > isValidModelId > rejects malformed input > rejects one character over the maximum length
+- `model-id.test.ts` > isValidModelId > rejects malformed input > rejects whitespace
+- `model-id.test.ts` > isValidModelId > rejects malformed input > rejects a non-alphanumeric first character
+- `model-id.test.ts` > isValidModelId > rejects injection and traversal payloads > rejects "." traversal sequences
+- `model-id.test.ts` > isValidModelId > rejects injection and traversal payloads > rejects empty path segments
+- `model-id.test.ts` > isValidModelId > rejects injection and traversal payloads > rejects a trailing separator
+- `model-id.test.ts` > isValidModelId > rejects injection and traversal payloads > rejects HTML/XSS payloads
+- `model-id.test.ts` > isValidModelId > rejects injection and traversal payloads > rejects shell metacharacters
+- `model-id.test.ts` > isValidModelId > rejects injection and traversal payloads > rejects control characters and null bytes
+- `model-id.test.ts` > isValidModelId > rejects injection and traversal payloads > rejects non-ASCII homoglyphs
+- `model-id.test.ts` > isValidModelId > rejects injection and traversal payloads > is fully anchored — a valid id embedded in junk is rejected
+- `llm-usage.test.ts` > POST /gui/llm/tiers > rejects a namespaced model id containing traversal with 400
+- `system-info.test.ts` > setTierModel > rejects a namespaced model ID containing traversal
+- `system-info.test.ts` > setTierModel > rejects model ID with path traversal
+- `security-measures.test.ts` > MODEL_ID_PATTERN > rejects traversal sequences even though slashes are allowed
+- `model-spec.test.ts` > parseModelRef > rejects 'foo/bar/../etc' (traversal inside namespaced model)
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
@@ -12598,7 +13037,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-SEC-007 | prompt-templates.test.ts | 10 | 6 | Implemented |
 | REQ-SEC-008 | security-measures.test.ts | 6 | 3 | Implemented |
 | REQ-SEC-009 | security-measures.test.ts | 5 | 2 | Implemented |
-| REQ-SEC-010 | security-measures.test.ts | 4 | 6 | Implemented |
+| REQ-SEC-010 | security-measures.test.ts | 5 | 6 | Implemented |
+| REQ-SEC-013 | model-id.test.ts, llm-usage.test.ts, system-info.test.ts, security-measures.test.ts, model-spec.test.ts | 8 | 18 | Implemented |
 | REQ-SEC-011 | security-measures.test.ts | 5 | 10 | Implemented |
 | REQ-SEC-012 | security-measures.test.ts | 1 | 0 | Implemented |
 | REQ-NFR-001 | — | — | — | Implemented |
@@ -12622,6 +13062,13 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-034 | shadow-verdict.test.ts, shadow-integration.test.ts, route-dispatch.test.ts | 10 | 16 | Implemented |
 | REQ-LLM-035 | shadow-dispatch.test.ts, shadow-handlers-parity.test.ts, shadow-primary.integration.test.ts, shadow-verdict.test.ts, shadow-logger.test.ts, shadow-taxonomy.test.ts | 14 | 29 | Implemented |
 | REQ-LLM-036 | analyze-shadow-log.test.ts | 15 | 6 | Implemented |
+| REQ-LLM-037 | model-capabilities.test.ts, anthropic-provider.test.ts, google-provider.test.ts, openai-compatible-provider.test.ts, base-provider.test.ts | 12 | 11 | Implemented |
+| REQ-LLM-038 | llm-errors.test.ts, retry.test.ts, base-provider.test.ts | 7 | 5 | Implemented |
+| REQ-LLM-039 | ollama-provider.test.ts, llm-errors.test.ts, shadow-classifier.test.ts, dispatch.test.ts | 10 | 9 | Implemented |
+| REQ-LLM-040 | rubric-oracle.test.ts, shadow-classifier.test.ts, dispatch.test.ts | 6 | 7 | Implemented |
+| REQ-LLM-041 | json-strip-fences.test.ts, recall-classifier.test.ts, message-segmenter.test.ts, title-generator.test.ts, session-summarizer.test.ts, session-control-classifier.test.ts, data-query.test.ts, route-verifier.test.ts, weakness-summarizer.test.ts | 15 | 20 | Implemented |
+| REQ-LLM-042 | openai-compatible-provider.test.ts, llama-cpp-provider.test.ts | 4 | 6 | Implemented |
+| REQ-LLM-043 | estimator.test.ts, local-model-estimate.test.ts, regression-routes.test.ts, estimate-guard-cost.test.ts, system-info.test.ts | 8 | 14 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -12991,6 +13438,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-016 | run-registry.test.ts, regression-routes-write.test.ts, subprocess.test.ts, codex-corrections.test.ts | 3 | 10 | Implemented |
 | REQ-REG-017 | estimator.test.ts, regression-routes.test.ts | 6 | 5 | Implemented |
 | REQ-REG-018 | cost-tracker.test.ts, dispatch.test.ts, routing-runner.test.ts, recall-runner.test.ts, chatbot-runner.test.ts, receipt-runner.test.ts, rubric-oracle.test.ts, build-deps.test.ts, evaluated-tier.test.ts | 25 | 25 | Implemented |
+| REQ-REG-019 | dispatch.test.ts | 2 | 0 | Implemented |
+| REQ-REG-020 | receipt-runner.test.ts | 2 | 2 | Implemented |
+| REQ-REG-021 | local-model-estimate.test.ts, estimator.test.ts | 3 | 2 | Implemented |
+| REQ-REG-022 | orchestrator-receipt-dispatch.test.ts, receipt-runner.test.ts | 2 | 4 | Implemented |
 | REQ-REG-GUI-OV-001 | regression-routes-write.test.ts | 5 | 0 | Implemented |
 | REQ-REG-GUI-OV-002 | model-spec.test.ts | 7 | 14 | Implemented |
 | REQ-REG-GUI-OV-003 | regression-routes-write.test.ts | 4 | 6 | Implemented |
@@ -13027,6 +13478,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-GUI-V2-024 | regression-routes.test.ts | 1 | 0 | Implemented |
 | REQ-REG-GUI-V2-025 | terminal-banner.test.ts, subprocess.test.ts, regression-routes-write.test.ts, regression-routes.test.ts | 8 | 11 | Implemented |
 | REQ-REG-GUI-V2-026 | leaderboard-aggregator.test.ts, regression-routes.test.ts | 2 | 5 | Implemented |
+| REQ-REG-GUI-V2-027 | run-registry.test.ts, regression-routes-write.test.ts, regression-routes.test.ts | 7 | 6 | Implemented |
+| REQ-REG-GUI-V2-028 | run-registry.test.ts, regression-routes.test.ts | 6 | 5 | Implemented |
 | REQ-REG-CLI-MAN-001 | args.test.ts, runner-options.test.ts | 14 | 10 | Implemented |
 | REQ-FOOD-RECEIPT-INTEGRITY-001 | receipt-parser.test.ts | 0 | 4 | Implemented |
 | REQ-FOOD-RECEIPT-INTEGRITY-002 | receipt-parser.test.ts | 2 | 0 | Implemented |
@@ -13123,4 +13576,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **445 test files** | **2946** | **2860** | **5806 tests** |
+| **Totals** | **446 test files** | **3064** | **2997** | **6061 tests** |

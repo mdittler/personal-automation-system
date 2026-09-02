@@ -9,6 +9,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
+import type { LLMFinishReason } from '../../../types/llm.js';
 import {
 	classifySessionControl,
 	detectSessionControl,
@@ -18,20 +20,29 @@ import type { SessionControlClassifierDeps } from '../session-control-classifier
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeDeps(rawResponse: string): SessionControlClassifierDeps {
+function makeDeps(
+	rawResponse: string,
+	finishReason: LLMFinishReason = 'stop',
+): SessionControlClassifierDeps & {
+	llm: { complete: ReturnType<typeof vi.fn> };
+	logger: { warn: ReturnType<typeof vi.fn> };
+} {
 	return {
-		llm: {
-			complete: vi.fn().mockResolvedValue(rawResponse),
-		},
+		llm: withCompleteWithMeta(
+			{
+				complete: vi.fn().mockResolvedValue(rawResponse),
+			},
+			finishReason,
+		),
 		logger: { warn: vi.fn() },
 	};
 }
 
 function makeThrowingDeps(): SessionControlClassifierDeps {
 	return {
-		llm: {
+		llm: withCompleteWithMeta({
 			complete: vi.fn().mockRejectedValue(new Error('LLM timeout')),
-		},
+		}),
 		logger: { warn: vi.fn() },
 	};
 }
@@ -289,5 +300,59 @@ describe('detectSessionControl — meta-question avoids LLM call (Batch 3)', () 
 		expect(result.intent).toBe('continue');
 		expect(result.source).toBe('prefilter');
 		expect(deps.llm.complete).not.toHaveBeenCalled();
+	});
+});
+
+// ─── Truncation at the output cap ────────────────────────────────────────────
+//
+// The safe default carries `reason: 'parse error'`, which reads as "the model
+// emitted garbage". A reply cut at the 80-token cap now says so instead.
+
+describe('classifySessionControl — truncated output', () => {
+	const TRUNCATED =
+		'{"intent":"new_session","confidence":0.9,"reason":"the user asked to begin a completely fresh';
+
+	it('returns the safe default with reason "truncated" and makes exactly one call', async () => {
+		const deps = makeDeps(TRUNCATED, 'length');
+		const result = await classifySessionControl('lets start over', deps);
+		expect(result).toEqual({
+			intent: 'unclear',
+			confidence: 0,
+			reason: 'truncated',
+			source: 'llm',
+		});
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('logs truncation naming the cap instead of a parse error', async () => {
+		const deps = makeDeps(TRUNCATED, 'length');
+		await classifySessionControl('lets start over', deps);
+		const [, msg] = deps.logger.warn.mock.calls[0] as [unknown, string];
+		expect(msg).toContain('truncated');
+		expect(msg).toContain('80-token');
+		expect(msg).not.toMatch(/parse/i);
+	});
+
+	it('keeps reason "parse error" for a complete but malformed reply', async () => {
+		const deps = makeDeps(TRUNCATED, 'stop');
+		const result = await classifySessionControl('lets start over', deps);
+		expect(result.reason).toBe('parse error');
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('parse-first: a complete verdict still classifies when finishReason is "length"', async () => {
+		const deps = makeDeps(
+			JSON.stringify({ intent: 'new_session', confidence: 0.9, reason: 'clear' }),
+			'length',
+		);
+		const result = await classifySessionControl('lets start over', deps);
+		expect(result.intent).toBe('new_session');
+	});
+
+	it('passes maxTokens 80 on the completeWithMeta call', async () => {
+		const deps = makeDeps(JSON.stringify({ intent: 'continue', confidence: 0.9, reason: 'r' }));
+		await classifySessionControl('hello there', deps);
+		const options = deps.llm.complete.mock.calls[0]?.[1];
+		expect(options).toMatchObject({ maxTokens: 80, responseFormat: 'json' });
 	});
 });

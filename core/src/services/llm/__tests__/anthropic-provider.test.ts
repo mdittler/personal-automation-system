@@ -152,6 +152,41 @@ describe('AnthropicProvider', () => {
 		expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ temperature: 0.5 }));
 	});
 
+	// --- temperature capability gate ---
+
+	describe('temperature capability gate', () => {
+		it('omits temperature entirely for a model that rejects it', async () => {
+			const provider = makeProvider();
+			await provider.complete('hi', {
+				modelRef: { provider: 'anthropic', model: 'claude-opus-5' },
+				temperature: 0,
+			});
+
+			const callArgs = mockCreate.mock.calls[0]?.[0];
+			expect(callArgs).toMatchObject({ model: 'claude-opus-5' });
+			expect(callArgs).not.toHaveProperty('temperature');
+		});
+
+		it('still sends temperature for a model that supports it', async () => {
+			const provider = makeProvider();
+			await provider.complete('hi', {
+				modelRef: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+				temperature: 0,
+			});
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: 'claude-sonnet-4-6', temperature: 0 }),
+			);
+		});
+
+		it('still sends temperature for an unprobed model (default is supported)', async () => {
+			const provider = makeProvider({ defaultModel: 'claude-some-future-model' });
+			await provider.complete('hi', { temperature: 0.3 });
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ temperature: 0.3 }));
+		});
+	});
+
 	it("accepts responseFormat: 'json' without sending any extra SDK fields (Batch 1 — Claude reliably returns JSON when asked)", async () => {
 		const provider = makeProvider();
 		await provider.complete('return json', { responseFormat: 'json' });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyLLMError } from '../llm-errors.js';
+import { classifyLLMError, isEmptyOutputError, isParameterRejectionError } from '../llm-errors.js';
 
 describe('classifyLLMError', () => {
 	describe('standard', () => {
@@ -114,6 +114,104 @@ describe('classifyLLMError', () => {
 			const info = classifyLLMError(error);
 			expect(info.category).toBe('unknown');
 			expect(info.isRetryable).toBe(true);
+		});
+	});
+
+	describe('parameter rejection', () => {
+		it('classifies the observed Anthropic temperature deprecation as parameter-rejection', () => {
+			const error = {
+				status: 400,
+				message: '`temperature` is deprecated for this model.',
+			};
+			const info = classifyLLMError(error);
+			expect(info.category).toBe('parameter-rejection');
+		});
+
+		it('is NOT retryable — the same request fails identically every time', () => {
+			const error = { status: 400, message: '`temperature` is deprecated for this model.' };
+			expect(classifyLLMError(error).isRetryable).toBe(false);
+		});
+
+		it('states the real reason rather than telling the user to try again later', () => {
+			const error = { status: 400, message: '`temperature` is deprecated for this model.' };
+			const { userMessage } = classifyLLMError(error);
+			expect(userMessage).toContain('rejected');
+			expect(userMessage).not.toContain('try again later');
+		});
+
+		it.each([
+			['Unsupported parameter: ‘temperature’ is not supported with this model.'],
+			['Unrecognized request argument supplied: temperature'],
+			['Invalid JSON payload received. Unknown name "temperature".'],
+			['temperature: Extra inputs are not permitted'],
+		])('classifies provider phrasing %#: %s', (message) => {
+			expect(classifyLLMError({ status: 400, message }).category).toBe('parameter-rejection');
+		});
+
+		it('only applies to status 400 — the same wording on a 500 stays overloaded', () => {
+			const error = { status: 500, message: '`temperature` is deprecated for this model.' };
+			expect(classifyLLMError(error).category).toBe('overloaded');
+		});
+
+		it('does not hijack the billing 400, which is checked first', () => {
+			const error = {
+				status: 400,
+				message: 'Your credit balance is too low; unknown parameter checks come later.',
+			};
+			expect(classifyLLMError(error).category).toBe('billing');
+		});
+
+		it('isParameterRejectionError is true for a parameter 400 and false otherwise', () => {
+			expect(
+				isParameterRejectionError({
+					status: 400,
+					message: '`temperature` is deprecated for this model.',
+				}),
+			).toBe(true);
+			expect(isParameterRejectionError({ status: 400, message: 'Invalid request format' })).toBe(
+				false,
+			);
+			expect(isParameterRejectionError(new Error('boom'))).toBe(false);
+			expect(isParameterRejectionError(null)).toBe(false);
+		});
+	});
+
+	describe('empty output', () => {
+		/** Shape produced by LLMEmptyOutputError (core/src/services/llm/errors.ts). */
+		function emptyOutput(): Error {
+			return Object.assign(
+				new Error(
+					"Model 'qwen3.8:27b-mlx' (provider 'ollama') returned empty output after exhausting its num_predict budget of 80 token(s).",
+				),
+				{ name: 'LLMEmptyOutputError' },
+			);
+		}
+
+		it('classifies LLMEmptyOutputError as empty-output', () => {
+			expect(classifyLLMError(emptyOutput()).category).toBe('empty-output');
+		});
+
+		it('is NOT retryable — the same request exhausts the same budget every time', () => {
+			expect(classifyLLMError(emptyOutput()).isRetryable).toBe(false);
+		});
+
+		it('states the real reason rather than telling the user to try again later', () => {
+			const { userMessage } = classifyLLMError(emptyOutput());
+			expect(userMessage).toContain('Retrying will not help');
+			expect(userMessage).not.toContain('try again later');
+		});
+
+		it('isEmptyOutputError is true for that error and false otherwise', () => {
+			expect(isEmptyOutputError(emptyOutput())).toBe(true);
+			expect(isEmptyOutputError(new Error('returned empty output'))).toBe(false);
+			expect(isEmptyOutputError({ status: 400, message: 'temperature is deprecated' })).toBe(false);
+			expect(isEmptyOutputError(null)).toBe(false);
+		});
+
+		it('does not classify by message text — only the error name counts', () => {
+			// A provider echoing similar wording in a 500 must stay 'overloaded'.
+			const lookalike = { status: 500, message: 'returned empty output after exhausting budget' };
+			expect(classifyLLMError(lookalike).category).toBe('overloaded');
 		});
 	});
 

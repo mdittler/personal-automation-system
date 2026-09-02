@@ -110,6 +110,9 @@
         <strong data-testid="case-input-count"><%= it.estimate.totalCases %> cases / <%= it.estimate.totalInputs %> inputs</strong> ·
       <% } %>
       Estimated cost: <strong>$<%= it.estimate.totalUsd %></strong>
+      <% if (it.estimate.allLocal) { %>
+        <span data-testid="estimate-all-local">— all-local run (models run on this machine; no per-token billing)</span>
+      <% } %>
       (run budget ceiling $<%= it.estimate.ceilingUsd %>)
     </p>
   <% } %>

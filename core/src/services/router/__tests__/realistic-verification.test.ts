@@ -13,6 +13,7 @@
 
 import type { Logger } from 'pino';
 import { describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { TelegramService } from '../../../types/telegram.js';
 import type { MessageContext, PhotoContext } from '../../../types/telegram.js';
@@ -109,12 +110,12 @@ const ALL_APPS = [FOOD_APP, NOTES_APP, CHATBOT_APP];
 // ---------------------------------------------------------------------------
 
 function createMockLLM(response: string): LLMService {
-	return {
+	return withCompleteWithMeta({
 		complete: vi.fn().mockResolvedValue(response),
 		classify: vi.fn(),
 		extractStructured: vi.fn(),
 		getModelForTier: vi.fn(),
-	} as unknown as LLMService;
+	}) as unknown as LLMService;
 }
 
 function createMockTelegram(): TelegramService {

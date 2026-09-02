@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
 import { ChatTranscriptIndexImpl } from '../../chat-transcript-index/chat-transcript-index.js';
 import { composeChatSessionStore } from '../../conversation-session/compose.js';
 import { CONVERSATION_DATA_SCOPES } from '../../conversation/manifest.js';
@@ -97,9 +98,9 @@ describe('auto-titling persona — first exchange', () => {
 		});
 
 		// Mock LLM that returns a valid title JSON envelope
-		const mockLlm = {
+		const mockLlm = withCompleteWithMeta({
 			complete: vi.fn().mockResolvedValue('{"title":"Planning a Weekend Trip"}'),
-		};
+		});
 
 		const titleService = new TitleService({ chatSessions, chatTranscriptIndex, logger });
 
@@ -158,9 +159,9 @@ describe('auto-titling persona — first exchange', () => {
 			title: null,
 		});
 
-		const mockLlm = {
+		const mockLlm = withCompleteWithMeta({
 			complete: vi.fn().mockResolvedValue('{"title":"Monthly Grocery Budget Planning"}'),
-		};
+		});
 
 		const titleService = new TitleService({ chatSessions, chatTranscriptIndex, logger });
 
@@ -233,12 +234,12 @@ describe('auto-titling persona — skipIfTitled guard', () => {
 			title: null,
 		});
 
-		const mockLlm = {
+		const mockLlm = withCompleteWithMeta({
 			complete: vi
 				.fn()
 				.mockResolvedValueOnce('{"title":"Organizing Personal Recipe Collection"}')
 				.mockResolvedValueOnce('{"title":"New Title Should Not Appear"}'),
-		};
+		});
 
 		const titleService = new TitleService({ chatSessions, chatTranscriptIndex, logger });
 

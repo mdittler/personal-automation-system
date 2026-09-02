@@ -24,6 +24,7 @@ import type {
 } from '@core/types/regression.js';
 import { VERDICT } from '@core/types/regression.js';
 import { type StructuralExpectation, runStructuralOracle } from '../../oracles/structural.js';
+import type { EstimateUsdFn } from '../../shared/types.js';
 import { MeteredError } from '../dispatch.js';
 
 export interface MinimalLogger {
@@ -49,13 +50,18 @@ export interface RoutingRunnerDeps {
 	cacheKey: string;
 	/** Authoritative per-case budget. Orchestrator sets this from `c.budgetUsd`. */
 	caseBudgetUsd: number;
-	estimateUsd: (call: { tokenIn: number; tokenOut: number }) => number;
+	estimateUsd: EstimateUsdFn;
 	logger: MinimalLogger;
 	classifiers: RoutingClassifierAdapter;
 }
 
-/** Conservative token budget used for the pre-charge gate. */
-export const ESTIMATE_TOKENS = { tokenIn: 400, tokenOut: 80 } as const;
+/**
+ * Conservative token budget used for the fast-tier pre-charge gate. `tier`
+ * is part of the constant so the estimator prices the classifier's ACTUAL
+ * tier (and therefore its provider) rather than defaulting to `fast` by
+ * accident — routing and recall both dispatch on the fast tier.
+ */
+export const ESTIMATE_TOKENS = { tokenIn: 400, tokenOut: 80, tier: 'fast' } as const;
 
 /**
  * Tier slot exercised by each routing classifier. All three production

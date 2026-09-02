@@ -13,6 +13,7 @@ import type {
 	LLMFinishReason,
 	ProviderModel,
 } from '../../../types/llm.js';
+import { LLMEmptyOutputError } from '../errors.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 
 /**
@@ -56,6 +57,13 @@ export class OllamaProvider extends BaseProvider {
 			prompt,
 			...(options?.systemPrompt ? { system: options.systemPrompt } : {}),
 			...(options?.responseFormat === 'json' ? { format: 'json' as const } : {}),
+			// Unconditional, NOT a conditional spread: `think: false` has to reach
+			// the wire. Thinking-capable models (qwen3.8, muse-glimmer, …) default
+			// to thinking ON and spend the whole `num_predict` budget inside the
+			// separate `thinking` field, returning `response: ''`. Non-thinking
+			// models (gemma4) accept the flag and ignore it. See
+			// LLMCompletionOptions.thinking for why the default is OFF.
+			think: options?.thinking === true,
 			options: {
 				temperature: options?.temperature ?? 0.1,
 				num_predict: options?.maxTokens,
@@ -77,8 +85,28 @@ export class OllamaProvider extends BaseProvider {
 			finishReason = 'other';
 		}
 
+		const text = response.response ?? '';
+
+		// Empty output + budget exhausted is unambiguously a failure: there is
+		// nothing to return and no budget left to produce it with. Gated on the
+		// finish reason rather than on a thinking block being present, so a model
+		// that burns its budget without reporting `thinking` is caught too.
+		//
+		// Empty output + `stop` deliberately still returns '': Gemma legitimately
+		// answers ambiguous prompts with an empty string, and the shadow/recall
+		// classifiers already retry that case themselves.
+		if (text.trim() === '' && finishReason === 'length') {
+			const thinking = (response as { thinking?: unknown }).thinking;
+			throw new LLMEmptyOutputError({
+				provider: this.providerId,
+				model,
+				maxTokens: options?.maxTokens,
+				...(typeof thinking === 'string' ? { thinkingChars: thinking.length } : {}),
+			});
+		}
+
 		return {
-			text: response.response ?? '',
+			text,
 			usage: {
 				inputTokens: response.prompt_eval_count ?? 0,
 				outputTokens: response.eval_count ?? 0,

@@ -15,6 +15,8 @@ export type LLMErrorCategory =
 	| 'reservation-exceeded'
 	| 'auth'
 	| 'overloaded'
+	| 'parameter-rejection'
+	| 'empty-output'
 	| 'unknown';
 
 export interface LLMErrorInfo {
@@ -34,6 +36,10 @@ const USER_MESSAGES: Record<LLMErrorCategory, string> = {
 	'reservation-exceeded': 'The AI service is briefly at capacity. Please try again in a moment.',
 	auth: 'AI service configuration error. Please contact your admin.',
 	overloaded: 'AI service is temporarily overloaded. Please try again shortly.',
+	'parameter-rejection':
+		'The selected AI model rejected one of the request settings. Retrying will not help — please contact your admin to adjust the model configuration.',
+	'empty-output':
+		'The selected AI model ran out of room before it produced an answer. Retrying will not help — please contact your admin to raise the response length limit for this model.',
 	unknown: 'Could not process your request right now. Please try again later.',
 };
 
@@ -46,8 +52,42 @@ const RETRYABLE: Record<LLMErrorCategory, boolean> = {
 	'reservation-exceeded': true,
 	auth: false,
 	overloaded: true,
+	'parameter-rejection': false,
+	'empty-output': false,
 	unknown: true,
 };
+
+/**
+ * Message shapes providers use when a request parameter is unsupported,
+ * deprecated, or unrecognised for the target model. These are deterministic
+ * failures — the same request will fail identically every time — so they must
+ * classify as non-retryable rather than falling through to 'unknown'.
+ *
+ * Observed examples:
+ *   Anthropic: "`temperature` is deprecated for this model."
+ *   OpenAI:    "Unsupported parameter: 'temperature' is not supported with this model."
+ *   OpenAI:    "Unrecognized request argument supplied: temperature"
+ *   Google:    "Invalid JSON payload received. Unknown name \"temperature\""
+ */
+/**
+ * `Error.name` of `LLMEmptyOutputError` (core/src/services/llm/errors.ts).
+ * Matched by name rather than by `instanceof` so this module stays free of
+ * imports, exactly as the LLMRateLimitError / LLMCostCapError checks do.
+ */
+const EMPTY_OUTPUT_ERROR_NAME = 'LLMEmptyOutputError';
+
+const PARAMETER_REJECTION_PATTERNS: readonly RegExp[] = [
+	/is deprecated for this model/,
+	/\b(?:unsupported|unknown|unrecognized|unrecognised|invalid)\s+(?:request\s+)?(?:parameter|argument|name|field|property)\b/,
+	/\bparameter\b[^.]*\bis not supported\b/,
+	/\bis not supported with this model\b/,
+	/\bextra inputs are not permitted\b/,
+];
+
+/** True when a provider 400 message names an unsupported/deprecated request parameter. */
+function isParameterRejectionMessage(message: string): boolean {
+	return PARAMETER_REJECTION_PATTERNS.some((pattern) => pattern.test(message));
+}
 
 /**
  * Classify an LLM error into a user-friendly category.
@@ -75,12 +115,21 @@ export function classifyLLMError(error: unknown): LLMErrorInfo {
 		return makeInfo('cost-cap');
 	}
 
+	// Provider produced nothing and reported the token budget as the reason.
+	// Deterministic — the same request exhausts the same budget every time.
+	if (err.name === EMPTY_OUTPUT_ERROR_NAME) {
+		return makeInfo('empty-output');
+	}
+
 	// Provider HTTP errors (Anthropic SDK, OpenAI SDK, etc.)
 	const status = typeof err.status === 'number' ? err.status : undefined;
 	const message = typeof err.message === 'string' ? err.message.toLowerCase() : '';
 
 	if (status === 400 && (message.includes('credit') || message.includes('billing'))) {
 		return makeInfo('billing');
+	}
+	if (status === 400 && isParameterRejectionMessage(message)) {
+		return makeInfo('parameter-rejection');
 	}
 	if (status === 401) {
 		return makeInfo('auth');
@@ -93,6 +142,25 @@ export function classifyLLMError(error: unknown): LLMErrorInfo {
 	}
 
 	return makeInfo('unknown');
+}
+
+/**
+ * True when the error is a provider 400 rejecting an unsupported/deprecated
+ * request parameter. Used by BaseProvider to decide whether stripping the
+ * parameter and retrying once is worth attempting.
+ */
+export function isParameterRejectionError(error: unknown): boolean {
+	return classifyLLMError(error).category === 'parameter-rejection';
+}
+
+/**
+ * True when the error is an `LLMEmptyOutputError` — the provider returned no
+ * text and reported that the token budget ran out. Used by BaseProvider to skip
+ * the retry schedule: re-issuing the identical request exhausts the identical
+ * budget, exactly like a rejected parameter.
+ */
+export function isEmptyOutputError(error: unknown): boolean {
+	return classifyLLMError(error).category === 'empty-output';
 }
 
 function makeInfo(category: LLMErrorCategory): LLMErrorInfo {

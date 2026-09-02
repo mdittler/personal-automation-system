@@ -107,6 +107,14 @@ interface BuildOptions {
 	cachedResults?: Array<{ caseId: string; cacheKey: string; result: RunResult }>;
 	registry?: RunRegistry;
 	runHistoryStore?: RunHistoryStore;
+	/**
+	 * Provider type per tier. When set, the routes get a `ModelSelector` +
+	 * `ProviderRegistry` pair so the cost estimator can tell a local tier from
+	 * a remote one. Omitted → neither is wired, and the estimator falls back
+	 * to the conservative remote constants (the legacy behaviour every other
+	 * test in this file exercises).
+	 */
+	tierProviderTypes?: { fast: string; standard: string; reasoning?: string };
 }
 
 interface BuiltApp {
@@ -114,6 +122,35 @@ interface BuiltApp {
 	cacheDir: string;
 	runRegistry: RunRegistry;
 	tempDir: string;
+}
+
+/**
+ * Minimal `ModelSelector` + `ProviderRegistry` pair mapping each tier to a
+ * provider whose `providerType` decides whether that tier is billed. Only the
+ * members the estimator's locality probe calls are implemented.
+ */
+function makeTierProviderDeps(types: { fast: string; standard: string; reasoning?: string }) {
+	const providerIdFor = (tier: 'fast' | 'standard' | 'reasoning') => `prov-${tier}`;
+	const modelSelector = {
+		getFastRef: () => ({ provider: providerIdFor('fast'), model: 'm-fast' }),
+		getStandardRef: () => ({ provider: providerIdFor('standard'), model: 'm-standard' }),
+		getReasoningRef: () =>
+			types.reasoning ? { provider: providerIdFor('reasoning'), model: 'm-reasoning' } : undefined,
+	};
+	const byId: Record<string, { providerType: string }> = {
+		'prov-fast': { providerType: types.fast },
+		'prov-standard': { providerType: types.standard },
+		...(types.reasoning ? { 'prov-reasoning': { providerType: types.reasoning } } : {}),
+	};
+	const providerRegistry = { get: (id: string) => byId[id] };
+	return {
+		modelSelector: modelSelector as unknown as Parameters<
+			typeof registerRegressionRoutes
+		>[1]['modelSelector'],
+		providerRegistry: providerRegistry as unknown as Parameters<
+			typeof registerRegressionRoutes
+		>[1]['providerRegistry'],
+	};
 }
 
 async function buildApp(opts: BuildOptions = {}): Promise<BuiltApp> {
@@ -168,6 +205,7 @@ async function buildApp(opts: BuildOptions = {}): Promise<BuiltApp> {
 				maxRunBudgetUsd: 5,
 				logger,
 				...(opts.runHistoryStore ? { runHistoryStore: opts.runHistoryStore } : {}),
+				...(opts.tierProviderTypes ? makeTierProviderDeps(opts.tierProviderTypes) : {}),
 			});
 		},
 		{ prefix: '/gui' },
@@ -967,6 +1005,19 @@ describe('GET /gui/regression — client wiring (Codex P1)', () => {
 		}
 	});
 
+	it('page carries the progress-bar wiring (server-computed counts)', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('run-progress');
+			expect(res.body).toContain('setProgress');
+			expect(res.body).toContain('payload.completed');
+		} finally {
+			await app.close();
+		}
+	});
+
 	it('client wrapper includes reconnect + gap + 3-strike banner wiring (REQ-REG-GUI-V2-021/024)', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {
@@ -1289,5 +1340,225 @@ describe('pas.css — terminal banner state styling', () => {
 		expect(failed).toMatch(/\.terminal-failed\s*{[^}]*--pas-danger/);
 		// gate-failed must NOT borrow the danger token — it is not a crash.
 		expect(/\.terminal-gate-failed\s*{[^}]*--pas-danger/.test(css)).toBe(false);
+	});
+
+	it('the live-run progress bar is styled from PAS tokens', async () => {
+		const css = await readFile(join(moduleDir, 'public', 'pas.css'), 'utf8');
+		expect(css).toMatch(/\.run-progress\s*{[^}]*--pas-primary/);
+		expect(css).toMatch(/\.run-progress-text\s*{[^}]*--pas-text-muted/);
+	});
+});
+
+// ─────────────────── activeRunId threading (previously dead on every path)
+//
+// `regression.eta` renders `data-runid` from `it.activeRunId`; the client
+// bootstrap re-attaches to that run on page load. Every render path used to
+// pass `null`, so a page reload during a run silently lost the live banner.
+
+/**
+ * Register a run that stays active until the returned `end()` is called.
+ * Returns the runId so tests can assert it round-trips into the markup.
+ */
+async function startHeldRun(registry: RunRegistry): Promise<{
+	runId: string;
+	end: () => Promise<void>;
+}> {
+	let emit!: (e: RegressionEvent) => void;
+	let resolveComplete!: () => void;
+	const whenComplete = new Promise<void>((res) => {
+		resolveComplete = res;
+	});
+	const { runId } = await registry.createRun({
+		args: ['--json'],
+		totalCases: 1,
+		runFactory: (onEvent) => {
+			emit = onEvent;
+			return { whenComplete };
+		},
+	});
+	return {
+		runId,
+		end: async () => {
+			emit({ type: 'cancelled' });
+			resolveComplete();
+			await registry.waitForCompletion(runId);
+		},
+	};
+}
+
+describe('GET /gui/regression — activeRunId reaches every view', () => {
+	for (const view of ['overview', 'run', 'compare'] as const) {
+		it(`?view=${view} renders data-runid for the active run`, async () => {
+			const registry = createRunRegistry();
+			const { app } = await buildApp({ listedCases: [makeListedCase()], registry });
+			const held = await startHeldRun(registry);
+			try {
+				const res = await getAuthed(app, `/gui/regression?view=${view}`);
+				expect(res.statusCode).toBe(200);
+				expect(res.body).toContain(`data-runid="${held.runId}"`);
+			} finally {
+				await held.end();
+				await app.close();
+			}
+		});
+
+		it(`?view=${view} renders an empty data-runid when no run is active`, async () => {
+			const { app } = await buildApp({ listedCases: [makeListedCase()] });
+			try {
+				const res = await getAuthed(app, `/gui/regression?view=${view}`);
+				expect(res.statusCode).toBe(200);
+				expect(res.body).toContain('data-runid=""');
+			} finally {
+				await app.close();
+			}
+		});
+	}
+
+	// The Compare tab is the view that renders the summary bar, so it is
+	// where the "a run is already going" submit guard becomes observable.
+	it('compare summary-bar submit is disabled during an active run', async () => {
+		const registry = createRunRegistry();
+		const { app } = await buildApp({ listedCases: [makeListedCase()], registry });
+		const held = await startHeldRun(registry);
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=compare');
+			expect(res.body).toMatch(/<button type="submit" class="primary"\s+disabled>/);
+			expect(res.body).toContain('active-run-notice');
+		} finally {
+			await held.end();
+			await app.close();
+		}
+	});
+
+	it('compare summary-bar submit is enabled when no run is active', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=compare');
+			expect(res.body).not.toMatch(/<button type="submit" class="primary"\s+disabled>/);
+			expect(res.body).not.toContain('active-run-notice');
+		} finally {
+			await app.close();
+		}
+	});
+});
+
+/**
+ * The GUI half of the operator's invariant: an all-local model matrix must
+ * estimate $0.00 in the confirm dialog and say so in the Run-tab banner. The
+ * estimator's per-bucket constants are remote prices; before this, the Run tab
+ * showed the same dollar figure for an all-Ollama matrix as for an all-Opus
+ * one.
+ */
+describe('regression GUI — local-model cost estimate', () => {
+	it('GET /estimate reports $0.00 and allLocal for an all-local install', async () => {
+		const { app } = await buildApp({
+			listedCases: [
+				makeListedCase({ caseId: 'r1', bucket: 'routing' }),
+				makeListedCase({ caseId: 'r2', bucket: 'routing' }),
+				makeListedCase({ caseId: 'p1', bucket: 'receipt', routingTarget: undefined }),
+			],
+			tierProviderTypes: { fast: 'ollama', standard: 'llama-cpp' },
+		});
+		try {
+			const cookies = await loginAs(app, ADMIN_USER_ID, ADMIN_PASSWORD);
+			const res = await app.inject({
+				method: 'GET',
+				url: '/gui/regression/estimate',
+				cookies,
+			});
+			const body = JSON.parse(res.body) as {
+				totalUsd: number;
+				allLocal: boolean;
+				perBucketUsd: Record<string, number>;
+				totalCases: number;
+			};
+			expect(body.totalCases).toBe(3);
+			expect(body.totalUsd).toBe(0);
+			expect(body.allLocal).toBe(true);
+			expect(body.perBucketUsd.routing).toBe(0);
+			expect(body.perBucketUsd.receipt).toBe(0);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('GET /estimate prices only the remote tier on a mixed install', async () => {
+		const { app } = await buildApp({
+			listedCases: [
+				makeListedCase({ caseId: 'r1', bucket: 'routing' }),
+				makeListedCase({ caseId: 'p1', bucket: 'receipt', routingTarget: undefined }),
+			],
+			// fast local → routing free; standard remote → receipt billed.
+			tierProviderTypes: { fast: 'ollama', standard: 'anthropic' },
+		});
+		try {
+			const cookies = await loginAs(app, ADMIN_USER_ID, ADMIN_PASSWORD);
+			const res = await app.inject({
+				method: 'GET',
+				url: '/gui/regression/estimate',
+				cookies,
+			});
+			const body = JSON.parse(res.body) as {
+				totalUsd: number;
+				allLocal: boolean;
+				perBucketUsd: Record<string, number>;
+			};
+			expect(body.perBucketUsd.routing).toBe(0);
+			expect(body.perBucketUsd.receipt).toBeGreaterThan(0);
+			expect(body.totalUsd).toBe(body.perBucketUsd.receipt);
+			expect(body.allLocal).toBe(false);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('GET /estimate keeps remote constants when provider locality is unknown', async () => {
+		// No modelSelector/providerRegistry wired → cannot prove locality →
+		// conservative remote pricing, exactly as before this change.
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'r1', bucket: 'routing' })],
+		});
+		try {
+			const cookies = await loginAs(app, ADMIN_USER_ID, ADMIN_PASSWORD);
+			const res = await app.inject({
+				method: 'GET',
+				url: '/gui/regression/estimate',
+				cookies,
+			});
+			const body = JSON.parse(res.body) as { totalUsd: number; allLocal: boolean };
+			expect(body.totalUsd).toBeGreaterThan(0);
+			expect(body.allLocal).toBe(false);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('Run tab banner says "all-local run" instead of a bare $0.00', async () => {
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'r1', bucket: 'routing' })],
+			tierProviderTypes: { fast: 'ollama', standard: 'ollama' },
+		});
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=run');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('data-testid="estimate-all-local"');
+			expect(res.body).toMatch(/Estimated cost: <strong>\$0\.00<\/strong>/);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('Run tab banner omits the all-local note on a remote install', async () => {
+		const { app } = await buildApp({
+			listedCases: [makeListedCase({ caseId: 'r1', bucket: 'routing' })],
+			tierProviderTypes: { fast: 'anthropic', standard: 'anthropic' },
+		});
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=run');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).not.toContain('data-testid="estimate-all-local"');
+		} finally {
+			await app.close();
+		}
 	});
 });

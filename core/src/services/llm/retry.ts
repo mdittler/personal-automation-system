@@ -16,6 +16,13 @@ export interface RetryOptions {
 	backoffMultiplier?: number;
 	/** Logger for retry warnings. */
 	logger?: Logger;
+	/**
+	 * Predicate deciding whether a given failure is worth retrying.
+	 * Defaults to retrying every error. Return false for deterministic failures
+	 * (e.g. a provider 400 rejecting a request parameter) so the caller fails
+	 * fast instead of burning the backoff schedule on a guaranteed repeat.
+	 */
+	shouldRetry?: (error: Error) => boolean;
 }
 
 /**
@@ -38,6 +45,10 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
 			return await fn();
 		} catch (err) {
 			lastError = err instanceof Error ? err : new Error(String(err));
+
+			if (options.shouldRetry && !options.shouldRetry(lastError)) {
+				throw lastError;
+			}
 
 			if (attempt < maxRetries) {
 				const delay = initialDelayMs * backoffMultiplier ** attempt;

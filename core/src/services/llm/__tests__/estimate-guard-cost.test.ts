@@ -111,6 +111,66 @@ describe('estimateGuardCost', () => {
 			expect(cost).toBe(0.05);
 		});
 	});
+
+	/**
+	 * An all-local install (Ollama / llama.cpp only) never bills per token, so
+	 * an unresolvable tier must not invent a `defaultReservationUsd` charge —
+	 * that phantom reservation eats a household's cost cap for inference the
+	 * operator is never billed for.
+	 */
+	describe('unresolvable tier on an all-local install', () => {
+		const unresolvable: PriceLookup = { priceFor: () => undefined };
+
+		it('estimates $0 when no configured provider bills per token', () => {
+			const allLocal: PriceLookup = {
+				...unresolvable,
+				hasBillableProvider: () => false,
+			};
+			const warn = vi.fn();
+			const cost = estimateGuardCost(
+				{ method: 'complete', tier: 'reasoning', prompt: 'hi' },
+				allLocal,
+				{ warn },
+			);
+			expect(cost).toBe(0);
+			// Reports why rather than silently returning 0.
+			expect(warn).toHaveBeenCalledTimes(1);
+			expect(String(warn.mock.calls[0]?.[1])).toMatch(/local/i);
+		});
+
+		it('keeps the default reservation when a remote provider IS configured', () => {
+			const mixed: PriceLookup = {
+				...unresolvable,
+				hasBillableProvider: () => true,
+			};
+			const cost = estimateGuardCost(
+				{ method: 'complete', tier: 'reasoning', prompt: 'hi' },
+				mixed,
+			);
+			expect(cost).toBe(0.05);
+		});
+
+		it('keeps the default reservation when the lookup cannot answer', () => {
+			// No `hasBillableProvider` at all → locality undeterminable →
+			// conservative fallback, i.e. the legacy behaviour.
+			const cost = estimateGuardCost(
+				{ method: 'complete', tier: 'reasoning', prompt: 'hi' },
+				unresolvable,
+			);
+			expect(cost).toBe(0.05);
+		});
+
+		it('a resolvable local tier still prices at $0 through priceFor', () => {
+			// compose-runtime maps a local tier to {0,0} rather than undefined;
+			// that path must not reach the reservation fallback at all.
+			const localPriced: PriceLookup = {
+				priceFor: () => ({ inputUsdPer1k: 0, outputUsdPer1k: 0 }),
+			};
+			expect(
+				estimateGuardCost({ method: 'complete', tier: 'fast', prompt: 'hi' }, localPriced),
+			).toBe(0);
+		});
+	});
 });
 
 describe('approximateTokens', () => {

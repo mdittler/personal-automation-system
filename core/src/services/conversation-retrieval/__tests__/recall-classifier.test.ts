@@ -7,6 +7,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
+import type { LLMFinishReason } from '../../../types/llm.js';
 import {
 	RECALL_SAFE_DEFAULT,
 	buildClassifierPrompt,
@@ -117,11 +119,14 @@ describe('recallPreFilter', () => {
 
 // ─── classifyRecallIntent — malformed output table ────────────────────────────
 
-function makeDeps(rawResponse: string) {
+function makeDeps(rawResponse: string, finishReason: LLMFinishReason = 'stop') {
 	return {
-		llm: {
-			complete: vi.fn().mockResolvedValue(rawResponse),
-		},
+		llm: withCompleteWithMeta(
+			{
+				complete: vi.fn().mockResolvedValue(rawResponse),
+			},
+			finishReason,
+		),
 		logger: { warn: vi.fn() },
 		today: TODAY,
 	};
@@ -249,9 +254,9 @@ describe('classifyRecallIntent — happy path', () => {
 
 	it('LLM throws → returns safe default without rethrowing', async () => {
 		const deps = {
-			llm: {
+			llm: withCompleteWithMeta({
 				complete: vi.fn().mockRejectedValue(new Error('LLM timeout')),
-			},
+			}),
 			logger: { warn: vi.fn() },
 			today: TODAY,
 		};
@@ -359,19 +364,122 @@ describe('classifyRecallIntent — maxWindowDays threading', () => {
 // ─── Batch 2 — responseFormat: 'json' + retry-on-empty ────────────────────────
 
 /** Helper: LLM that returns a queued sequence of responses, one per call. */
-function makeQueuedDeps(responses: string[]) {
+function makeQueuedDeps(responses: string[], finishReason: LLMFinishReason = 'stop') {
 	let i = 0;
 	return {
-		llm: {
-			complete: vi.fn().mockImplementation(async () => {
-				if (i >= responses.length) throw new Error('queuedLLM: exhausted');
-				return responses[i++]!;
-			}),
-		},
+		llm: withCompleteWithMeta(
+			{
+				complete: vi.fn().mockImplementation(async () => {
+					if (i >= responses.length) throw new Error('queuedLLM: exhausted');
+					return responses[i++]!;
+				}),
+			},
+			finishReason,
+		),
 		logger: { warn: vi.fn() },
 		today: TODAY,
 	};
 }
+
+// ─── Truncation at the output cap vs. a malformed response ────────────────────
+//
+// A reply the provider cut at maxTokens is NOT a classifier that emitted
+// garbage. Same misdiagnosis class fixed for the Ollama empty-output path, the
+// rubric judge and the food shadow classifier.
+
+describe('classifyRecallIntent — truncated output vs malformed output', () => {
+	/** Valid JSON prefix, cut mid-string — the shape a 150-token cap produces. */
+	const TRUNCATED_JSON =
+		'{"shouldRecall": true, "query": "the blueberry prices we compared", "reason": "the user is asking about a previous';
+
+	it('unparseable + finishReason "length" → reason "truncated", no retry', async () => {
+		const deps = makeDeps(TRUNCATED_JSON, 'length');
+		const result = await classifyRecallIntent('what did we say about blueberries?', deps);
+
+		expect(result).toEqual({
+			shouldRecall: false,
+			query: null,
+			timeAnchor: null,
+			reason: 'truncated',
+		});
+		// Terminal: the same prompt against the same cap cuts the same way.
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not return the shared RECALL_SAFE_DEFAULT object on the truncated path', async () => {
+		// RECALL_SAFE_DEFAULT is a non-frozen module-level object returned by
+		// identity from a dozen sites; the truncated verdict must be its own.
+		const deps = makeDeps(TRUNCATED_JSON, 'length');
+		const result = await classifyRecallIntent('what did we say about blueberries?', deps);
+		expect(result).not.toBe(RECALL_SAFE_DEFAULT);
+		expect(RECALL_SAFE_DEFAULT.reason).toBe('parse-failed');
+	});
+
+	it('logs a warn naming the cap instead of claiming a parse failure', async () => {
+		const deps = makeDeps(TRUNCATED_JSON, 'length');
+		await classifyRecallIntent('what did we say about blueberries?', deps);
+		const [, msg] = deps.logger.warn.mock.calls[0] as [unknown, string];
+		expect(msg).toContain('truncated');
+		expect(msg).toContain('150-token');
+		expect(msg).not.toMatch(/failed to parse/i);
+	});
+
+	it('unparseable + finishReason "stop" keeps the malformed diagnosis and no retry', async () => {
+		const deps = makeDeps(TRUNCATED_JSON, 'stop');
+		const result = await classifyRecallIntent('what did we say about blueberries?', deps);
+		expect(result).toEqual(RECALL_SAFE_DEFAULT);
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('empty + finishReason "length" still takes the one repair retry', async () => {
+		// Empty output is classified as empty under BOTH orderings, so the
+		// retry-on-empty policy is untouched by the truncation check above it.
+		const good = JSON.stringify({
+			shouldRecall: true,
+			query: 'pasta',
+			timeAnchor: null,
+			reason: 'recovered on retry',
+		});
+		const deps = makeQueuedDeps(['', good], 'length');
+		const result = await classifyRecallIntent('did we discuss pasta?', deps);
+		expect(result.shouldRecall).toBe(true);
+		expect(deps.llm.complete).toHaveBeenCalledTimes(2);
+	});
+
+	it('a retry that comes back truncated reports truncation after exactly 2 calls', async () => {
+		const deps = makeQueuedDeps(['', TRUNCATED_JSON], 'length');
+		const result = await classifyRecallIntent('did we discuss pasta?', deps);
+		expect(result.reason).toBe('truncated');
+		expect(deps.llm.complete).toHaveBeenCalledTimes(2);
+	});
+
+	it('a valid verdict still parses when finishReason is "length" (parse-first)', async () => {
+		// The recall verdict is a closed object that parseRecallVerdict validates
+		// field by field, so a reply that parses is complete by construction.
+		const good = JSON.stringify({
+			shouldRecall: true,
+			query: 'pasta',
+			timeAnchor: null,
+			reason: 'complete despite the cap',
+		});
+		const deps = makeDeps(good, 'length');
+		const result = await classifyRecallIntent('did we discuss pasta?', deps);
+		expect(result.shouldRecall).toBe(true);
+		expect(result.query).toBe('pasta');
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('passes maxTokens 150 on the completeWithMeta call', async () => {
+		// The stub's completeWithMeta forwards to the same `complete` mock, so the
+		// recorded options are the ones the classifier actually sent.
+		const deps = makeDeps(
+			JSON.stringify({ shouldRecall: false, query: null, timeAnchor: null, reason: 'r' }),
+		);
+		await classifyRecallIntent('what did we talk about yesterday?', deps);
+		const options = (deps.llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]?.[1];
+		expect(options).toMatchObject({ maxTokens: 150, responseFormat: 'json' });
+	});
+});
 
 describe('classifyRecallIntent — JSON mode + retry-on-empty (Batch 2)', () => {
 	it('passes responseFormat: "json" to llm.complete', async () => {

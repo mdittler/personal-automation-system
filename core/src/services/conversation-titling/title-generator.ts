@@ -1,14 +1,26 @@
-import type { LLMService } from '../../types/llm.js';
+import type { LLMCompletionMeta, LLMService } from '../../types/llm.js';
+import { classifyStructuredOutput, formatRawPreview } from '../../utils/json-strip-fences.js';
 import { sanitizeInput } from '../prompt-assembly/sanitization.js';
 
 export interface TitleGeneratorDeps {
-	llm: Pick<LLMService, 'complete'>;
+	/**
+	 * `completeWithMeta` is required alongside `complete` so the generator can
+	 * tell a reply cut off at TITLE_MAX_TOKENS from a genuinely malformed one.
+	 */
+	llm: Pick<LLMService, 'complete' | 'completeWithMeta'>;
 	// Narrow logger shape — match the pattern used in recall-classifier.ts.
 	// AppLogger lives at `../../types/app-module.js` if a wider type is ever needed.
 	logger: { warn(obj: unknown, msg?: string): void };
 }
 
 const TITLE_MAX_LEN = 80;
+/**
+ * Output budget for the title call. Tight on purpose — the answer is
+ * `{"title": "three to seven words"}`. Tight budgets are exactly where a cut
+ * reply gets misreported as invalid JSON, so the truncation branch below names
+ * this number instead of blaming the model.
+ */
+const TITLE_MAX_TOKENS = 60;
 const TITLE_MIN_WORDS = 3;
 const TITLE_MAX_WORDS = 7;
 
@@ -45,27 +57,20 @@ function sanitizeOutput(raw: string): string | null {
 	return truncated;
 }
 
-// Some fast-tier models wrap JSON in ```json fences despite instructions; strip them
-// before JSON.parse. Mirrors the pattern in recall-classifier.ts.
-function stripFences(raw: string): string {
-	return raw
-		.replace(/^```(?:json)?\s*/i, '')
-		.replace(/\s*```\s*$/i, '')
-		.trim();
-}
-
 export async function generateTitle(
 	userContent: string,
 	assistantContent: string,
 	deps: TitleGeneratorDeps,
 ): Promise<string | null> {
 	const userPrompt = fenceUntrusted(userContent, assistantContent);
-	let raw: string;
+	let meta: LLMCompletionMeta;
 	try {
-		raw = await deps.llm.complete(userPrompt, {
+		// completeWithMeta (not complete) so `finishReason` is visible: a reply cut
+		// off at TITLE_MAX_TOKENS must be reported as truncation, not invalid JSON.
+		meta = await deps.llm.completeWithMeta(userPrompt, {
 			tier: 'fast',
 			systemPrompt: SYSTEM_PROMPT,
-			maxTokens: 60,
+			maxTokens: TITLE_MAX_TOKENS,
 			temperature: 0,
 		});
 	} catch (err) {
@@ -73,13 +78,27 @@ export async function generateTitle(
 		return null;
 	}
 
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(stripFences(raw));
-	} catch {
-		deps.logger.warn({ raw }, 'title-generator: LLM returned invalid JSON');
+	// 'parse-first': `{"title": "..."}` is a closed single-string schema, so a
+	// reply that parses is complete by construction (a cut lands inside the
+	// string and fails to parse). The finish reason only decides WHICH failure to
+	// report. Every branch still returns null — titling is fire-and-forget — the
+	// only thing that changes is the honesty of the log line.
+	const outcome = classifyStructuredOutput(meta, {
+		order: 'parse-first',
+		maxTokens: TITLE_MAX_TOKENS,
+	});
+	if (outcome.kind === 'truncated') {
+		deps.logger.warn(
+			{ raw: formatRawPreview(outcome.raw) },
+			`title-generator: LLM reply truncated at the ${TITLE_MAX_TOKENS}-token cap (finishReason='length') — the output is incomplete, not malformed; raise the cap rather than blaming the model`,
+		);
 		return null;
 	}
+	if (outcome.kind !== 'ok') {
+		deps.logger.warn({ raw: outcome.raw }, 'title-generator: LLM returned invalid JSON');
+		return null;
+	}
+	const parsed = outcome.value;
 	if (typeof parsed !== 'object' || parsed === null) return null;
 	const title = (parsed as { title?: unknown }).title;
 	if (title === null || title === undefined) return null;

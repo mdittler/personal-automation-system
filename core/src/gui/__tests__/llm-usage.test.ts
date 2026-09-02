@@ -845,6 +845,44 @@ describe('LLM Usage Routes', () => {
 			expect(res.body).toContain('That model isn&#39;t valid.');
 		});
 
+		it('accepts a namespaced model id (Ollama-from-HuggingFace)', async () => {
+			const built = await buildApp({
+				providerRegistry: createMockProviderRegistry([{ id: 'ollama', type: 'ollama' }]),
+			});
+			app = built.app;
+			modelSelector = built.modelSelector;
+
+			const res = await authenticatedPost(app, '/gui/llm/tiers', {
+				tier: 'fast',
+				provider: 'ollama',
+				model: 'hf.co/bartowski/Foo-GGUF:Q4_K_M',
+			});
+
+			expect(res.statusCode).toBe(204);
+			expect(modelSelector.setFastRef).toHaveBeenCalledWith({
+				provider: 'ollama',
+				model: 'hf.co/bartowski/Foo-GGUF:Q4_K_M',
+			});
+		});
+
+		it('rejects a namespaced model id containing traversal with 400', async () => {
+			const built = await buildApp({
+				providerRegistry: createMockProviderRegistry([{ id: 'ollama', type: 'ollama' }]),
+			});
+			app = built.app;
+			modelSelector = built.modelSelector;
+
+			const res = await authenticatedPost(app, '/gui/llm/tiers', {
+				tier: 'fast',
+				provider: 'ollama',
+				model: 'hf.co/../../etc/passwd',
+			});
+
+			expect(res.statusCode).toBe(400);
+			expect(res.body).toContain('That model isn&#39;t valid.');
+			expect(modelSelector.setFastRef).not.toHaveBeenCalled();
+		});
+
 		it('rejects unknown provider with 400', async () => {
 			const built = await buildApp({
 				providerRegistry: createMockProviderRegistry([{ id: 'anthropic', type: 'anthropic' }]),

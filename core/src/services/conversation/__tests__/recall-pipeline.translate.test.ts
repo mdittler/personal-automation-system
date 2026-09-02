@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
 import type { SearchResult } from '../../chat-transcript-index/types.js';
 import { requestContext } from '../../context/request-context.js';
 import type { ConversationRetrievalService } from '../../conversation-retrieval/conversation-retrieval-service.js';
@@ -44,9 +45,9 @@ function makeDepsWithVerdict(
 	timezone?: string,
 ): RecallPipelineDeps {
 	return {
-		llm: {
+		llm: withCompleteWithMeta({
 			complete: vi.fn().mockResolvedValue(JSON.stringify(verdict)),
-		} as unknown as RecallPipelineDeps['llm'],
+		}) as unknown as RecallPipelineDeps['llm'],
 		logger: {
 			warn: vi.fn(),
 			info: vi.fn(),

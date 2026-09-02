@@ -19,17 +19,15 @@ import type {
 	SystemStatusInfo,
 	TierInfo,
 } from '../../types/system-info.js';
+import { isValidModelId } from '../../utils/model-id.js';
 import type { AppRegistry } from '../app-registry/index.js';
 import type { CostTracker } from '../llm/cost-tracker.js';
 import type { ModelCatalog } from '../llm/model-catalog.js';
-import { getModelPricing } from '../llm/model-pricing.js';
+import { getModelPricing, isLocalProvider } from '../llm/model-pricing.js';
 import type { ModelSelector } from '../llm/model-selector.js';
 import type { ProviderRegistry } from '../llm/providers/provider-registry.js';
 import type { CronManager } from '../scheduler/cron-manager.js';
 import type { UserManager } from '../user-manager/index.js';
-
-/** Model ID validation pattern (same as GUI). */
-const MODEL_ID_PATTERN = /^[a-zA-Z0-9._:-]{1,100}$/;
 
 /** Valid tier names. */
 const VALID_TIERS = new Set(['fast', 'standard', 'reasoning']);
@@ -109,7 +107,17 @@ export class SystemInfoServiceImpl implements SystemInfoService {
 		}
 	}
 
-	getModelPricing(modelId: string): ModelPricingInfo | null {
+	getModelPricing(modelId: string, providerId?: string): ModelPricingInfo | null {
+		// A local server can serve any model id it likes — a GGUF published as
+		// `gpt-4o` is still free inference on the operator's own hardware.
+		// Mirrors `openai-compatible-provider.listModels`, which suppresses
+		// catalog pricing for local providers for exactly this reason.
+		// Callers that know which provider serves the id pass it; callers that
+		// don't get the id-only lookup (no locality claim can be made).
+		if (providerId !== undefined) {
+			const providerType = this.providerRegistry.get(providerId)?.providerType;
+			if (isLocalProvider(providerType)) return null;
+		}
 		const pricing = getModelPricing(modelId);
 		if (!pricing) return null;
 		return {
@@ -193,8 +201,8 @@ export class SystemInfoServiceImpl implements SystemInfoService {
 			};
 		}
 
-		// Validate model ID format
-		if (!MODEL_ID_PATTERN.test(model)) {
+		// Validate model ID format (shared with the GUI + regression paths)
+		if (!isValidModelId(model)) {
 			return { success: false, error: `Invalid model ID "${model}".` };
 		}
 

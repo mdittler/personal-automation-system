@@ -19,10 +19,26 @@ let env: { dispose: () => Promise<void> } | undefined;
 
 beforeEach(() => {
 	env = undefined;
+	// `createChatbotEnvironment` calls `loadSystemConfig`, which validates the
+	// process environment with envalid — and envalid calls `process.exit(1)`
+	// when a required var is missing. The repo ships only `.env.example`
+	// (`.env` is gitignored), so in a fresh clone, a git worktree, or CI these
+	// tests killed the vitest worker instead of asserting anything. Supply the
+	// two required vars plus one provider key (`buildLLMConfig` refuses to
+	// build a config with no usable provider) so the suite no longer depends
+	// on operator-local credentials. dotenv does not override already-set
+	// vars, so these win even where a real `.env` exists.
+	//
+	// The values are inert: the composed runtime is wired to
+	// `fakeTelegramService` and these tests never dispatch an LLM call.
+	vi.stubEnv('TELEGRAM_BOT_TOKEN', 'regression-test-telegram-token');
+	vi.stubEnv('GUI_AUTH_TOKEN', 'regression-test-gui-token');
+	vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-regression-test-key');
 });
 
 afterEach(async () => {
 	if (env) await env.dispose();
+	vi.unstubAllEnvs();
 });
 
 describe('createChatbotEnvironment', () => {

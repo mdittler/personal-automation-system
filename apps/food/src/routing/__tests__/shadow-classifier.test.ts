@@ -1,4 +1,4 @@
-import type { AppLogger, LLMService } from '@pas/core/types';
+import type { AppLogger, LLMFinishReason, LLMService } from '@pas/core/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	FoodShadowClassifier,
@@ -12,33 +12,44 @@ import { FOOD_SHADOW_LABELS } from '../shadow-taxonomy.js';
 // Test helpers
 // ---------------------------------------------------------------------------
 
-function mockLLM(response: string): LLMService {
+/**
+ * Builds the LLM surface the classifier consumes from a single `complete` mock.
+ *
+ * The classifier calls `completeWithMeta`; wiring that through to the same
+ * `complete` mock (rather than a second independent mock) keeps every
+ * `vi.mocked(llm.complete)` assertion in this file — call counts, prompts,
+ * options — meaningful, and mirrors StubLLMService in the regression harness.
+ */
+function llmFromComplete(
+	complete: ReturnType<typeof vi.fn>,
+	finishReason: LLMFinishReason = 'stop',
+): LLMService {
 	return {
-		complete: vi.fn().mockResolvedValue(response),
+		complete,
+		completeWithMeta: vi.fn(async (prompt: string, options?: unknown) => ({
+			text: await complete(prompt, options),
+			finishReason,
+		})),
 		classify: vi.fn(),
 		extractStructured: vi.fn(),
 		getModelForTier: vi.fn(),
 	} as unknown as LLMService;
+}
+
+function mockLLM(response: string, finishReason: LLMFinishReason = 'stop'): LLMService {
+	return llmFromComplete(vi.fn().mockResolvedValue(response), finishReason);
 }
 
 function throwingLLM(err: unknown): LLMService {
-	return {
-		complete: vi.fn().mockImplementation(() => {
+	return llmFromComplete(
+		vi.fn().mockImplementation(() => {
 			throw err;
 		}),
-		classify: vi.fn(),
-		extractStructured: vi.fn(),
-		getModelForTier: vi.fn(),
-	} as unknown as LLMService;
+	);
 }
 
 function asyncThrowingLLM(err: unknown): LLMService {
-	return {
-		complete: vi.fn().mockRejectedValue(err),
-		classify: vi.fn(),
-		extractStructured: vi.fn(),
-		getModelForTier: vi.fn(),
-	} as unknown as LLMService;
+	return llmFromComplete(vi.fn().mockRejectedValue(err));
 }
 
 const silentLogger: AppLogger = {
@@ -406,7 +417,7 @@ describe('FoodShadowClassifier.classify — LLM error handling', () => {
 			labels: FOOD_SHADOW_LABELS,
 		});
 		const r = await c.classify('test message', 1.0);
-		expect(r).toEqual({ kind: 'llm-error', category: expectedCategory });
+		expect(r).toMatchObject({ kind: 'llm-error', category: expectedCategory });
 		expect(vi.mocked(logger.warn)).toHaveBeenCalledOnce();
 		expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain(
 			'FoodShadowClassifier: LLM call failed',
@@ -530,7 +541,46 @@ describe('FoodShadowClassifier.classify — LLM error handling', () => {
 			labels: FOOD_SHADOW_LABELS,
 		});
 		const r = await c.classify('test', 1.0);
-		expect(r).toEqual({ kind: 'llm-error', category: 'rate-limit' });
+		expect(r).toMatchObject({ kind: 'llm-error', category: 'rate-limit' });
+	});
+});
+
+describe('FoodShadowClassifier.classify — llm-error message passthrough', () => {
+	/** The diagnostic OllamaProvider throws when a model burns its whole budget. */
+	const EMPTY_OUTPUT_MESSAGE =
+		"Model 'qwen3.8:27b-mlx' (provider 'ollama') returned empty output after exhausting its num_predict budget of 80 token(s).";
+
+	function emptyOutputError(): Error {
+		return Object.assign(new Error(EMPTY_OUTPUT_MESSAGE), { name: 'LLMEmptyOutputError' });
+	}
+
+	it('carries the underlying error message so callers can report something useful', async () => {
+		const c = makeClassifier({ llm: asyncThrowingLLM(emptyOutputError()) });
+		const r = await c.classify('add milk', 1.0);
+		expect(r).toEqual({
+			kind: 'llm-error',
+			category: 'empty-output',
+			message: EMPTY_OUTPUT_MESSAGE,
+		});
+	});
+
+	it('does NOT trigger the empty-output repair retry — a throw bypasses parseShadowResponse', async () => {
+		const llm = asyncThrowingLLM(emptyOutputError());
+		const c = makeClassifier({ llm });
+		await c.classify('add milk', 1.0);
+		// The repair retry only fires for a *resolved* empty string; a rejection
+		// short-circuits straight to handleLLMError.
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+	});
+
+	it('stringifies non-Error throws rather than dropping them', async () => {
+		const c = makeClassifier({ llm: asyncThrowingLLM('socket hang up') });
+		const r = await c.classify('add milk', 1.0);
+		expect(r).toEqual({
+			kind: 'llm-error',
+			category: 'unknown',
+			message: 'socket hang up',
+		});
 	});
 });
 
@@ -626,15 +676,12 @@ describe('FoodShadowClassifier.classify — concurrency', () => {
 			hello: makeOkJson('none', 0.7),
 		};
 		const inputs = Object.keys(responses);
-		const llm: LLMService = {
-			complete: vi.fn().mockImplementation((prompt: string) => {
+		const llm: LLMService = llmFromComplete(
+			vi.fn().mockImplementation((prompt: string) => {
 				const match = inputs.find((i) => prompt.includes(i));
 				return Promise.resolve(responses[match ?? 'hello']!);
 			}),
-			classify: vi.fn(),
-			extractStructured: vi.fn(),
-			getModelForTier: vi.fn(),
-		} as unknown as LLMService;
+		);
 		const c = new FoodShadowClassifier({ llm, logger: silentLogger, labels });
 		const results = await Promise.all(inputs.map((input) => c.classify(input, 1.0)));
 		for (let i = 0; i < inputs.length; i++) {
@@ -676,12 +723,9 @@ describe('FoodShadowClassifier.classify — concurrency', () => {
 		});
 		const deferreds = [deferred0, deferred1, deferred2];
 		let callIndex = 0;
-		const llm: LLMService = {
-			complete: vi.fn().mockImplementation(() => deferreds[callIndex++]),
-			classify: vi.fn(),
-			extractStructured: vi.fn(),
-			getModelForTier: vi.fn(),
-		} as unknown as LLMService;
+		const llm: LLMService = llmFromComplete(
+			vi.fn().mockImplementation(() => deferreds[callIndex++]),
+		);
 		const c = new FoodShadowClassifier({ llm, logger: silentLogger, labels: FOOD_SHADOW_LABELS });
 		// Fire 3 classify calls but do NOT await yet
 		const allPromise = Promise.all([
@@ -712,17 +756,14 @@ describe('FoodShadowClassifier.classify — concurrency', () => {
 describe('FoodShadowClassifier.classify — state transitions', () => {
 	it('after LLM throw, next classify on same instance succeeds (no poisoned state)', async () => {
 		const goodResponse = makeOkJson('none', 0.5);
-		const llm: LLMService = {
-			complete: vi
+		const llm: LLMService = llmFromComplete(
+			vi
 				.fn()
 				.mockImplementationOnce(() => {
 					throw new Error('first call fails');
 				})
 				.mockResolvedValueOnce(goodResponse),
-			classify: vi.fn(),
-			extractStructured: vi.fn(),
-			getModelForTier: vi.fn(),
-		} as unknown as LLMService;
+		);
 		const c = new FoodShadowClassifier({ llm, logger: silentLogger, labels: FOOD_SHADOW_LABELS });
 		const r1 = await c.classify('first call', 1.0);
 		expect(r1.kind).toBe('llm-error');
@@ -1049,17 +1090,15 @@ describe('FoodShadowClassifier.classify — never throws to caller', () => {
 // ---------------------------------------------------------------------------
 
 /** Helper: an LLM whose .complete() returns a queue of responses in order. */
-function queuedLLM(responses: string[]): LLMService {
+function queuedLLM(responses: string[], finishReason: LLMFinishReason = 'stop'): LLMService {
 	let i = 0;
-	return {
-		complete: vi.fn().mockImplementation(async () => {
+	return llmFromComplete(
+		vi.fn().mockImplementation(async () => {
 			if (i >= responses.length) throw new Error('queuedLLM: exhausted');
 			return responses[i++]!;
 		}),
-		classify: vi.fn(),
-		extractStructured: vi.fn(),
-		getModelForTier: vi.fn(),
-	} as unknown as LLMService;
+		finishReason,
+	);
 }
 
 describe('FoodShadowClassifier.classify — JSON mode + retry-on-empty (Batch 2)', () => {
@@ -1115,5 +1154,146 @@ describe('FoodShadowClassifier.classify — JSON mode + retry-on-empty (Batch 2)
 		const c = makeClassifier({ llm });
 		await c.classify('add milk', 1.0);
 		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Truncation at the output cap is reported as truncation, not as malformed JSON
+//
+// Live 2026-09-01: ollama/muse-glimmer:30b-mlx emitted 369+ characters of JSON
+// on `food-user-wants-to-log-an-unfamiliar-meal-with-a-free-text-description`,
+// hit the 80-token cap, and the regression harness reported
+// "JSON parse failed: Unterminated string in JSON at position 369".
+// ---------------------------------------------------------------------------
+
+describe('FoodShadowClassifier.classify — truncated output vs malformed output', () => {
+	/** The shape the live run produced: valid JSON prefix, cut mid-string. */
+	const TRUNCATED_JSON =
+		'{"action": "user wants to log a meal they ate with a free text description of what it';
+
+	it('unparseable + finishReason "length" → llm-error naming the token cap, no retry', async () => {
+		const llm = queuedLLM([TRUNCATED_JSON], 'length');
+		const c = makeClassifier({ llm });
+
+		const r = await c.classify('had some kind of stew thing at my aunts place', 1.0);
+
+		expect(r.kind).toBe('llm-error');
+		if (r.kind !== 'llm-error') throw new Error('unreachable');
+		expect(r.category).toBe('truncated-output');
+		expect(r.message).toContain('truncated');
+		expect(r.message).toContain('80-token cap');
+		expect(r.message).toContain("finishReason='length'");
+		// The raw prefix is echoed so an operator can see what the model emitted.
+		expect(r.message).toContain('user wants to log a meal');
+		// Terminal: re-asking the same prompt against the same cap cuts the same way.
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+	});
+
+	it('the truncation diagnostic is a single line even when the raw reply has newlines', async () => {
+		const llm = queuedLLM(
+			['{"action":\n"user wants to log', '{"action":\n"user wants to log'],
+			'length',
+		);
+		const c = makeClassifier({ llm });
+		const r = await c.classify('msg', 1.0);
+		expect(r.kind).toBe('llm-error');
+		if (r.kind !== 'llm-error') throw new Error('unreachable');
+		expect(r.message).not.toContain('\n');
+	});
+
+	it('unparseable + finishReason "stop" keeps parse-failed and its no-retry policy', async () => {
+		const llm = queuedLLM([TRUNCATED_JSON], 'stop');
+		const c = makeClassifier({ llm });
+
+		const r = await c.classify('had some kind of stew thing', 1.0);
+
+		expect(r).toEqual({ kind: 'parse-failed', raw: TRUNCATED_JSON });
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+	});
+
+	it('empty + finishReason "stop" still takes the one repair retry (unchanged)', async () => {
+		const label = 'user wants to add items to the grocery list';
+		const llm = queuedLLM(['', makeOkJson(label, 0.95)], 'stop');
+		const c = makeClassifier({ llm });
+
+		const r = await c.classify('add milk to my list', 1.0);
+
+		expect(r).toEqual({ kind: 'ok', action: label, confidence: 0.95 });
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(2);
+	});
+
+	it('a retry that comes back truncated is reported as truncation (2 calls)', async () => {
+		const llm = queuedLLM(['', TRUNCATED_JSON], 'length');
+		const c = makeClassifier({ llm });
+
+		const r = await c.classify('add milk to my list', 1.0);
+
+		expect(r).toMatchObject({ kind: 'llm-error', category: 'truncated-output' });
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(2);
+	});
+
+	it('a valid reply still parses even when finishReason is "length" (schema is complete)', async () => {
+		const label = 'user wants to add items to the grocery list';
+		const llm = queuedLLM([makeOkJson(label, 0.92)], 'length');
+		const c = makeClassifier({ llm });
+
+		const r = await c.classify('add milk', 1.0);
+
+		expect(r).toEqual({ kind: 'ok', action: label, confidence: 0.92 });
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+	});
+
+	it('a reply whose JSON closes but whose label is invalid, cut at the cap, is truncation', async () => {
+		// The JSON envelope closed, so `classifyStructuredOutput` reports 'ok', but
+		// the payload fails the closed-schema check. With finishReason 'length' the
+		// offending field is a casualty of the cut — preserved behaviour from the
+		// pre-helper `raw.trim().length > 0 && finishReason === 'length'` gate.
+		const llm = queuedLLM(['{"action": "user wants to log a mea", "confidence": 0.9}'], 'length');
+		const c = makeClassifier({ llm });
+
+		const r = await c.classify('had some stew', 1.0);
+
+		expect(r).toMatchObject({ kind: 'llm-error', category: 'truncated-output' });
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+	});
+
+	it('the same schema-invalid reply with finishReason "stop" stays parse-failed', async () => {
+		const raw = '{"action": "user wants to log a mea", "confidence": 0.9}';
+		const llm = queuedLLM([raw], 'stop');
+		const c = makeClassifier({ llm });
+
+		const r = await c.classify('had some stew', 1.0);
+
+		expect(r).toEqual({ kind: 'parse-failed', raw });
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+	});
+
+	it('the classifier call carries maxTokens 80 through completeWithMeta', async () => {
+		const label = 'user wants to add items to the grocery list';
+		const llm = mockLLM(makeOkJson(label, 0.9));
+		const c = makeClassifier({ llm });
+
+		await c.classify('add milk', 1.0);
+
+		const options = vi.mocked(llm.completeWithMeta).mock.calls[0]?.[1];
+		expect(options).toMatchObject({ maxTokens: 80, tier: 'fast', responseFormat: 'json' });
+	});
+
+	it('logs a warn naming the cap so the truncation is visible outside the return value', async () => {
+		const logger = {
+			warn: vi.fn(),
+			error: vi.fn(),
+			info: vi.fn(),
+			debug: vi.fn(),
+			trace: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn().mockReturnThis(),
+		} as unknown as AppLogger;
+		const c = makeClassifier({ llm: queuedLLM([TRUNCATED_JSON], 'length'), logger });
+
+		await c.classify('msg', 1.0);
+
+		expect(vi.mocked(logger.warn)).toHaveBeenCalledOnce();
+		expect(vi.mocked(logger.warn).mock.calls[0]?.[1]).toContain('80-token cap');
 	});
 });

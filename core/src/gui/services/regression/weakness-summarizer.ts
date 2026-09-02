@@ -36,7 +36,8 @@ import type {
 } from '../../../types/regression.js';
 import { VERDICT, isPlainObject, looksLikeRunResult } from '../../../types/regression.js';
 import { atomicWriteJson } from '../../../utils/atomic-write.js';
-import { UNPARSEABLE_JSON, tryParseJsonStripFences } from '../../../utils/json-strip-fences.js';
+import type { StructuredOutputResult } from '../../../utils/json-strip-fences.js';
+import { classifyStructuredOutput, formatRawPreview } from '../../../utils/json-strip-fences.js';
 
 export type SummaryTier = Exclude<EvaluatedTier, 'mixed' | 'unknown'>;
 
@@ -63,7 +64,12 @@ export interface WeaknessSummarizerOptions {
 	manifestDir: string;
 	cacheDir: string;
 	summaryDir: string;
-	llm: Pick<LLMService, 'complete'>;
+	/**
+	 * `completeWithMeta` is required alongside `complete` so the summarizer can
+	 * tell a reply cut off at WEAKNESS_MAX_TOKENS from a genuinely malformed one
+	 * — the persisted `errorMessage` is shown verbatim in the GUI.
+	 */
+	llm: Pick<LLMService, 'complete' | 'completeWithMeta'>;
 	logger: Logger;
 	/** Truncate the failing-cases list passed to the LLM (default 20). */
 	maxFailingInputs?: number;
@@ -77,6 +83,14 @@ export interface SummarizeRequest {
 }
 
 const DEFAULT_MAX_FAILING_INPUTS = 20;
+
+/**
+ * Output budget for the summary call. Generous — the reply is a paragraph plus
+ * 2–5 categories — but a model that enumerates every failing case can still
+ * reach it, and the resulting `errorMessage` is what an operator reads in the
+ * GUI, so it must say "truncated", not "not valid JSON".
+ */
+const WEAKNESS_MAX_TOKENS = 1500;
 
 const SYSTEM_PROMPT = `You analyze regression test failures for a personal-automation-system. Given a model's failing inputs and the actuals it produced, identify the categories of inputs where this model struggles. Return JSON only.
 
@@ -186,25 +200,33 @@ export function createWeaknessSummarizer(opts: WeaknessSummarizerOptions): Weakn
 
 		const prompt = buildPrompt(enriched.slice(0, maxFailing), tier, modelId);
 
-		let raw = await llm.complete(prompt, {
+		const callOptions = {
 			tier: 'standard',
 			temperature: 0,
-			maxTokens: 1500,
+			maxTokens: WEAKNESS_MAX_TOKENS,
 			responseFormat: 'json',
-		});
-		if (!raw || raw.trim() === '') {
-			// One retry on empty output. The LLM call is idempotent (same prompt,
-			// no state), so a single retry is sufficient.
-			raw = await llm.complete(prompt, {
-				tier: 'standard',
-				temperature: 0,
-				maxTokens: 1500,
-				responseFormat: 'json',
-			});
-		}
+		} as const;
+		// 'parse-first': the summary payload is a closed object validated field by
+		// field below, so a reply that parses is complete by construction.
+		const classifyOptions = {
+			order: 'parse-first',
+			maxTokens: WEAKNESS_MAX_TOKENS,
+		} as const;
 
-		const parsed = tryParseSummaryJson(
-			raw,
+		// completeWithMeta (not complete) so `finishReason` is visible.
+		let meta = await llm.completeWithMeta(prompt, callOptions);
+		let outcome = classifyStructuredOutput(meta, classifyOptions);
+		if (outcome.kind === 'empty') {
+			// One retry on empty output — unchanged. The LLM call is idempotent
+			// (same prompt, no state), so a single retry is sufficient. Truncated and
+			// unparseable deliberately do NOT retry: both repeat.
+			meta = await llm.completeWithMeta(prompt, callOptions);
+			outcome = classifyStructuredOutput(meta, classifyOptions);
+		}
+		const raw = meta.text ?? '';
+
+		const parsed = interpretSummaryOutcome(
+			outcome,
 			failing.map((f) => f.caseId),
 		);
 		const result: PersistedWeaknessSummary = parsed.ok
@@ -332,14 +354,33 @@ interface ParsedSummary {
 	failureCategories: FailureCategory[];
 }
 
-function tryParseSummaryJson(
-	raw: string,
+type SummaryParseResult = { ok: true; value: ParsedSummary } | { ok: false; error: string };
+
+/**
+ * Map a classified completion onto the persisted result. The `truncated` case
+ * is the point of this indirection: its `errorMessage` names the cap instead of
+ * claiming the model emitted invalid JSON.
+ */
+function interpretSummaryOutcome(
+	outcome: StructuredOutputResult,
 	validCaseIds: readonly string[],
-): { ok: true; value: ParsedSummary } | { ok: false; error: string } {
-	const parsed = tryParseJsonStripFences(raw);
-	if (parsed === UNPARSEABLE_JSON) {
+): SummaryParseResult {
+	if (outcome.kind === 'truncated') {
+		return {
+			ok: false,
+			error: `LLM output truncated at the ${WEAKNESS_MAX_TOKENS}-token cap (finishReason='length') — raise maxTokens in weakness-summarizer.ts; the output is incomplete, not invalid. raw=${formatRawPreview(outcome.raw)}`,
+		};
+	}
+	if (outcome.kind !== 'ok') {
 		return { ok: false, error: 'LLM output is empty or not valid JSON (after retry)' };
 	}
+	return validateSummaryPayload(outcome.value, validCaseIds);
+}
+
+function validateSummaryPayload(
+	parsed: unknown,
+	validCaseIds: readonly string[],
+): SummaryParseResult {
 	if (!isPlainObject(parsed)) {
 		return { ok: false, error: 'LLM output is not an object' };
 	}

@@ -122,7 +122,11 @@ export function buildClassifierAdapters(deps: BuildAdaptersDeps): RoutingClassif
 				return { raw: r.raw, meter };
 			}
 			if (r.kind === 'llm-error') {
-				throw new MeteredError(`food-shadow infrastructure error: ${r.category}`, meter);
+				// Append the underlying message when there is one — `category` is
+				// 'unknown' for most provider failures, and "infrastructure error:
+				// unknown" is useless in a report.
+				const detail = r.message ? `${r.category}: ${r.message}` : r.category;
+				throw new MeteredError(`food-shadow infrastructure error: ${detail}`, meter);
 			}
 			throw new MeteredError(`food-shadow unexpected kind: ${(r as { kind: string }).kind}`, meter);
 		},

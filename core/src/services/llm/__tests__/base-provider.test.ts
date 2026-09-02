@@ -236,4 +236,131 @@ describe('BaseProvider', () => {
 
 		await expect(provider.completeWithUsage('hello')).rejects.toThrow('permanent failure');
 	});
+
+	describe('temperature strip-and-retry fallback', () => {
+		/** Mimics the SDK error shape: a 400 whose message names the parameter. */
+		function temperatureRejection(): Error {
+			return Object.assign(new Error('`temperature` is deprecated for this model.'), {
+				status: 400,
+			});
+		}
+
+		it('retries once without temperature when the model rejects the parameter', async () => {
+			const provider = createTestProvider({ defaultModel: 'model-that-rejects' });
+			const seen: Array<number | undefined> = [];
+
+			vi.spyOn(provider as never, 'doComplete' as never).mockImplementation(
+				async (_prompt: string, options?: LLMCompletionOptions) => {
+					seen.push(options?.temperature);
+					if (options?.temperature !== undefined) throw temperatureRejection();
+					return provider.doCompleteResult;
+				},
+			);
+
+			const result = await provider.completeWithUsage('hello', { temperature: 0 });
+
+			expect(result.text).toBe('test response');
+			// First attempt carries temperature; the strip-and-retry attempt does not.
+			// No exponential backoff burn in between — the 400 is non-retryable.
+			expect(seen).toEqual([0, undefined]);
+		});
+
+		it('does not swallow the error when the retry without temperature also fails', async () => {
+			const provider = createTestProvider();
+
+			vi.spyOn(provider as never, 'doComplete' as never).mockImplementation(async () => {
+				throw temperatureRejection();
+			});
+
+			await expect(provider.completeWithUsage('hello', { temperature: 0 })).rejects.toThrow(
+				'`temperature` is deprecated for this model.',
+			);
+		});
+
+		it('does not retry when no temperature was requested', async () => {
+			const provider = createTestProvider();
+			let calls = 0;
+
+			vi.spyOn(provider as never, 'doComplete' as never).mockImplementation(async () => {
+				calls++;
+				throw temperatureRejection();
+			});
+
+			await expect(provider.completeWithUsage('hello')).rejects.toThrow('is deprecated');
+			expect(calls).toBe(1);
+		});
+
+		it('rethrows unrelated errors unchanged without stripping temperature', async () => {
+			const provider = createTestProvider();
+			let calls = 0;
+
+			vi.spyOn(provider as never, 'doComplete' as never).mockImplementation(async () => {
+				calls++;
+				throw Object.assign(new Error('Invalid request format'), { status: 400 });
+			});
+
+			await expect(provider.completeWithUsage('hello', { temperature: 0 })).rejects.toThrow(
+				'Invalid request format',
+			);
+			// 1 initial + 2 retries from withRetry; no strip-and-retry pass on top.
+			expect(calls).toBe(3);
+		});
+
+		it('does not strip temperature for a 400 naming a different parameter', async () => {
+			const provider = createTestProvider();
+			let calls = 0;
+
+			vi.spyOn(provider as never, 'doComplete' as never).mockImplementation(async () => {
+				calls++;
+				throw Object.assign(new Error('Unsupported parameter: `top_k` for this model.'), {
+					status: 400,
+				});
+			});
+
+			await expect(provider.completeWithUsage('hello', { temperature: 0 })).rejects.toThrow(
+				'top_k',
+			);
+			expect(calls).toBe(1);
+		});
+	});
+
+	describe('empty-output errors are not retried', () => {
+		/** Mirrors LLMEmptyOutputError's shape without importing the provider layer. */
+		function emptyOutput(): Error {
+			return Object.assign(
+				new Error(
+					"Model 'qwen3.8:27b-mlx' returned empty output after exhausting its num_predict budget of 80 token(s).",
+				),
+				{ name: 'LLMEmptyOutputError' },
+			);
+		}
+
+		it('is attempted exactly once — exhausting the same budget again cannot help', async () => {
+			const provider = createTestProvider();
+			let calls = 0;
+
+			vi.spyOn(provider as never, 'doComplete' as never).mockImplementation(async () => {
+				calls++;
+				throw emptyOutput();
+			});
+
+			await expect(provider.completeWithUsage('hello')).rejects.toThrow(/empty output/i);
+			expect(calls).toBe(1);
+		});
+
+		it('is not retried even when a temperature was requested (no strip-and-retry pass)', async () => {
+			const provider = createTestProvider();
+			let calls = 0;
+
+			vi.spyOn(provider as never, 'doComplete' as never).mockImplementation(async () => {
+				calls++;
+				throw emptyOutput();
+			});
+
+			await expect(provider.completeWithUsage('hello', { temperature: 0 })).rejects.toThrow(
+				/empty output/i,
+			);
+			expect(calls).toBe(1);
+		});
+	});
 });

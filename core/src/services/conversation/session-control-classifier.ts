@@ -14,7 +14,8 @@
  * parse failure.
  */
 
-import type { LLMCompletionOptions } from '../../types/llm.js';
+import type { LLMCompletionMeta, LLMCompletionOptions } from '../../types/llm.js';
+import { classifyStructuredOutput, formatRawPreview } from '../../utils/json-strip-fences.js';
 import { sanitizeInput } from '../prompt-assembly/sanitization.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -27,9 +28,25 @@ export interface SessionControlResult {
 }
 
 export interface SessionControlClassifierDeps {
-	llm: { complete(prompt: string, options?: LLMCompletionOptions): Promise<string> };
+	/**
+	 * `completeWithMeta` is required alongside `complete` so the classifier can
+	 * tell a reply cut off at SESSION_CONTROL_MAX_TOKENS from a genuinely
+	 * malformed one.
+	 */
+	llm: {
+		complete(prompt: string, options?: LLMCompletionOptions): Promise<string>;
+		completeWithMeta(prompt: string, options?: LLMCompletionOptions): Promise<LLMCompletionMeta>;
+	};
 	logger: { warn(obj: unknown, msg?: string): void };
 }
+
+/**
+ * Output budget for the classifier call. The answer is one small JSON object
+ * with a short free-text `reason`, so 80 is ample — but the `reason` field is
+ * the part a verbose model overruns, and a cut reply used to come back as
+ * `reason: 'parse error'`, which reads as "the model emitted garbage".
+ */
+const SESSION_CONTROL_MAX_TOKENS = 80;
 
 // ─── Pre-filter ───────────────────────────────────────────────────────────────
 
@@ -138,12 +155,15 @@ export async function classifySessionControl(
 		source: 'llm',
 	};
 
-	let raw: string;
+	let meta: LLMCompletionMeta;
 	try {
-		raw = await deps.llm.complete(fenceUntrusted(text), {
+		// completeWithMeta (not complete) so `finishReason` is visible: a reply cut
+		// off at SESSION_CONTROL_MAX_TOKENS must be reported as truncation, not as
+		// a parse error.
+		meta = await deps.llm.completeWithMeta(fenceUntrusted(text), {
 			tier: 'fast',
 			systemPrompt: CLASSIFIER_SYSTEM_PROMPT,
-			maxTokens: 80,
+			maxTokens: SESSION_CONTROL_MAX_TOKENS,
 			temperature: 0,
 			responseFormat: 'json',
 		});
@@ -152,52 +172,67 @@ export async function classifySessionControl(
 		return SAFE_DEFAULT;
 	}
 
-	return parseSessionControlResult(raw, deps, SAFE_DEFAULT);
+	// 'parse-first': the result is a closed object fully validated below, so a
+	// reply that parses is complete by construction and the finish reason only
+	// decides WHICH failure to report. There is no retry on this path and none is
+	// added — every failure still yields the safe default, which is 'unclear' and
+	// therefore a no-op for the caller.
+	const outcome = classifyStructuredOutput(meta, {
+		order: 'parse-first',
+		maxTokens: SESSION_CONTROL_MAX_TOKENS,
+	});
+	if (outcome.kind === 'truncated') {
+		deps.logger.warn(
+			{ raw: formatRawPreview(outcome.raw) },
+			`session-control classifier: LLM response truncated at the ${SESSION_CONTROL_MAX_TOKENS}-token cap (finishReason='length') — the model did not finish its JSON object; the budget ran out`,
+		);
+		return { ...SAFE_DEFAULT, reason: 'truncated' };
+	}
+	if (outcome.kind !== 'ok') {
+		deps.logger.warn(
+			{ raw: outcome.raw },
+			'session-control classifier: failed to parse LLM response',
+		);
+		return SAFE_DEFAULT;
+	}
+	return validateSessionControlResult(outcome.value, SAFE_DEFAULT);
 }
 
 // ─── Output validation ────────────────────────────────────────────────────────
 
 const VALID_INTENTS = new Set(['new_session', 'continue', 'unclear']);
 
-function parseSessionControlResult(
-	raw: string,
-	deps: SessionControlClassifierDeps,
+/**
+ * Validate an already-parsed classifier payload. The JSON parse (and the
+ * truncated / empty / unparseable split) happens in `classifySessionControl`
+ * via `classifyStructuredOutput`; this function only judges the shape.
+ */
+function validateSessionControlResult(
+	parsed: unknown,
 	safeDefault: SessionControlResult,
 ): SessionControlResult {
-	try {
-		// Strip markdown code fences if present
-		const json = raw
-			.replace(/^```(?:json)?\s*/i, '')
-			.replace(/\s*```\s*$/i, '')
-			.trim();
-
-		const parsed = JSON.parse(json) as unknown;
-		if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-			return safeDefault;
-		}
-		const obj = parsed as Record<string, unknown>;
-
-		// Validate intent
-		if (typeof obj.intent !== 'string' || !VALID_INTENTS.has(obj.intent)) {
-			return safeDefault;
-		}
-		const intent = obj.intent as 'new_session' | 'continue' | 'unclear';
-
-		// Validate confidence
-		if (typeof obj.confidence !== 'number' || obj.confidence < 0 || obj.confidence > 1) {
-			return safeDefault;
-		}
-		const confidence = obj.confidence;
-
-		// reason: string, truncate to 100 chars
-		let reason = 'classified';
-		if (typeof obj.reason === 'string') reason = obj.reason.slice(0, 100);
-
-		return { intent, confidence, reason, source: 'llm' };
-	} catch (err) {
-		deps.logger.warn({ err }, 'session-control classifier: failed to parse LLM response');
+	if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
 		return safeDefault;
 	}
+	const obj = parsed as Record<string, unknown>;
+
+	// Validate intent
+	if (typeof obj.intent !== 'string' || !VALID_INTENTS.has(obj.intent)) {
+		return safeDefault;
+	}
+	const intent = obj.intent as 'new_session' | 'continue' | 'unclear';
+
+	// Validate confidence
+	if (typeof obj.confidence !== 'number' || obj.confidence < 0 || obj.confidence > 1) {
+		return safeDefault;
+	}
+	const confidence = obj.confidence;
+
+	// reason: string, truncate to 100 chars
+	let reason = 'classified';
+	if (typeof obj.reason === 'string') reason = obj.reason.slice(0, 100);
+
+	return { intent, confidence, reason, source: 'llm' };
 }
 
 // ─── Combined entry point ─────────────────────────────────────────────────────

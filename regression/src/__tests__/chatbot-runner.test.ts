@@ -76,9 +76,9 @@ describe('runChatbotCase', () => {
 			cost = 0.05;
 			env.telegram.pushReply('You spent $306.77 at Costco on 2026-05-01.');
 		});
-		// Rubric judge call adds more
-		const originalComplete = judge.complete.bind(judge);
-		judge.complete = async (p, o) => {
+		// Rubric judge call adds more (the oracle calls completeWithMeta)
+		const originalComplete = judge.completeWithMeta.bind(judge);
+		judge.completeWithMeta = async (p, o) => {
 			cost = 0.07;
 			return originalComplete(p, o);
 		};

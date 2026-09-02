@@ -11,6 +11,7 @@ import type {
 	LLMFinishReason,
 	ProviderModel,
 } from '../../../types/llm.js';
+import { supportsTemperature } from '../model-capabilities.js';
 import { getModelPricing } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 
@@ -75,7 +76,7 @@ export class GoogleProvider extends BaseProvider {
 			model,
 			contents,
 			config: {
-				temperature: options?.temperature,
+				...(supportsTemperature(model) ? { temperature: options?.temperature } : {}),
 				maxOutputTokens: options?.maxTokens ?? 1024,
 				...(options?.systemPrompt ? { systemInstruction: options.systemPrompt } : {}),
 				...(options?.responseFormat === 'json' ? { responseMimeType: 'application/json' } : {}),

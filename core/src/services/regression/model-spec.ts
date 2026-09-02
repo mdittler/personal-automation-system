@@ -12,6 +12,7 @@
  */
 
 import type { ModelRef, ModelTier } from '../../types/llm.js';
+import { MODEL_ID_PATTERN } from '../../utils/model-id.js';
 
 export const MAX_MODEL_SPEC_CHARS = 256;
 const SINGLE_REF_MAX_CHARS = Math.floor(MAX_MODEL_SPEC_CHARS / 2);
@@ -26,7 +27,11 @@ const PROVIDER_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$/;
 // namespaced ids like "meta-llama/Llama-3.3-70B-Instruct-Turbo". The `..`
 // traversal sequence, "//" empty segments, and trailing "/" are rejected
 // in the parseModelRef body below.
-const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$/;
+//
+// Shared with `gui/routes/llm-usage.ts` and `services/system-info/index.ts`
+// via `utils/model-id.ts` — a model id that can be regression-tested must also
+// be assignable to a tier.
+const MODEL_RE = MODEL_ID_PATTERN;
 
 const TIER_NAMES: ReadonlySet<ModelTier> = new Set(['fast', 'standard', 'reasoning']);
 

@@ -41,7 +41,17 @@ export function isTerminalEventType(t: RegressionEvent['type']): t is TerminalEv
 	return (TERMINAL_EVENT_TYPES as readonly string[]).includes(t);
 }
 
-export type RegistryListener = (event: RegressionEvent, id: number) => void;
+/**
+ * Server-computed progress snapshot that rides every dispatched event.
+ * `total` is 0 when the run's case count is unknown (callers that omit
+ * `totalCases`); clients treat 0 as "no denominator".
+ */
+export interface RunProgress {
+	completed: number;
+	total: number;
+}
+
+export type RegistryListener = (event: RegressionEvent, id: number, progress: RunProgress) => void;
 
 export const MAX_EVENT_LOG_ENTRIES = 1000;
 
@@ -51,7 +61,11 @@ export interface RunState {
 	startedAt: number;
 	endedAt?: number;
 	args: readonly string[];
-	eventLog: Array<{ id: number; event: RegressionEvent }>;
+	/** Case-count denominator for the progress bar. 0 = unknown. */
+	totalCases: number;
+	/** Monotonic count of `case-result` events. Never decremented. */
+	completedCases: number;
+	eventLog: Array<{ id: number; event: RegressionEvent; progress: RunProgress }>;
 	nextEventId: number;
 	listeners: Set<RegistryListener>;
 	abort: AbortController;
@@ -72,6 +86,11 @@ interface FakeRunHandleShape {
 export interface CreateRunOptions {
 	args: readonly string[];
 	/**
+	 * Total number of cases this run will report on. Optional (defaults to 0
+	 * = unknown) so existing callers keep compiling.
+	 */
+	totalCases?: number;
+	/**
 	 * Invoked once `createRun()` has minted the runId. The third argument is
 	 * the registry-issued runId — required so the subprocess can be tagged
 	 * with `--run-id=<runId>` without observing a TDZ-captured outer variable.
@@ -83,7 +102,9 @@ export interface CreateRunOptions {
 	) => Promise<FakeRunHandleShape | undefined> | FakeRunHandleShape | undefined;
 }
 
-export type ReplayResult = Array<{ id: number; event: RegressionEvent }> | { gap: true };
+export type ReplayResult =
+	| Array<{ id: number; event: RegressionEvent; progress: RunProgress }>
+	| { gap: true };
 
 export interface RunRegistry {
 	createRun(opts: CreateRunOptions): Promise<{ runId: string }>;
@@ -92,6 +113,8 @@ export interface RunRegistry {
 	/** Registers `listener` for live events WITHOUT replaying the buffer. */
 	attachLive(runId: string, listener: RegistryListener): (() => void) | null;
 	getEventsAfter(runId: string, lastEventId: number | null): ReplayResult;
+	/** The currently-active runId, or null when no run is in flight. */
+	getActiveRunId(): string | null;
 	cancel(runId: string): Promise<void>;
 	get(runId: string): RunState | undefined;
 	isTerminal(runId: string): boolean;
@@ -116,14 +139,22 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 	let now: () => number = options?.now ?? (() => Date.now());
 
 	function dispatchEvent(state: RunState, event: RegressionEvent): void {
+		// Monotonic counter rather than a scan of `eventLog`: the ring buffer
+		// below evicts old entries once a run exceeds MAX_EVENT_LOG_ENTRIES,
+		// so counting `case-result` entries would plateau at the buffer size.
+		if (event.type === 'case-result') state.completedCases++;
+		// Snapshot per entry rather than reading the live counter at send
+		// time: `getEventsAfter` replays historical entries, and a live read
+		// would stamp every replayed frame with the final count.
+		const progress: RunProgress = { completed: state.completedCases, total: state.totalCases };
 		const id = state.nextEventId++;
-		state.eventLog.push({ id, event });
+		state.eventLog.push({ id, event, progress });
 		while (state.eventLog.length > MAX_EVENT_LOG_ENTRIES) {
 			state.eventLog.shift();
 		}
 		for (const listener of state.listeners) {
 			try {
-				listener(event, id);
+				listener(event, id, progress);
 			} catch {
 				/* listener errors do not affect other listeners */
 			}
@@ -149,7 +180,7 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 	}
 
 	return {
-		async createRun({ args, runFactory }) {
+		async createRun({ args, totalCases, runFactory }) {
 			if (activeRunId) throw new RegistrationConflictError(activeRunId);
 			const runId = randomUUID();
 			const abort = new AbortController();
@@ -162,6 +193,8 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 				status: 'starting',
 				startedAt: now(),
 				args,
+				totalCases: totalCases ?? 0,
+				completedCases: 0,
 				eventLog: [],
 				nextEventId: 0,
 				listeners: new Set(),
@@ -212,7 +245,7 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 		attach(runId, listener) {
 			const state = runs.get(runId);
 			if (!state) return null;
-			for (const { id, event } of state.eventLog) listener(event, id);
+			for (const { id, event, progress } of state.eventLog) listener(event, id, progress);
 			state.listeners.add(listener);
 			return () => state.listeners.delete(listener);
 		},
@@ -222,6 +255,10 @@ export function createRunRegistry(options?: { now?: () => number }): RunRegistry
 			if (!state) return null;
 			state.listeners.add(listener);
 			return () => state.listeners.delete(listener);
+		},
+
+		getActiveRunId() {
+			return activeRunId;
 		},
 
 		getEventsAfter(runId, lastEventId) {

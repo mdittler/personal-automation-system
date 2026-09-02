@@ -398,6 +398,15 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 	});
 
 	const guardPriceLookup: PriceLookup = {
+		// An all-local install (Ollama / llama.cpp only) never bills per token,
+		// so an unresolvable tier must estimate $0 instead of the flat
+		// `defaultReservationUsd`. With zero providers registered locality is
+		// undeterminable — report `true` so the conservative reservation stands.
+		hasBillableProvider: () => {
+			const all = providerRegistry.getAll();
+			if (all.length === 0) return true;
+			return all.some((p) => !isLocalProvider(p.providerType));
+		},
 		priceFor: (tier) => {
 			const ref = modelSelector.getTierRef(tier);
 			if (!ref) {

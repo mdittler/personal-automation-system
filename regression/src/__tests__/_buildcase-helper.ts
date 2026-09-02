@@ -128,6 +128,36 @@ export function makeZeroCostTracker(): ReceiptRunnerDeps['costTracker'] {
 }
 
 /**
+ * `CostMeterSource` whose running totals advance by a fixed amount every time
+ * `charge()` is called — the shape a real `CostTracker` has when an LLM call
+ * lands.
+ *
+ * The receipt runner derives `RunResult.costUsd` from a
+ * `getMonthlyTotalCost()` delta, so a test that wants a non-zero cost must
+ * make the meter actually move: wire `charge()` into the LLM stub. A test
+ * whose meter never advances asserts $0, which is the correct answer for a
+ * dispatch that never billed anything (e.g. a local model).
+ */
+export function makeChargingCostTracker(perCall: {
+	costUsd: number;
+	input?: number;
+	output?: number;
+}): ReceiptRunnerDeps['costTracker'] & { charge: () => void } {
+	let cost = 0;
+	let input = 0;
+	let output = 0;
+	return {
+		charge: () => {
+			cost += perCall.costUsd;
+			input += perCall.input ?? 0;
+			output += perCall.output ?? 0;
+		},
+		getMonthlyTotalCost: () => cost,
+		getTokenUsageTotals: () => ({ input, output }),
+	};
+}
+
+/**
  * Returns a fully-formed `ReceiptRunnerDeps` with sane defaults. Each test
  * supplies the `llm` (the variable bit) and optionally overrides any other
  * field; the boilerplate (`logger`, `modelIds`, `cacheKey`, `caseBudgetUsd`,

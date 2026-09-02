@@ -12,6 +12,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
 import { loadSystemConfig } from '../../config/index.js';
 import {
 	RECALL_SAFE_DEFAULT,
@@ -81,7 +82,7 @@ describe('recall-pipeline integration — max_window_days config wiring', () => 
 		});
 
 		const deps = {
-			llm: { complete: vi.fn().mockResolvedValue(raw) },
+			llm: withCompleteWithMeta({ complete: vi.fn().mockResolvedValue(raw) }),
 			logger: { warn: vi.fn() },
 			today: '2026-05-07',
 			maxWindowDays: cfg.chat?.recall?.max_window_days ?? 365,
@@ -106,7 +107,7 @@ describe('recall-pipeline integration — max_window_days config wiring', () => 
 		});
 
 		const deps = {
-			llm: { complete: vi.fn().mockResolvedValue(raw) },
+			llm: withCompleteWithMeta({ complete: vi.fn().mockResolvedValue(raw) }),
 			logger: { warn: vi.fn() },
 			today: '2026-05-07',
 			maxWindowDays: cfg.chat?.recall?.max_window_days ?? 365,

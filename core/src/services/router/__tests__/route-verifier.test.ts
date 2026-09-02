@@ -3,7 +3,8 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LLMService } from '../../../types/llm.js';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
+import type { LLMFinishReason, LLMService } from '../../../types/llm.js';
 import type { TelegramService } from '../../../types/telegram.js';
 import type { MessageContext, PhotoContext } from '../../../types/telegram.js';
 import type { AppRegistry } from '../../app-registry/index.js';
@@ -15,13 +16,16 @@ import type { VerificationLogger } from '../verification-logger.js';
 // Mock factories
 // ---------------------------------------------------------------------------
 
-function createMockLLM(response: string): LLMService {
-	return {
-		complete: vi.fn().mockResolvedValue(response),
-		classify: vi.fn(),
-		extractStructured: vi.fn(),
-		getModelForTier: vi.fn(),
-	} as unknown as LLMService;
+function createMockLLM(response: string, finishReason: LLMFinishReason = 'stop'): LLMService {
+	return withCompleteWithMeta(
+		{
+			complete: vi.fn().mockResolvedValue(response),
+			classify: vi.fn(),
+			extractStructured: vi.fn(),
+			getModelForTier: vi.fn(),
+		},
+		finishReason,
+	) as unknown as LLMService;
 }
 
 function createMockTelegram(): TelegramService {
@@ -329,12 +333,12 @@ describe('RouteVerifier', () => {
 	// -------------------------------------------------------------------------
 
 	it('degrades gracefully when LLM call fails', async () => {
-		const llm: LLMService = {
+		const llm: LLMService = withCompleteWithMeta({
 			complete: vi.fn().mockRejectedValue(new Error('network error')),
 			classify: vi.fn(),
 			extractStructured: vi.fn(),
 			getModelForTier: vi.fn(),
-		} as unknown as LLMService;
+		}) as unknown as LLMService;
 		const verifier = buildVerifier(llm);
 
 		const result = await verifier.verify(createTextCtx(), classifierResult);
@@ -363,6 +367,68 @@ describe('RouteVerifier', () => {
 			verifierStatus: 'degraded',
 		});
 		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
+	});
+
+	// ─── Truncation at the provider's output cap ─────────────────────────────
+	//
+	// This call passes no maxTokens (it inherits the provider default), so there
+	// is no cap of ours to name — but a reply the provider cut is truncation, not
+	// a verifier that emitted garbage. Fail-open behaviour must be byte-identical.
+
+	it('degrades gracefully (unchanged) when the verifier reply is cut at the cap', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "no', 'length');
+		const verifier = buildVerifier(llm);
+
+		const result = await verifier.verify(createTextCtx(), classifierResult);
+
+		expect(result).toEqual({
+			action: 'route',
+			appId: 'food',
+			intent: classifierResult.intent,
+			confidence: classifierResult.confidence,
+			verifierStatus: 'degraded',
+		});
+		expect(telegram.sendWithButtons).not.toHaveBeenCalled();
+	});
+
+	it('returns fallback in strict mode when the verifier reply is cut at the cap', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "no', 'length');
+		const verifier = buildVerifier(llm);
+
+		const result = await verifier.verify(
+			createTextCtx(),
+			classifierResult,
+			undefined,
+			undefined,
+			undefined,
+			true,
+		);
+
+		expect(result).toEqual({ action: 'fallback' });
+	});
+
+	it('logs truncation rather than claiming an unparseable response', async () => {
+		const llm = createMockLLM('{"agrees": false, "suggestedAppId": "no', 'length');
+		await buildVerifier(llm).verify(createTextCtx(), classifierResult);
+
+		const warns = vi.mocked(logger.warn).mock.calls.map((c) => String(c[1]));
+		expect(warns.some((m) => /truncated/.test(m))).toBe(true);
+		expect(warns.some((m) => /unparseable/.test(m))).toBe(false);
+	});
+
+	it('keeps the unparseable diagnostic for a complete but malformed reply', async () => {
+		const llm = createMockLLM('this is not json at all!!!', 'stop');
+		await buildVerifier(llm).verify(createTextCtx(), classifierResult);
+
+		const warns = vi.mocked(logger.warn).mock.calls.map((c) => String(c[1]));
+		expect(warns.some((m) => /unparseable/.test(m))).toBe(true);
+		expect(warns.some((m) => /truncated/.test(m))).toBe(false);
+	});
+
+	it('parse-first: a complete verdict is honoured even when finishReason is "length"', async () => {
+		const llm = createMockLLM('{"agrees": true}', 'length');
+		const result = await buildVerifier(llm).verify(createTextCtx(), classifierResult);
+		expect(result).toMatchObject({ action: 'route', verifierStatus: 'agreed' });
 	});
 
 	it('degrades gracefully when LLM response is valid JSON but missing agrees field', async () => {

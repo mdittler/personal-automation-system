@@ -5,12 +5,14 @@
  * Patterns are copied here and must stay in sync with their source files:
  * - escapeHtml: gui/routes/apps.ts, gui/routes/logs.ts, gui/routes/llm-usage.ts
  * - escapeMarkdown: services/router/index.ts
- * - MODEL_ID_PATTERN: gui/routes/llm-usage.ts
+ * - isValidModelId: utils/model-id.ts (imported, not copied — shared by
+ *   gui/routes/llm-usage.ts, services/system-info, services/regression)
  * - userId/appId patterns: gui/routes/apps.ts, gui/routes/config.ts
  * - MAX_TAIL_BYTES: gui/routes/logs.ts
  */
 
 import { describe, expect, it } from 'vitest';
+import { isValidModelId } from '../../utils/model-id.js';
 
 // ---------------------------------------------------------------------------
 // Copied security patterns — keep in sync with source files
@@ -28,8 +30,6 @@ function escapeHtml(str: string): string {
 function escapeMarkdown(text: string): string {
 	return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
 }
-
-const MODEL_ID_PATTERN = /^[a-zA-Z0-9._:-]{1,100}$/;
 
 const APPID_PATTERN = /^[a-z0-9-]+$/;
 const USERID_PATTERN = /^[a-zA-Z0-9_-]+$/;
@@ -114,43 +114,49 @@ describe('escapeMarkdown', () => {
 
 describe('MODEL_ID_PATTERN', () => {
 	it('accepts claude-sonnet-4-20250514', () => {
-		expect(MODEL_ID_PATTERN.test('claude-sonnet-4-20250514')).toBe(true);
+		expect(isValidModelId('claude-sonnet-4-20250514')).toBe(true);
 	});
 
 	it('accepts gpt-4o', () => {
-		expect(MODEL_ID_PATTERN.test('gpt-4o')).toBe(true);
+		expect(isValidModelId('gpt-4o')).toBe(true);
 	});
 
 	it('accepts gemini-2.0-flash', () => {
-		expect(MODEL_ID_PATTERN.test('gemini-2.0-flash')).toBe(true);
+		expect(isValidModelId('gemini-2.0-flash')).toBe(true);
 	});
 
 	it('accepts o3-mini', () => {
-		expect(MODEL_ID_PATTERN.test('o3-mini')).toBe(true);
+		expect(isValidModelId('o3-mini')).toBe(true);
 	});
 
 	it('rejects model ID with spaces', () => {
-		expect(MODEL_ID_PATTERN.test('gpt 4o')).toBe(false);
+		expect(isValidModelId('gpt 4o')).toBe(false);
 	});
 
-	it('rejects model ID with slashes', () => {
-		expect(MODEL_ID_PATTERN.test('models/gpt-4o')).toBe(false);
+	it('accepts namespaced model ID with slashes', () => {
+		expect(isValidModelId('models/gpt-4o')).toBe(true);
+		expect(isValidModelId('hf.co/bartowski/Foo-GGUF:Q4_K_M')).toBe(true);
 	});
 
 	it('rejects model ID with angle brackets (XSS)', () => {
-		expect(MODEL_ID_PATTERN.test('<script>alert(1)</script>')).toBe(false);
+		expect(isValidModelId('<script>alert(1)</script>')).toBe(false);
 	});
 
-	it('rejects model ID over 100 chars', () => {
-		expect(MODEL_ID_PATTERN.test('a'.repeat(101))).toBe(false);
+	it('rejects model ID over 192 chars', () => {
+		expect(isValidModelId('a'.repeat(193))).toBe(false);
 	});
 
 	it('rejects empty string', () => {
-		expect(MODEL_ID_PATTERN.test('')).toBe(false);
+		expect(isValidModelId('')).toBe(false);
 	});
 
 	it('rejects model ID with backticks', () => {
-		expect(MODEL_ID_PATTERN.test('model`name')).toBe(false);
+		expect(isValidModelId('model`name')).toBe(false);
+	});
+
+	it('rejects traversal sequences even though slashes are allowed', () => {
+		expect(isValidModelId('a/../../etc/passwd')).toBe(false);
+		expect(isValidModelId('../../../etc/passwd')).toBe(false);
 	});
 });
 

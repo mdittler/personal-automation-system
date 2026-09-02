@@ -222,7 +222,7 @@ export async function gatherSystemData(
 			const tiers = systemInfo.getTierAssignments();
 			sections.push('Active model tiers:');
 			for (const t of tiers) {
-				const pricing = isAdmin ? systemInfo.getModelPricing(t.model) : null;
+				const pricing = isAdmin ? systemInfo.getModelPricing(t.model, t.provider) : null;
 				const priceStr = pricing
 					? ` (input: $${pricing.inputPerMillion}/M tokens, output: $${pricing.outputPerMillion}/M tokens)`
 					: '';
@@ -254,7 +254,7 @@ export async function gatherSystemData(
 								`Available models (${models.length} total, showing up to ${MAX_AVAILABLE_MODELS}):`,
 							);
 							for (const m of models.slice(0, MAX_AVAILABLE_MODELS)) {
-								const pricing = systemInfo.getModelPricing(m.id);
+								const pricing = systemInfo.getModelPricing(m.id, m.provider);
 								const priceStr = pricing
 									? ` ($${pricing.inputPerMillion}/$${pricing.outputPerMillion} per M tokens)`
 									: '';
@@ -310,7 +310,7 @@ export async function gatherSystemData(
 				for (const t of tiers) {
 					if (pricedModels.has(t.model)) continue;
 					pricedModels.add(t.model);
-					const pricing = systemInfo.getModelPricing(t.model);
+					const pricing = systemInfo.getModelPricing(t.model, t.provider);
 					if (pricing) {
 						sections.push(
 							`  ${t.model} pricing: $${pricing.inputPerMillion}/M input, $${pricing.outputPerMillion}/M output`,

@@ -25,6 +25,7 @@ import {
 	llmShim,
 	llmShimFromMock,
 	makeCase,
+	makeChargingCostTracker,
 	makeReceiptDeps,
 	makeTempDir,
 	removeTempDir,
@@ -60,8 +61,14 @@ describe('runReceiptCase — production parser integration', () => {
 				{ name: 'Milk', totalPrice: 3.49 },
 			],
 		});
-		const llmComplete = vi.fn().mockResolvedValue(
-			JSON.stringify({
+		// The meter advances only when the LLM actually dispatches, so
+		// `result.costUsd` proves the runner reads a real CostTracker delta and
+		// not the pre-charge projection (which used to be the recorded cost, and
+		// was structurally $0 for every model).
+		const meter = makeChargingCostTracker({ costUsd: 0.021, input: 2165, output: 976 });
+		const llmComplete = vi.fn().mockImplementation(async () => {
+			meter.charge();
+			return JSON.stringify({
 				store: 'Walmart',
 				date: '2026-04-15',
 				lineItems: [
@@ -71,13 +78,14 @@ describe('runReceiptCase — production parser integration', () => {
 				subtotal: 8.48,
 				tax: 39.34,
 				total: 47.82,
-			}),
-		);
-		const deps = makeReceiptDeps(llmShimFromMock(llmComplete));
+			});
+		});
+		const deps = makeReceiptDeps(llmShimFromMock(llmComplete), { costTracker: meter });
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath), deps);
 		expect(result.verdict).toBe(VERDICT.pass);
 		expect(result.actuals).toHaveLength(1);
-		expect(result.costUsd).toBeCloseTo(0.02, 4);
+		expect(result.costUsd).toBeCloseTo(0.021, 4);
+		expect(result.tokenCounts).toEqual({ input: 2165, output: 976 });
 		expect(llmComplete).toHaveBeenCalledTimes(1);
 		const callArgs = llmComplete.mock.calls[0];
 		if (!callArgs) throw new Error('expected llm.complete to have been called');
@@ -214,8 +222,12 @@ describe('runReceiptCase — production parser integration', () => {
 			total: 4.99,
 			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
 		});
-		const llmComplete = vi.fn().mockResolvedValue(
-			JSON.stringify({
+		// The first dispatch really bills $0.02 (metered), so the second input's
+		// $0.05 projection pushes 0.02 + 0.05 = 0.07 past the $0.05 case budget.
+		const meter = makeChargingCostTracker({ costUsd: 0.02 });
+		const llmComplete = vi.fn().mockImplementation(async () => {
+			meter.charge();
+			return JSON.stringify({
 				store: 'Walmart',
 				date: '2026-04-15',
 				lineItems: [
@@ -225,11 +237,12 @@ describe('runReceiptCase — production parser integration', () => {
 				subtotal: 104.99,
 				tax: 0,
 				total: 104.99,
-			}),
-		);
-		// estimate: first call $0.02 (fits in $0.05 budget), second call $0.05 (would push 0.02+0.05=0.07 > 0.05)
+			});
+		});
+		// estimate: first call $0.02 (fits in $0.05 budget), second call $0.05
 		let callIdx = 0;
 		const deps = makeReceiptDeps(llmShimFromMock(llmComplete), {
+			costTracker: meter,
 			estimateUsd: () => {
 				callIdx += 1;
 				return callIdx === 1 ? 0.02 : 0.05;
@@ -598,6 +611,110 @@ describe('runReceiptCase — production parser integration', () => {
 });
 
 // =====================================================================
+// Sidecar date vs. the parser's acceptance window.
+//
+// `parseReceiptFromPhoto` refuses receipt dates that are in the future or
+// older than MAX_RECEIPT_AGE_DAYS, overwriting `date` with today and moving
+// the model's extraction to `rawExtractedDate`. Photo fixtures carry an
+// immutable real-world date, so a fixture inevitably ages out of that window
+// — the runner must keep asserting the ground-truth date without the case
+// turning red purely because the wall clock advanced.
+//
+// The clock is frozen in every test below so BOTH branches stay covered
+// forever; before this suite existed, which branch ran depended on how long
+// ago the fixture dates in this file happened to be authored.
+// =====================================================================
+
+const WINDOW_SIDECAR_DATE = '2026-05-10';
+// 10 days after the receipt date — comfortably inside MAX_RECEIPT_AGE_DAYS.
+const IN_WINDOW_NOW = '2026-05-20T12:00:00Z';
+// ~7 months after the receipt date — well past MAX_RECEIPT_AGE_DAYS.
+const AGED_OUT_NOW = '2026-12-01T12:00:00Z';
+// `makeReceiptDeps` uses America/New_York; both instants above are midday UTC,
+// so the local calendar date matches the UTC one.
+const AGED_OUT_TODAY = '2026-12-01';
+
+describe('runReceiptCase — sidecar date acceptance window', () => {
+	// Only Date is faked: the runner awaits real filesystem I/O, and replacing
+	// the timer queue is neither needed nor risk-free here.
+	function freezeClock(iso: string): void {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(new Date(iso));
+	}
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	/**
+	 * Stages a photo + a sidecar fixed at `WINDOW_SIDECAR_DATE`, and stubs the
+	 * LLM to extract `extractedDate`. Only the extracted date and the frozen
+	 * clock vary across the four cases below.
+	 */
+	async function stageDateCase(extractedDate: string, idSuffix: string) {
+		const photoPath = await stagePhoto('dated');
+		const sidecarPath = await stageSidecar(`dated-${idSuffix}`, {
+			store: 'Walmart',
+			date: WINDOW_SIDECAR_DATE,
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: extractedDate,
+					lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+					subtotal: 4.99,
+					tax: 0,
+					total: 4.99,
+				}),
+			),
+		);
+		return { case_: makeCase(photoPath, sidecarPath, idSuffix), deps };
+	}
+
+	it('in-window sidecar date is asserted verbatim on the parsed date', async () => {
+		freezeClock(IN_WINDOW_NOW);
+		const { case_, deps } = await stageDateCase(WINDOW_SIDECAR_DATE, 'in-window');
+		const result = await runReceiptCase(case_, deps);
+		expect(result.verdict).toBe(VERDICT.pass);
+		const parsed = result.actuals[0] as { date: string; rawExtractedDate?: string };
+		// Parser accepted the date, so no fallback and no audit field.
+		expect(parsed.date).toBe(WINDOW_SIDECAR_DATE);
+		expect(parsed.rawExtractedDate).toBeUndefined();
+	});
+
+	it('in-window sidecar date fails when the parser reads a different in-window date', async () => {
+		freezeClock(IN_WINDOW_NOW);
+		const { case_, deps } = await stageDateCase('2026-05-15', 'in-window-wrong');
+		const result = await runReceiptCase(case_, deps);
+		expect(result.verdict).toBe(VERDICT.fail);
+		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/Date date outside/);
+	});
+
+	it('aged-out sidecar date expects the today-fallback and pins rawExtractedDate', async () => {
+		freezeClock(AGED_OUT_NOW);
+		const { case_, deps } = await stageDateCase(WINDOW_SIDECAR_DATE, 'aged-out');
+		const result = await runReceiptCase(case_, deps);
+		expect(result.verdict).toBe(VERDICT.pass);
+		const parsed = result.actuals[0] as { date: string; rawExtractedDate?: string };
+		expect(parsed.date).toBe(AGED_OUT_TODAY);
+		expect(parsed.rawExtractedDate).toBe(WINDOW_SIDECAR_DATE);
+	});
+
+	it('aged-out sidecar date still fails when the parser reads the wrong date', async () => {
+		freezeClock(AGED_OUT_NOW);
+		// Also aged out, so the parser takes the same fallback path — only the
+		// preserved `rawExtractedDate` distinguishes right from wrong.
+		const { case_, deps } = await stageDateCase('2026-05-11', 'aged-out-wrong');
+		const result = await runReceiptCase(case_, deps);
+		expect(result.verdict).toBe(VERDICT.fail);
+		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/rawExtractedDate/);
+	});
+});
+
+// =====================================================================
 // PR2 Batch 3 — transcription oracle wiring tests.
 //
 // Each test wires the new `transcriptionFixture` payload field plus a YAML
@@ -937,23 +1054,26 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 			total: 4.99,
 			lineItems: [{ name: 'Eggs', totalPrice: 4.99, confidence: 'high' }],
 		});
-		const llmComplete = vi.fn().mockResolvedValue(
-			JSON.stringify({
+		const meter = makeChargingCostTracker({ costUsd: 0.02 });
+		const llmComplete = vi.fn().mockImplementation(async () => {
+			meter.charge();
+			return JSON.stringify({
 				store: 'Walmart',
 				date: '2026-04-15',
 				lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
 				subtotal: 4.99,
 				tax: 0,
 				total: 4.99,
-			}),
-		);
-		const deps = makeReceiptDeps(llmShimFromMock(llmComplete));
+			});
+		});
+		const deps = makeReceiptDeps(llmShimFromMock(llmComplete), { costTracker: meter });
 		const result = await runReceiptCase(
 			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'budget-once'),
 			deps,
 		);
 		expect(result.verdict).toBe(VERDICT.pass);
-		// One parser call → one charge of the estimated $0.02 (see makeReceiptDeps).
+		// Two oracles ran, but only ONE parser dispatch happened → exactly one
+		// metered charge (the delta is read once per input, not once per oracle).
 		expect(llmComplete).toHaveBeenCalledTimes(1);
 		expect(result.costUsd).toBeCloseTo(0.02, 4);
 	});

@@ -9,7 +9,9 @@ import { join } from 'node:path';
  * path hardening, and error handling.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
 import type { AppLogger } from '../../../types/app-module.js';
+import type { LLMFinishReason } from '../../../types/llm.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { ManifestDataScope } from '../../../types/manifest.js';
 import { requestContext } from '../../context/request-context.js';
@@ -57,13 +59,16 @@ function makeMockLogger(): AppLogger {
 	return logger;
 }
 
-function makeMockLlm(response: string): LLMService {
-	return {
-		complete: vi.fn().mockResolvedValue(response),
-		classify: vi.fn(),
-		extractStructured: vi.fn(),
-		getModelForTier: vi.fn().mockReturnValue('mock-model'),
-	} as unknown as LLMService;
+function makeMockLlm(response: string, finishReason: LLMFinishReason = 'stop'): LLMService {
+	return withCompleteWithMeta(
+		{
+			complete: vi.fn().mockResolvedValue(response),
+			classify: vi.fn(),
+			extractStructured: vi.fn(),
+			getModelForTier: vi.fn().mockReturnValue('mock-model'),
+		},
+		finishReason,
+	) as unknown as LLMService;
 }
 
 interface MockSpaceService {
@@ -252,6 +257,77 @@ describe('DataQueryService — happy path', () => {
 		// User question appears in the LLM user message
 		const callArgs = completeSpy.mock.calls[0];
 		expect(callArgs[0]).toContain('taco recipes');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Truncation at the file-selection output cap
+//
+// `parseAndValidateIds` has a prose fallback that scrapes bare integers, so a
+// truncated `[0, 3, ` still yields `[0, 3]` — a plausible-looking but silently
+// SHORT file list. The ids are deliberately unchanged; the warn is the signal.
+// ---------------------------------------------------------------------------
+
+describe('DataQueryService — truncated file-selection reply', () => {
+	let dataDir: string;
+	let logger: AppLogger;
+	let fileIndex: FileIndexService;
+
+	beforeEach(async () => {
+		dataDir = makeTempDir();
+		await mkdir(dataDir, { recursive: true });
+		logger = makeMockLogger();
+		await writeDataFile(dataDir, 'users/matt/food/recipes/tacos.md', RECIPE_FILE);
+		await writeDataFile(dataDir, 'users/matt/food/recipes/pasta.md', RECIPE_FILE);
+		fileIndex = new FileIndexService(dataDir, makeAppScopes(['recipes/'], []));
+		await fileIndex.rebuild();
+	});
+
+	afterEach(async () => {
+		await rm(dataDir, { recursive: true, force: true });
+	});
+
+	function build(llm: LLMService) {
+		return new DataQueryServiceImpl({
+			fileIndex,
+			spaceService: makeSpaceService([]),
+			llm,
+			dataDir,
+			logger,
+		});
+	}
+
+	it('returns the same ids the prose fallback would (behaviour unchanged)', async () => {
+		const truncated = await build(makeMockLlm('[0, 1, ', 'length')).query('recipes?', 'matt');
+		const complete = await build(makeMockLlm('[0, 1, ', 'stop')).query('recipes?', 'matt');
+		expect(truncated.files.map((f) => f.path)).toEqual(complete.files.map((f) => f.path));
+		expect(truncated.files.length).toBeGreaterThan(0);
+	});
+
+	it('warns that the list may be short rather than staying silent', async () => {
+		await build(makeMockLlm('[0, 1, ', 'length')).query('recipes?', 'matt');
+		const warns = vi.mocked(logger.warn).mock.calls.map((c) => String(c[0]));
+		expect(warns.some((m) => /truncated/.test(m))).toBe(true);
+		expect(warns.some((m) => /50-token/.test(m))).toBe(true);
+	});
+
+	it('does not warn when the reply completed normally', async () => {
+		await build(makeMockLlm('[0, 1]', 'stop')).query('recipes?', 'matt');
+		const warns = vi.mocked(logger.warn).mock.calls.map((c) => String(c[0]));
+		expect(warns.some((m) => /truncated/.test(m))).toBe(false);
+	});
+
+	it('makes exactly one LLM call — no retry is added', async () => {
+		const llm = makeMockLlm('[0, 1, ', 'length');
+		await build(llm).query('recipes?', 'matt');
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledOnce();
+	});
+
+	it('passes maxTokens 50 on the completeWithMeta call', async () => {
+		const llm = makeMockLlm('[0]');
+		await build(llm).query('recipes?', 'matt');
+		const options = vi.mocked(llm.complete).mock.calls[0]?.[1];
+		expect(options).toMatchObject({ maxTokens: 50 });
 	});
 });
 
@@ -498,12 +574,12 @@ describe('DataQueryService — error handling', () => {
 		const fileIndex = new FileIndexService(dataDir, makeAppScopes(['recipes/'], []));
 		await fileIndex.rebuild();
 
-		const llm = {
+		const llm = withCompleteWithMeta({
 			complete: vi.fn().mockRejectedValue(new Error('LLM timeout')),
 			classify: vi.fn(),
 			extractStructured: vi.fn(),
 			getModelForTier: vi.fn(),
-		} as unknown as LLMService;
+		}) as unknown as LLMService;
 
 		const svc = new DataQueryServiceImpl({
 			fileIndex,
