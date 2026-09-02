@@ -3806,6 +3806,116 @@ Before the fixes the same suite was **0 pass / 26 error**. `muse-glimmer:30b-mlx
 
 ---
 
+## Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02)
+
+**Goal:** Close the defect class the 2026-09-01 phase opened rather than keep fixing it one site at a time, then answer the two questions that investigation raised but did not settle: *is the Ollama thinking fix actually systemic?* and *why does an all-local regression run quote a dollar figure when local models are free?*
+
+**Outcome:** four commits, `ddb0c3c` → this one. One shared classification helper with ten sites migrated onto it; the empty-output guard extended to the other local-serving provider path; three cost estimators taught that a local model costs $0; and the two model-id validators aligned so a model you can benchmark is a model you can assign.
+
+---
+
+### The defect class, closed
+
+The 2026-09-01 phase named it: **a fixed `maxTokens` budget feeding a structured-output parse, where truncation is reported as malformed output.** It found four instances and fixed them individually (`9f9f2fb` Ollama empty output, `e90e8f0` rubric judge, `9b15027` food shadow classifier, plus the judge's raised budget), and deferred two more to `docs/open-items.md`. Fixing the fifth the same way would have been the fourth time the same reasoning was re-derived.
+
+`ddb0c3c` extracts the reasoning once. `classifyStructuredOutput` lives in `core/src/utils/json-strip-fences.ts` — the file whose header already claimed to be the canonical home for local-model quirks — takes `{text, finishReason}` plus the cap, and returns `ok | truncated | empty | unparseable`. It **classifies only**; each call site keeps its own policy, because their result types and retry semantics all genuinely differ. `formatRawPreview` standardises the diagnostic on `9b15027`'s `JSON.stringify(raw.slice(0, 200))` form, so a multi-line reply cannot break a log line, a `MeteredError` message, or a regression verdict detail.
+
+**The design point worth remembering: the parse/length ordering is a required caller option with no default.** The two originally-fixed sites deliberately disagree, and both are right:
+
+| Site | Order | Why |
+|---|---|---|
+| Rubric judge (`regression/src/oracles/rubric.ts`) | `check-length-first` | A cap-truncated reply is untrusted even when its prefix parses — the cut lands inside `explanation`, so the grade is real but the reasoning behind it is amputated. |
+| Food shadow classifier (`apps/food/src/routing/shadow-classifier.ts`) | `parse-first` | The schema is closed by construction; a reply that satisfies it is complete, and refusing it would throw away a usable classification. |
+
+A helper that quietly picked one would have regressed the other. `message-segmenter` is the sharpest illustration of why `check-length-first` exists at all: its payload is an **array**, so a reply cut between elements still parses into a *shorter valid* `segments` list — a silent, confident drop of the user's last request. `empty` is decided before either branch, so the retry-on-empty policies in `recall-classifier`, the shadow classifier and `weakness-summarizer` keep firing untouched.
+
+Ten sites migrated, each widening its narrow LLM interface to require `completeWithMeta` and each pinning its existing policy in tests: `recall-classifier` (parse-first, 150), `message-segmenter` (check-length-first, 400), `title-generator` (60), `session-summarizer` (400 against a prompt asking for ~1200 characters), `session-control-classifier` (80 — `reason: 'truncated'` replaces the misleading `'parse error'`), `data-query` file selection (50 — the returned ids are deliberately unchanged, because the prose fallback turns `[0, 3, ` into a plausible but *short* file list), `route-verifier` (no cap of ours; fail-open behaviour byte-identical, only the log line is honest now), `weakness-summarizer` (1500; its persisted `errorMessage` is GUI-visible), plus `rubric.ts` and `shadow-classifier.ts` moving onto the helper with no behaviour change beyond the standardised preview.
+
+**A test-infrastructure hazard surfaced on the way.** Several stubs hand a `complete`-only object over with `as unknown as`, so a missing `completeWithMeta` fails at *runtime*, not compile time — and in `classifySessionControl` the resulting `TypeError` was swallowed by the surrounding `try/catch` and returned the safe default, which is how `regression/src/__tests__/dispatch.test.ts` silently asserted the wrong intent and still went green. `core/src/testing/llm-meta-stub.ts#withCompleteWithMeta` now delegates to the same `complete` mock so existing call-count and prompt assertions stay meaningful, and `createMockCoreServices` delegates too. The root cause — **no tsconfig in this repo typechecks test files**, so a throwaway typecheck during this commit surfaced ~1628 pre-existing test type errors — is recorded in `docs/open-items.md` and needs an owner.
+
+---
+
+### Was the thinking fix systemic? Partly.
+
+The `think` flag itself is **fully systemic**. `9f9f2fb` sends `think: options?.thinking === true` unconditionally and consults no model table, so a brand-new thinking-capable model pulled tomorrow is protected on its first call, forever, with no per-model work. Nothing to extend.
+
+The *empty-output guard* was **not** systemic across local serving. `OpenAICompatibleProvider` — and `LlamaCppProvider`, which inherits it — had neither the thinking suppression nor the guard, and ignored `reasoning_content`, the non-standard field LM Studio, vLLM, SGLang and llama-server all use to carry a reasoning model's chain of thought. `content ?? ''` turned a budget-exhausted reasoning model into a silent empty string, indistinguishable from a model with nothing to say.
+
+The sharp edge: `docs/open-items.md` item **L4 recommends moving the fast tier onto the llama.cpp provider**. Doing that before `1fcc3e1` would have silently reintroduced the exact bug the 2026-09-01 phase had just spent a day diagnosing.
+
+`1fcc3e1` closes it:
+
+- `message.reasoning_content` is read through a narrow cast, the way `OllamaProvider` reads `done_reason`. It is used **only as evidence in the diagnostic** and never substituted for the answer — reasoning text is prose, and returning it would feed narration to every `responseFormat: 'json'` caller, a quieter failure than the `''` it replaced.
+- Empty text at `finishReason === 'length'` throws `LLMEmptyOutputError` naming provider, model, the cap actually sent on the wire, and the reasoning-block length. `isEmptyOutputError()` already classifies it non-retryable, so no new plumbing.
+- Empty text at `'stop'` still returns `''` unchanged — callers' retry-on-empty logic depends on it — and a reasoning block on that path logs a warning so it is not silent to the operator.
+- The 1024 provider default cap is hoisted so the diagnostic names the real value.
+- `LlamaCppProvider` needs no changes and is covered by tests that fail if anyone re-implements `doComplete` on the subclass.
+
+Known gap, recorded in `docs/open-items.md`: the read covers only `reasoning_content` on the non-streaming path. Some servers use `message.reasoning`, or nest it under `delta` when streaming. Unverified against a live server.
+
+---
+
+### Local models are free — everywhere the operator can see a number
+
+The requirement is the operator's, not the code's: **local models run on the operator's own hardware and are always free, so a new Ollama model must never need a pricing entry.** Recorded spend already honoured it — `CostTracker.record` passes `providerType` and `estimateCallCost` short-circuits a local provider to $0.
+
+Three *estimators* did not, because they dropped `providerType` on the way in. **Model id alone is never enough:** a local model such as `qwen3.8:27b-mlx` has no `MODEL_PRICING` entry, so it falls through to `DEFAULT_REMOTE_PRICING` at $3/$15 per Mtok and gets quoted at frontier rates. `f4a8767` fixes all three plus two narrower gaps:
+
+**(a) Regression pre-flight estimator.** `build-deps` priced every call as `modelIds.fast` with no provider — so it was wrong twice over: free models priced as paid, *and* every bucket priced against the fast tier regardless of which tier actually ran it. `resolveTierRefs` now returns the full `ModelRef` per tier, `buildTierPricingRefs` pairs each with its `providerType` from the same `ProviderRegistry` the LLM service dispatches through, and `makeTierAwareEstimator` prices a call on the tier it will really run on. `BUCKET_ESTIMATE` gives each bucket its own token count *and* tier (routing/recall → fast, receipt/chatbot → standard). `TierModelSnapshot` and its `cache-key.ts` serialization are deliberately untouched, so **no cached result is invalidated** — provider info rides alongside the snapshot, not inside it.
+
+**(b) Receipt runner projected cost.** `estimateUsd({tokenIn: 0, tokenOut: 0})` is structurally `$0` for every model. That zero was recorded as the case's cost *and* added to accumulated run spend, so **the run-budget ceiling could not stop a receipt sweep** — the one bucket sending multi-thousand-token vision payloads was the one bucket reporting nothing. The runner now meters a real `getMonthlyTotalCost()` delta like every other runner, and gates the pre-charge check on a realistic `RECEIPT_ESTIMATE_TOKENS` projection.
+
+**(c) GUI confirm dialog.** `estimateRunCostUsd` took only `{caseId, bucket}` — flat per-bucket constants — so an all-Ollama matrix displayed the same figure as an all-Opus one: ~$0.19 for a 37-case routing run that costs nothing. It now takes `localTiers`, charges $0 for a bucket whose tier is local, and returns `allLocal` so the Run-tab banner and confirm dialog say "all-local run" instead of a bare $0.00 that reads like a bug. Remote constants are unchanged — numeric recalibration stays a separate open item.
+
+**(d) Two narrower gaps.** `estimateGuardCost` no longer invents a `defaultReservationUsd` charge for an unresolvable tier when every configured provider is local (and says why when it does fall back); `SystemInfoService.getModelPricing` takes an optional provider id and returns `null` for a local one, so a GGUF served under the id `gpt-4o` no longer shows remote admin pricing.
+
+---
+
+### Two model-id patterns, two answers (this commit)
+
+`MODEL_ID_PATTERN = /^[a-zA-Z0-9._:-]{1,100}$/` at `core/src/gui/routes/llm-usage.ts` and `core/src/services/system-info/index.ts` excluded `/`. The regression path's `MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$/` (`core/src/services/regression/model-spec.ts`) allowed it and explicitly documented namespaced ids. So an Ollama model pulled from HuggingFace (`hf.co/bartowski/Foo-GGUF:Q4_K_M`) could be regression-tested but could **not** be assigned to a tier via `POST /gui/llm/tiers` or the chatbot's `<switch-model>` path.
+
+Aligned on the permissive form, in one place: `core/src/utils/model-id.ts` exports `MODEL_ID_PATTERN` / `MAX_MODEL_ID_CHARS` / `isValidModelId`, and all three surfaces import it (`model-spec.ts` keeps its own richer error messages and aliases the shared pattern as `MODEL_RE`).
+
+These are input validators on operator-supplied strings — and, via `<switch-model>`, on LLM-supplied ones — so the widening was audited rather than assumed:
+
+- Anchors and a length bound are kept (192 chars, up from 100).
+- The first character must now be alphanumeric. That is a **tightening**: the old GUI pattern permitted a leading `-`, `.`, `_` or `:`.
+- Because `/` is meaningful only as a namespace separator, the shapes it enables are rejected separately — `..`, `//`, and a trailing `/` — the same three guards `model-spec.ts` already carried outside its regex.
+
+Downstream-consumer audit, the part that decided whether widening was safe at all:
+
+| Consumer | Handling of `/` |
+|---|---|
+| Model journal (`data/model-journal/<slug>.md`) — the only filesystem use | `slugifyModelId()` maps `[^a-z0-9-]` → `-`, then `MODEL_SLUG_PATTERN` re-validates. `/` cannot reach a path segment. |
+| `ModelSelector.save()` | Writes the id as a YAML **value** in `data/system/model-selection.yaml`, not as a key path. |
+| GUI available-models table | `escapeHtml()` on the id, and the `hx-vals` JSON is itself escaped. `/` is not HTML-special. |
+| `CostTracker` usage log | The markdown row strips `\|`, `\r` and `\n` before writing. |
+| Regression CLI | `spawnRegressionCli` uses `nodeSpawn(process.execPath, [...args])` — argv array, no shell. |
+| Providers | The id is a request-body field handed to the vendor SDK. |
+
+No consumer requires `/` to be excluded, so nothing was widened past what it can hold.
+
+---
+
+### Verification
+
+**Automated (this worktree, 2026-09-02):**
+
+| Suite | Result |
+|---|---|
+| root `pnpm test` | 576 test files, **12678 passed**, 3 skipped, 1 todo, **zero failures** |
+| `regression/` `pnpm test` | 40 test files, **676 passed**, zero failures |
+| `pnpm lint` | **zero errors** (warnings unchanged from the baseline) |
+
+**Live `pnpm test:regression` runs:** _placeholder — the operator was running these live while this section was written and the figures had not arrived. Fill in the run table here (bucket, model matrix, pass/fail/error counts, reported cost, wall time) before treating this section as complete. The specific claim to check is the cost line: an all-local matrix must report **$0.00** at the pre-flight estimate, in the GUI confirm dialog, and in the final report — the three places that disagreed before `f4a8767`._
+
+**URS:** 6 new entries — REQ-LLM-041 (one shared truncation classifier, ordering an explicit caller choice), REQ-LLM-042 (OpenAI-compatible/llama.cpp empty-output guard + `reasoning_content` never substituted), REQ-LLM-043 (local-provider models estimate $0 in every estimator), REQ-REG-021 (estimates price the tier that actually serves the bucket), REQ-REG-022 (receipt bucket meters real cost so the run-budget ceiling binds), REQ-SEC-013 (model-id validation accepts namespaced ids consistently across GUI, system-info and the regression path) — plus **Fixes** annotations on REQ-LLM-039 (the systemic-coverage assessment), REQ-LLM-040 (superseded by the shared helper) and REQ-SEC-010 (the widened pattern and its audit).
+
+**Doc footprint:** `docs/urs.md` (6 entries + 3 Fixes annotations + 7 traceability rows + Totals recount), this section, one CLAUDE.md Implementation Status bullet, and `docs/open-items.md` — three items closed (the two 2026-09-01 truncation-misdiagnosis call sites, and the "Regression GUI v2 — model-aware estimator" accepted risk) and six added (the `apps/food` `parseJsonResponse` cluster, the pseudo-tool-XML truncation family in `handle-message`/`handle-ask`, test files excluded from every tsconfig, `max_tokens` vs `max_completion_tokens` for OpenAI reasoning models, the narrow `reasoning_content` field coverage, and the missing `num_ctx`).
+
+---
+
 # Planned Phases — Pre-Open-Source Audit Remediation (2026-07-06)
 
 > **Status: PLANNED, not yet implemented.** These are forward-looking phase definitions, not completed-work records like the sections above. They are derived from the nine-pass audit in `docs/superpowers/plans/2026-06-11-ux-review-findings-and-fix-plan.md`; every finding cited below was confirmed against code (passes 4–9 during the 2026-07-06 audit sessions; the anchor findings of passes 1–3 re-verified 2026-07-06). Per-item actionables live in `docs/open-items.md`.

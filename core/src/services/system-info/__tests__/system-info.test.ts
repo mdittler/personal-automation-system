@@ -350,11 +350,31 @@ describe('SystemInfoServiceImpl', () => {
 			expect(result.error).toContain('Invalid model ID');
 		});
 
+		it('accepts a namespaced model ID', async () => {
+			const deps = createMockDeps();
+			const svc = new SystemInfoServiceImpl(deps);
+			const result = await svc.setTierModel('fast', 'anthropic', 'hf.co/bartowski/Foo-GGUF:Q4_K_M');
+			expect(result).toEqual({ success: true });
+			expect(deps.modelSelector.setFastRef).toHaveBeenCalledWith({
+				provider: 'anthropic',
+				model: 'hf.co/bartowski/Foo-GGUF:Q4_K_M',
+			});
+		});
+
 		it('rejects model ID with path traversal', async () => {
 			const svc = new SystemInfoServiceImpl(createMockDeps());
 			const result = await svc.setTierModel('fast', 'anthropic', '../../../etc/passwd');
 			expect(result.success).toBe(false);
 			expect(result.error).toContain('Invalid model ID');
+		});
+
+		it('rejects a namespaced model ID containing traversal', async () => {
+			const deps = createMockDeps();
+			const svc = new SystemInfoServiceImpl(deps);
+			const result = await svc.setTierModel('fast', 'anthropic', 'hf.co/../../etc/passwd');
+			expect(result.success).toBe(false);
+			expect(result.error).toContain('Invalid model ID');
+			expect(deps.modelSelector.setFastRef).not.toHaveBeenCalled();
 		});
 
 		it('handles selector save failure', async () => {
