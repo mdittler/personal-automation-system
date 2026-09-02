@@ -406,7 +406,7 @@ describe('FoodShadowClassifier.classify — LLM error handling', () => {
 			labels: FOOD_SHADOW_LABELS,
 		});
 		const r = await c.classify('test message', 1.0);
-		expect(r).toEqual({ kind: 'llm-error', category: expectedCategory });
+		expect(r).toMatchObject({ kind: 'llm-error', category: expectedCategory });
 		expect(vi.mocked(logger.warn)).toHaveBeenCalledOnce();
 		expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toContain(
 			'FoodShadowClassifier: LLM call failed',
@@ -530,7 +530,46 @@ describe('FoodShadowClassifier.classify — LLM error handling', () => {
 			labels: FOOD_SHADOW_LABELS,
 		});
 		const r = await c.classify('test', 1.0);
-		expect(r).toEqual({ kind: 'llm-error', category: 'rate-limit' });
+		expect(r).toMatchObject({ kind: 'llm-error', category: 'rate-limit' });
+	});
+});
+
+describe('FoodShadowClassifier.classify — llm-error message passthrough', () => {
+	/** The diagnostic OllamaProvider throws when a model burns its whole budget. */
+	const EMPTY_OUTPUT_MESSAGE =
+		"Model 'qwen3.8:27b-mlx' (provider 'ollama') returned empty output after exhausting its num_predict budget of 80 token(s).";
+
+	function emptyOutputError(): Error {
+		return Object.assign(new Error(EMPTY_OUTPUT_MESSAGE), { name: 'LLMEmptyOutputError' });
+	}
+
+	it('carries the underlying error message so callers can report something useful', async () => {
+		const c = makeClassifier({ llm: asyncThrowingLLM(emptyOutputError()) });
+		const r = await c.classify('add milk', 1.0);
+		expect(r).toEqual({
+			kind: 'llm-error',
+			category: 'empty-output',
+			message: EMPTY_OUTPUT_MESSAGE,
+		});
+	});
+
+	it('does NOT trigger the empty-output repair retry — a throw bypasses parseShadowResponse', async () => {
+		const llm = asyncThrowingLLM(emptyOutputError());
+		const c = makeClassifier({ llm });
+		await c.classify('add milk', 1.0);
+		// The repair retry only fires for a *resolved* empty string; a rejection
+		// short-circuits straight to handleLLMError.
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+	});
+
+	it('stringifies non-Error throws rather than dropping them', async () => {
+		const c = makeClassifier({ llm: asyncThrowingLLM('socket hang up') });
+		const r = await c.classify('add milk', 1.0);
+		expect(r).toEqual({
+			kind: 'llm-error',
+			category: 'unknown',
+			message: 'socket hang up',
+		});
 	});
 });
 

@@ -11,7 +11,14 @@ export type ShadowResult =
 	| { kind: 'skipped-number-select' }
 	| { kind: 'legacy-skipped' }
 	| { kind: 'parse-failed'; raw: string }
-	| { kind: 'llm-error'; category: string };
+	/**
+	 * `message` carries the underlying error text (e.g. the empty-output
+	 * diagnostic naming the model and its token budget). Optional so existing
+	 * producers stay valid; consumers that surface failures to an operator —
+	 * the regression harness — should include it, because `category` alone
+	 * degrades to a bare "unknown".
+	 */
+	| { kind: 'llm-error'; category: string; message?: string };
 
 export type ShadowVerdict =
 	| 'agree'

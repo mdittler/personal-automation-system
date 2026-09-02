@@ -323,4 +323,44 @@ describe('BaseProvider', () => {
 			expect(calls).toBe(1);
 		});
 	});
+
+	describe('empty-output errors are not retried', () => {
+		/** Mirrors LLMEmptyOutputError's shape without importing the provider layer. */
+		function emptyOutput(): Error {
+			return Object.assign(
+				new Error(
+					"Model 'qwen3.8:27b-mlx' returned empty output after exhausting its num_predict budget of 80 token(s).",
+				),
+				{ name: 'LLMEmptyOutputError' },
+			);
+		}
+
+		it('is attempted exactly once — exhausting the same budget again cannot help', async () => {
+			const provider = createTestProvider();
+			let calls = 0;
+
+			vi.spyOn(provider as never, 'doComplete' as never).mockImplementation(async () => {
+				calls++;
+				throw emptyOutput();
+			});
+
+			await expect(provider.completeWithUsage('hello')).rejects.toThrow(/empty output/i);
+			expect(calls).toBe(1);
+		});
+
+		it('is not retried even when a temperature was requested (no strip-and-retry pass)', async () => {
+			const provider = createTestProvider();
+			let calls = 0;
+
+			vi.spyOn(provider as never, 'doComplete' as never).mockImplementation(async () => {
+				calls++;
+				throw emptyOutput();
+			});
+
+			await expect(provider.completeWithUsage('hello', { temperature: 0 })).rejects.toThrow(
+				/empty output/i,
+			);
+			expect(calls).toBe(1);
+		});
+	});
 });

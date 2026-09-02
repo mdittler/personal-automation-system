@@ -143,7 +143,11 @@ export class FoodShadowClassifier {
 		} catch {
 			/* classifyLLMError is expected never to throw; defense-in-depth */
 		}
+		const message = err instanceof Error ? err.message : String(err);
 		this.opts.logger.warn('FoodShadowClassifier: LLM call failed — %s', String(err));
-		return { kind: 'llm-error', category };
+		// Carry the message through: `category` alone is 'unknown' for most
+		// provider failures, which tells an operator reading a regression report
+		// nothing about what actually broke.
+		return { kind: 'llm-error', category, message };
 	}
 }

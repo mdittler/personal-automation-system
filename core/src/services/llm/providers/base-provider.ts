@@ -14,7 +14,7 @@ import {
 	type ProviderType,
 	VALID_IMAGE_MIME_TYPES,
 } from '../../../types/llm.js';
-import { isParameterRejectionError } from '../../../utils/llm-errors.js';
+import { isEmptyOutputError, isParameterRejectionError } from '../../../utils/llm-errors.js';
 import { getCurrentHouseholdId, getCurrentUserId } from '../../context/request-context.js';
 import type { CostTracker } from '../cost-tracker.js';
 import { withRetry } from '../retry.js';
@@ -128,9 +128,11 @@ export abstract class BaseProvider implements LLMProviderClient {
 		// A parameter-rejection 400 is deterministic: retrying the identical
 		// request just burns the backoff schedule, so fail out of withRetry
 		// immediately and let the strip-and-retry below do the useful work.
+		// An empty-output failure is deterministic for the same reason — the
+		// identical request exhausts the identical token budget every time.
 		const retryOptions = {
 			...this.getRetryOptions(),
-			shouldRetry: (err: Error) => !isParameterRejectionError(err),
+			shouldRetry: (err: Error) => !isParameterRejectionError(err) && !isEmptyOutputError(err),
 		};
 
 		try {

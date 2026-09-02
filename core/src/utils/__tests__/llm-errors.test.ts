@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyLLMError, isParameterRejectionError } from '../llm-errors.js';
+import { classifyLLMError, isEmptyOutputError, isParameterRejectionError } from '../llm-errors.js';
 
 describe('classifyLLMError', () => {
 	describe('standard', () => {
@@ -173,6 +173,45 @@ describe('classifyLLMError', () => {
 			);
 			expect(isParameterRejectionError(new Error('boom'))).toBe(false);
 			expect(isParameterRejectionError(null)).toBe(false);
+		});
+	});
+
+	describe('empty output', () => {
+		/** Shape produced by LLMEmptyOutputError (core/src/services/llm/errors.ts). */
+		function emptyOutput(): Error {
+			return Object.assign(
+				new Error(
+					"Model 'qwen3.8:27b-mlx' (provider 'ollama') returned empty output after exhausting its num_predict budget of 80 token(s).",
+				),
+				{ name: 'LLMEmptyOutputError' },
+			);
+		}
+
+		it('classifies LLMEmptyOutputError as empty-output', () => {
+			expect(classifyLLMError(emptyOutput()).category).toBe('empty-output');
+		});
+
+		it('is NOT retryable — the same request exhausts the same budget every time', () => {
+			expect(classifyLLMError(emptyOutput()).isRetryable).toBe(false);
+		});
+
+		it('states the real reason rather than telling the user to try again later', () => {
+			const { userMessage } = classifyLLMError(emptyOutput());
+			expect(userMessage).toContain('Retrying will not help');
+			expect(userMessage).not.toContain('try again later');
+		});
+
+		it('isEmptyOutputError is true for that error and false otherwise', () => {
+			expect(isEmptyOutputError(emptyOutput())).toBe(true);
+			expect(isEmptyOutputError(new Error('returned empty output'))).toBe(false);
+			expect(isEmptyOutputError({ status: 400, message: 'temperature is deprecated' })).toBe(false);
+			expect(isEmptyOutputError(null)).toBe(false);
+		});
+
+		it('does not classify by message text — only the error name counts', () => {
+			// A provider echoing similar wording in a 500 must stay 'overloaded'.
+			const lookalike = { status: 500, message: 'returned empty output after exhausting budget' };
+			expect(classifyLLMError(lookalike).category).toBe('overloaded');
 		});
 	});
 

@@ -102,6 +102,25 @@ export interface LLMCompletionOptions {
 	 * and other local models avoid empty-string responses for ambiguous prompts.
 	 */
 	responseFormat?: 'json';
+
+	/**
+	 * Enable a thinking / reasoning phase on providers that support one.
+	 *
+	 * **Default OFF, and deliberately so.** PAS calls are single-shot with tight
+	 * `maxTokens` budgets, and a thinking phase competes with the visible answer
+	 * for that same budget. Thinking-capable Ollama models default to thinking ON
+	 * and will happily spend the entire `num_predict` allowance inside the
+	 * separate `thinking` field, returning an empty `response` — which is how
+	 * every routing regression case once failed with "Unexpected end of JSON
+	 * input". Sending `think: false` explicitly is what prevents that.
+	 *
+	 * A caller that genuinely wants a reasoning phase must set `thinking: true`
+	 * **and** raise `maxTokens` to cover both the reasoning and the answer.
+	 *
+	 * Only Ollama honours this today; other providers ignore it. Non-thinking
+	 * Ollama models accept and ignore the flag.
+	 */
+	thinking?: boolean;
 }
 
 // ---------------------------------------------------------------------------

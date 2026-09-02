@@ -148,6 +148,44 @@ describe('foodShadow adapter — throws on llm-error', () => {
 		});
 		await expect(adapters.foodShadow('hi')).rejects.toThrow(/food-shadow.*infrastructure error/i);
 	});
+
+	it('includes the underlying error message and a non-zero meter', async () => {
+		const emptyOutput = Object.assign(
+			new Error(
+				"Model 'qwen3.8:27b-mlx' (provider 'ollama') returned empty output after exhausting its num_predict budget of 80 token(s).",
+			),
+			{ name: 'LLMEmptyOutputError' },
+		);
+		const llm = {
+			complete: vi.fn().mockRejectedValue(emptyOutput),
+			classify: vi.fn(),
+		};
+		const costTracker = queuedTracker([
+			{ cost: 1.0, tokens: { input: 100, output: 0 } },
+			{ cost: 1.0002, tokens: { input: 310, output: 176 } },
+		]);
+		const adapters = buildClassifierAdapters({
+			llm: llm as never,
+			logger: makeLogger(),
+			costTracker,
+			modelIds: MODEL_IDS,
+		});
+
+		const err = await adapters.foodShadow('hi').then(
+			() => null,
+			(e: unknown) => e as MeteredError,
+		);
+
+		expect(err).toBeInstanceOf(MeteredError);
+		// "infrastructure error: unknown" would tell an operator nothing.
+		expect(err?.message).toContain('empty-output');
+		expect(err?.message).toContain('qwen3.8:27b-mlx');
+		expect(err?.message).toContain('num_predict budget of 80');
+		// Tokens were still spent producing nothing — the meter must show it.
+		expect(err?.meter.tokenIn).toBe(210);
+		expect(err?.meter.tokenOut).toBe(176);
+		expect(err?.meter.costUsd).toBeCloseTo(0.0002, 7);
+	});
 });
 
 describe('sessionControl adapter — prefilter zero-cost', () => {

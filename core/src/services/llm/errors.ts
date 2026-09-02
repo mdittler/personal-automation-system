@@ -84,3 +84,55 @@ export class LLMCostCapError extends Error {
 		this.reservationId = opts.reservationId;
 	}
 }
+
+export interface LLMEmptyOutputErrorOptions {
+	/** Provider key that produced the empty completion. */
+	provider: string;
+	/** Model id that produced the empty completion. */
+	model: string;
+	/** The `maxTokens` / `num_predict` budget the request was given, if any. */
+	maxTokens?: number;
+	/** Length in characters of the model's thinking block, when it reported one. */
+	thinkingChars?: number;
+}
+
+/**
+ * Thrown when a provider returns an empty completion **and** reports that
+ * generation stopped because the token budget ran out.
+ *
+ * Empty-plus-truncated is unambiguously a failure: the model produced nothing
+ * the caller can use and there is no more budget to produce it with. The usual
+ * cause is a thinking-capable model spending the whole `num_predict` allowance
+ * inside its reasoning phase (see `LLMCompletionOptions.thinking`).
+ *
+ * Empty-plus-`stop` is NOT this error — some local models (Gemma) legitimately
+ * return `''` on ambiguous prompts, and callers retry that themselves.
+ *
+ * Deterministic: the identical request exhausts the identical budget every
+ * time, so this classifies as non-retryable.
+ */
+export class LLMEmptyOutputError extends Error {
+	readonly provider: string;
+	readonly model: string;
+	readonly maxTokens?: number;
+	readonly thinkingChars?: number;
+
+	constructor(opts: LLMEmptyOutputErrorOptions) {
+		const budget =
+			typeof opts.maxTokens === 'number'
+				? `num_predict budget of ${opts.maxTokens} token(s)`
+				: 'num_predict budget';
+		const thinking =
+			typeof opts.thinkingChars === 'number' && opts.thinkingChars > 0
+				? ` The model emitted a ${opts.thinkingChars}-character thinking block instead of an answer.`
+				: '';
+		super(
+			`Model '${opts.model}' (provider '${opts.provider}') returned empty output after exhausting its ${budget}.${thinking} Raise maxTokens, or keep thinking disabled (thinking: false is the default).`,
+		);
+		this.name = 'LLMEmptyOutputError';
+		this.provider = opts.provider;
+		this.model = opts.model;
+		this.maxTokens = opts.maxTokens;
+		this.thinkingChars = opts.thinkingChars;
+	}
+}
