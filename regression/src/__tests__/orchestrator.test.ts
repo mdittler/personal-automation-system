@@ -2,8 +2,8 @@ import { execSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { LLMService } from '@core/types/llm.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RubricJudgeLLM } from '../oracles/rubric.js';
 import type { RecallAdapter } from '../runner/dispatch.js';
 import { runSuite } from '../runner/index.js';
 import { VERDICT } from '../shared/types.js';
@@ -670,7 +670,7 @@ describe('runSuite — chatbot bucket', () => {
 		const outcome = await runSuite(
 			chatbotBaseOpts({
 				chatbotEnvFactory: factory,
-				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
+				judgeLlm: judge as unknown as RubricJudgeLLM,
 				costTracker: {
 					getMonthlyTotalCost: () => 0,
 					getTokenUsageTotals: () => ({ input: 0, output: 0 }),
@@ -690,7 +690,7 @@ describe('runSuite — chatbot bucket', () => {
 		await runSuite(
 			chatbotBaseOpts({
 				chatbotEnvFactory: async () => env,
-				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
+				judgeLlm: judge as unknown as RubricJudgeLLM,
 				costTracker: {
 					getMonthlyTotalCost: () => 0,
 					getTokenUsageTotals: () => ({ input: 0, output: 0 }),
@@ -710,7 +710,7 @@ describe('runSuite — chatbot bucket', () => {
 		await runSuite(
 			chatbotBaseOpts({
 				chatbotEnvFactory: async () => env,
-				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
+				judgeLlm: judge as unknown as RubricJudgeLLM,
 				costTracker: {
 					getMonthlyTotalCost: () => 0,
 					getTokenUsageTotals: () => ({ input: 0, output: 0 }),
@@ -733,7 +733,7 @@ describe('runSuite — chatbot bucket', () => {
 		const outcome = await runSuite(
 			chatbotBaseOpts({
 				chatbotEnvFactory: factory,
-				judgeLlm: new StubLLMService() as unknown as Pick<LLMService, 'complete'>,
+				judgeLlm: new StubLLMService() as unknown as RubricJudgeLLM,
 				costTracker: {
 					getMonthlyTotalCost: () => 0,
 					getTokenUsageTotals: () => ({ input: 0, output: 0 }),
@@ -758,7 +758,7 @@ describe('runSuite — chatbot bucket', () => {
 		await runSuite(
 			chatbotBaseOpts({
 				chatbotEnvFactory: async () => env,
-				judgeLlm: judge as unknown as Pick<LLMService, 'complete'>,
+				judgeLlm: judge as unknown as RubricJudgeLLM,
 				costTracker: {
 					getMonthlyTotalCost: () => 0,
 					getTokenUsageTotals: () => ({ input: 0, output: 0 }),

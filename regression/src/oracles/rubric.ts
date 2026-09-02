@@ -4,9 +4,15 @@
  * Calls a standard-tier judge LLM with a structured prompt: rubric +
  * fenced actual response → JSON {score, explanation}. The judge's
  * output is untrusted per testing-standards trust-boundary rule 1:
- * NaN/Infinity, out-of-range, and non-parseable values all map to
- * verdict='error' (not 'fail') so a misbehaving judge can't silently
+ * NaN/Infinity, out-of-range, non-parseable, and cap-truncated values all
+ * map to verdict='error' (not 'fail') so a misbehaving judge can't silently
  * flip a real failure to pass.
+ *
+ * Truncation vs. malformed output: the judge is called through
+ * `completeWithMeta`, so `finishReason === 'length'` (the reply hit
+ * `JUDGE_MAX_TOKENS`) is reported as truncation naming the cap, and only
+ * genuinely malformed complete output falls through to the generic
+ * "JSON parse failed" verdict.
  *
  * Pass threshold: score >= 4 (spec line 210).
  *
@@ -22,7 +28,7 @@
  */
 
 import { buildMemoryContextBlock } from '@core/services/prompt-assembly/memory-context.js';
-import type { LLMService } from '@core/types/llm.js';
+import type { LLMCompletionMeta, LLMService } from '@core/types/llm.js';
 import { UNPARSEABLE_JSON, tryParseJsonStripFences } from '@core/utils/json-strip-fences.js';
 import { type CallMeter, type OracleVerdict, VERDICT } from '../shared/types.js';
 
@@ -31,8 +37,39 @@ const MIN_SCORE = 0;
 const MAX_SCORE = 5;
 const FENCE_MAX_CHARS = 6000;
 
+/**
+ * Output budget for the judge call.
+ *
+ * History of this number, because it has been wrong twice:
+ *   - 200 was tight for verbose local judges (Gemma 26b): the JSON was cut
+ *     mid-`"explanation"` and became unparseable.
+ *   - 400 was chosen on the assumption that frontier judges reply in ~100
+ *     tokens. A 2026-09-01 live run disproved that: `claude-opus-5` grading
+ *     `chatbot-cheapest-blueberries` exhausted the 400-token cap and returned
+ *     `{"score": 2, "explanation": "The reply g` — truncated mid-string. The
+ *     parse branch below then reported it as malformed JSON, misdiagnosing a
+ *     budget exhaustion as a broken judge (the same misdiagnosis the Ollama
+ *     empty-output work removed on the provider side).
+ *   - 1024 is the provider-default `max_tokens` used across core's Anthropic /
+ *     OpenAI-compatible / Google providers, and ~2.5x the longest judge reply
+ *     observed so far. A well-behaved judge stops at its own EOS long before
+ *     the cap, so raising it costs nothing on the common path; it only buys
+ *     headroom for the verbose ones.
+ *
+ * If a judge ever exhausts THIS cap, `finishReason === 'length'` now says so
+ * explicitly instead of hiding behind "JSON parse failed".
+ */
+const JUDGE_MAX_TOKENS = 1024;
+
+/**
+ * LLM surface the rubric oracle needs. `completeWithMeta` is required (not
+ * `complete`) because the oracle must see `finishReason` to tell a truncated
+ * judge reply apart from a malformed one.
+ */
+export type RubricJudgeLLM = Pick<LLMService, 'complete' | 'completeWithMeta'>;
+
 export interface RubricOracleDeps {
-	llm: Pick<LLMService, 'complete'>;
+	llm: RubricJudgeLLM;
 	standardModelId: string;
 	costMeter: {
 		getMonthlyTotalCost: () => number;
@@ -87,16 +124,15 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 	const tokBefore = deps.costMeter.getTokenUsageTotals();
 	// Declared before try so finally can assign and post-block code can read.
 	let tokAfter = tokBefore;
-	let raw: string | undefined;
+	let meta: LLMCompletionMeta | undefined;
 	let thrownErr: unknown;
 	try {
-		raw = await deps.llm.complete(prompt, {
+		// completeWithMeta (not complete) so `finishReason` is available: a reply
+		// cut off at JUDGE_MAX_TOKENS must be reported as truncation, not as
+		// malformed JSON.
+		meta = await deps.llm.completeWithMeta(prompt, {
 			tier: 'standard',
-			// 200 was tight for verbose local judges (Gemma 26b): truncating the
-			// JSON mid-`"explanation"` produced unparseable output. 400 fits
-			// frontier judges comfortably (their replies are ~100 tokens) and
-			// gives local judges room to close the JSON envelope.
-			maxTokens: 400,
+			maxTokens: JUDGE_MAX_TOKENS,
 			temperature: 0,
 			responseFormat: 'json',
 		});
@@ -125,8 +161,25 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 		};
 	}
 
-	// thrownErr is undefined here, so the try completed without throwing → raw is defined.
-	const resolvedRaw = raw as string;
+	// thrownErr is undefined here, so the try completed without throwing → meta is defined.
+	const resolvedMeta = meta as LLMCompletionMeta;
+	const resolvedRaw = resolvedMeta.text ?? '';
+
+	// Truncation is checked BEFORE parsing, not only in the parse-failure branch:
+	// a reply the provider cut at the cap is untrustworthy even in the rare case
+	// its prefix happens to parse, and per this file's trust-boundary contract a
+	// judge we cannot trust maps to `error`, never to a pass/fail grade.
+	if (resolvedMeta.finishReason === 'length') {
+		return {
+			verdict: {
+				verdict: VERDICT.error,
+				details: `judge reply truncated at the ${JUDGE_MAX_TOKENS}-token output cap (finishReason='length'; raise JUDGE_MAX_TOKENS in regression/src/oracles/rubric.ts); raw="${resolvedRaw.slice(0, 200)}"`,
+			},
+			meter,
+			score: null,
+		};
+	}
+
 	const parsed = tryParseJsonStripFences(resolvedRaw);
 	if (parsed === UNPARSEABLE_JSON) {
 		return {

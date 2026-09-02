@@ -31,6 +31,7 @@ import {
 	type TierModelSnapshot,
 	VERDICT,
 } from '@core/types/regression.js';
+import type { RubricJudgeLLM } from '../oracles/rubric.js';
 import { bucketCacheSalt, computeCacheKey } from '../shared/cache-key.js';
 import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
 import { RunBudget } from './budget.js';
@@ -76,7 +77,7 @@ export interface RunSuiteOptions {
 		dispose: () => Promise<void>;
 	}>;
 	/** Judge LLM used by the rubric oracle. Required if any chatbot case is present. */
-	judgeLlm?: Pick<LLMService, 'complete'>;
+	judgeLlm?: RubricJudgeLLM;
 	/**
 	 * LLM service for the receipt bucket. Required if any receipt case is in
 	 * the filtered set. Same instance as `judgeLlm` / production `llm` is fine.

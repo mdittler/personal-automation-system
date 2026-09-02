@@ -18,7 +18,6 @@
  * stub instead of composing the full runtime.
  */
 
-import type { LLMService } from '@core/types/llm.js';
 import type {
 	OracleVerdict,
 	PersonaCase,
@@ -27,6 +26,7 @@ import type {
 	Verdict,
 } from '@core/types/regression.js';
 import { VERDICT } from '@core/types/regression.js';
+import type { RubricJudgeLLM } from '../../oracles/rubric.js';
 import { runRubricOracle } from '../../oracles/rubric.js';
 import type { MinimalLogger } from './routing-runner.js';
 
@@ -53,7 +53,7 @@ export interface ChatbotEnvLike {
 
 export interface ChatbotRunnerDeps {
 	env: ChatbotEnvLike;
-	judgeLlm: Pick<LLMService, 'complete'>;
+	judgeLlm: RubricJudgeLLM;
 	judgeModelId: string;
 	costTracker: {
 		getMonthlyTotalCost: () => number;

@@ -60,6 +60,77 @@ describe('runRubricOracle', () => {
 		expect(result.verdict.details).toMatch(/parse/i);
 	});
 
+	// 2026-09-01 live run: claude-opus-5 grading `chatbot-cheapest-blueberries`
+	// exhausted the old 400-token cap and returned
+	// `{"score": 2, "explanation": "The reply g` — the oracle called that a
+	// malformed-JSON judge instead of a truncated one. The verdict must name the
+	// cap so the next reader raises the budget rather than blaming the judge.
+	it('reports truncation (not a parse failure) when finishReason is "length"', async () => {
+		const truncated = '{"score": 2, "explanation": "The reply g';
+		const stub = new StubLLMService().queue(truncated, 'length');
+		let tokenIn = 0;
+		let tokenOut = 0;
+		const deps = {
+			...baseDeps(stub),
+			costMeter: {
+				getMonthlyTotalCost: () => 0,
+				getTokenUsageTotals: () => ({ input: tokenIn, output: tokenOut }),
+			},
+		};
+		const original = stub.completeWithMeta.bind(stub);
+		stub.completeWithMeta = async (p, o) => {
+			tokenIn += 900;
+			tokenOut += 1024;
+			return original(p, o);
+		};
+		const result = await runRubricOracle({ rubric: 'r', actualResponse: 'a', deps });
+		expect(result.verdict.verdict).toBe(VERDICT.error);
+		expect(result.verdict.details).toMatch(/truncat/i);
+		// Names the cap that was hit...
+		expect(result.verdict.details).toContain('1024');
+		// ...shows the raw prefix so the operator can see where it stopped...
+		expect(result.verdict.details).toContain(truncated);
+		// ...and does NOT misreport it as malformed JSON.
+		expect(result.verdict.details).not.toMatch(/parse failed/i);
+		expect(result.score).toBeNull();
+		// Metering still runs on this path — the truncated call was not free.
+		expect(result.meter.tokenIn).toBe(900);
+		expect(result.meter.tokenOut).toBe(1024);
+		expect(result.meter.model).toBe('claude-sonnet-4-7');
+	});
+
+	// A cap-truncated reply is untrusted even when its prefix happens to parse:
+	// per the file's trust-boundary contract it maps to error, never to a grade.
+	it('errors on finishReason "length" even when the truncated prefix parses', async () => {
+		const stub = new StubLLMService().queue('{"score": 5, "explanation": "ok"}', 'length');
+		const result = await runRubricOracle({
+			rubric: 'r',
+			actualResponse: 'a',
+			deps: baseDeps(stub),
+		});
+		expect(result.verdict.verdict).toBe(VERDICT.error);
+		expect(result.verdict.details).toMatch(/truncat/i);
+		expect(result.score).toBeNull();
+	});
+
+	it('keeps the generic parse-failure verdict for malformed-but-complete output', async () => {
+		const stub = new StubLLMService().queue('not json at all', 'stop');
+		const result = await runRubricOracle({
+			rubric: 'r',
+			actualResponse: 'a',
+			deps: baseDeps(stub),
+		});
+		expect(result.verdict.verdict).toBe(VERDICT.error);
+		expect(result.verdict.details).toMatch(/parse failed/i);
+		expect(result.verdict.details).not.toMatch(/truncat/i);
+	});
+
+	it('gives the judge a 1024-token output budget', async () => {
+		const stub = new StubLLMService().queue('{"score": 5, "explanation": "ok"}');
+		await runRubricOracle({ rubric: 'r', actualResponse: 'a', deps: baseDeps(stub) });
+		expect(stub.lastOptions).toMatchObject({ maxTokens: 1024 });
+	});
+
 	it('errors when judge returns NaN', async () => {
 		const stub = new StubLLMService().queue('{"score": null, "explanation": "x"}');
 		const result = await runRubricOracle({
@@ -189,10 +260,10 @@ describe('runRubricOracle', () => {
 			getTokenUsageTotals: () => ({ input: 0, output: 0 }),
 		};
 		const deps = { ...baseDeps(stub), costMeter: meter };
-		// Simulate the LLM call mutating cost — the stub's complete() doesn't
-		// charge, so we mutate around it.
-		const originalComplete = stub.complete.bind(stub);
-		stub.complete = async (prompt, options) => {
+		// Simulate the LLM call mutating cost — the stub's completeWithMeta()
+		// doesn't charge, so we mutate around it.
+		const originalComplete = stub.completeWithMeta.bind(stub);
+		stub.completeWithMeta = async (prompt, options) => {
 			totalCost = 0.0021;
 			return originalComplete(prompt, options);
 		};
@@ -244,8 +315,8 @@ describe('runRubricOracle', () => {
 			costMeter: meter,
 		};
 		// Simulate the judge LLM call advancing the token counter
-		const originalComplete = stub.complete.bind(stub);
-		stub.complete = async (prompt, options) => {
+		const originalComplete = stub.completeWithMeta.bind(stub);
+		stub.completeWithMeta = async (prompt, options) => {
 			tokenIn += 45;
 			tokenOut += 12;
 			return originalComplete(prompt, options);
@@ -272,8 +343,8 @@ describe('runRubricOracle', () => {
 			costMeter: meter,
 		};
 		// Simulate spending some tokens before throwing
-		const originalComplete = stub.complete.bind(stub);
-		stub.complete = async (prompt, options) => {
+		const originalComplete = stub.completeWithMeta.bind(stub);
+		stub.completeWithMeta = async (prompt, options) => {
 			tokenIn += 30;
 			tokenOut += 8;
 			return originalComplete(prompt, options); // this throws
