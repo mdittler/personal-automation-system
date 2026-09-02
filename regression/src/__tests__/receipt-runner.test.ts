@@ -598,6 +598,110 @@ describe('runReceiptCase — production parser integration', () => {
 });
 
 // =====================================================================
+// Sidecar date vs. the parser's acceptance window.
+//
+// `parseReceiptFromPhoto` refuses receipt dates that are in the future or
+// older than MAX_RECEIPT_AGE_DAYS, overwriting `date` with today and moving
+// the model's extraction to `rawExtractedDate`. Photo fixtures carry an
+// immutable real-world date, so a fixture inevitably ages out of that window
+// — the runner must keep asserting the ground-truth date without the case
+// turning red purely because the wall clock advanced.
+//
+// The clock is frozen in every test below so BOTH branches stay covered
+// forever; before this suite existed, which branch ran depended on how long
+// ago the fixture dates in this file happened to be authored.
+// =====================================================================
+
+const WINDOW_SIDECAR_DATE = '2026-05-10';
+// 10 days after the receipt date — comfortably inside MAX_RECEIPT_AGE_DAYS.
+const IN_WINDOW_NOW = '2026-05-20T12:00:00Z';
+// ~7 months after the receipt date — well past MAX_RECEIPT_AGE_DAYS.
+const AGED_OUT_NOW = '2026-12-01T12:00:00Z';
+// `makeReceiptDeps` uses America/New_York; both instants above are midday UTC,
+// so the local calendar date matches the UTC one.
+const AGED_OUT_TODAY = '2026-12-01';
+
+describe('runReceiptCase — sidecar date acceptance window', () => {
+	// Only Date is faked: the runner awaits real filesystem I/O, and replacing
+	// the timer queue is neither needed nor risk-free here.
+	function freezeClock(iso: string): void {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(new Date(iso));
+	}
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	/**
+	 * Stages a photo + a sidecar fixed at `WINDOW_SIDECAR_DATE`, and stubs the
+	 * LLM to extract `extractedDate`. Only the extracted date and the frozen
+	 * clock vary across the four cases below.
+	 */
+	async function stageDateCase(extractedDate: string, idSuffix: string) {
+		const photoPath = await stagePhoto('dated');
+		const sidecarPath = await stageSidecar(`dated-${idSuffix}`, {
+			store: 'Walmart',
+			date: WINDOW_SIDECAR_DATE,
+			total: 4.99,
+			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
+		});
+		const deps = makeReceiptDeps(
+			llmShim(
+				JSON.stringify({
+					store: 'Walmart',
+					date: extractedDate,
+					lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
+					subtotal: 4.99,
+					tax: 0,
+					total: 4.99,
+				}),
+			),
+		);
+		return { case_: makeCase(photoPath, sidecarPath, idSuffix), deps };
+	}
+
+	it('in-window sidecar date is asserted verbatim on the parsed date', async () => {
+		freezeClock(IN_WINDOW_NOW);
+		const { case_, deps } = await stageDateCase(WINDOW_SIDECAR_DATE, 'in-window');
+		const result = await runReceiptCase(case_, deps);
+		expect(result.verdict).toBe(VERDICT.pass);
+		const parsed = result.actuals[0] as { date: string; rawExtractedDate?: string };
+		// Parser accepted the date, so no fallback and no audit field.
+		expect(parsed.date).toBe(WINDOW_SIDECAR_DATE);
+		expect(parsed.rawExtractedDate).toBeUndefined();
+	});
+
+	it('in-window sidecar date fails when the parser reads a different in-window date', async () => {
+		freezeClock(IN_WINDOW_NOW);
+		const { case_, deps } = await stageDateCase('2026-05-15', 'in-window-wrong');
+		const result = await runReceiptCase(case_, deps);
+		expect(result.verdict).toBe(VERDICT.fail);
+		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/Date date outside/);
+	});
+
+	it('aged-out sidecar date expects the today-fallback and pins rawExtractedDate', async () => {
+		freezeClock(AGED_OUT_NOW);
+		const { case_, deps } = await stageDateCase(WINDOW_SIDECAR_DATE, 'aged-out');
+		const result = await runReceiptCase(case_, deps);
+		expect(result.verdict).toBe(VERDICT.pass);
+		const parsed = result.actuals[0] as { date: string; rawExtractedDate?: string };
+		expect(parsed.date).toBe(AGED_OUT_TODAY);
+		expect(parsed.rawExtractedDate).toBe(WINDOW_SIDECAR_DATE);
+	});
+
+	it('aged-out sidecar date still fails when the parser reads the wrong date', async () => {
+		freezeClock(AGED_OUT_NOW);
+		// Also aged out, so the parser takes the same fallback path — only the
+		// preserved `rawExtractedDate` distinguishes right from wrong.
+		const { case_, deps } = await stageDateCase('2026-05-11', 'aged-out-wrong');
+		const result = await runReceiptCase(case_, deps);
+		expect(result.verdict).toBe(VERDICT.fail);
+		expect(result.oracleVerdicts[0]?.details ?? '').toMatch(/rawExtractedDate/);
+	});
+});
+
+// =====================================================================
 // PR2 Batch 3 — transcription oracle wiring tests.
 //
 // Each test wires the new `transcriptionFixture` payload field plus a YAML
