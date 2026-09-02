@@ -284,9 +284,7 @@ describe('--no-cache flag', () => {
 });
 
 describe('buildTierOverrideFromCli', () => {
-	// Codex correction #3 + plan Batch 0 test: --judge-model must win over
-	// --model-matrix=standard= for the standard slot.
-	it('returns undefined when neither modelMatrix nor judgeModel is set', () => {
+	it('returns undefined when modelMatrix is not set, even with a separate judge', () => {
 		expect(
 			buildTierOverrideFromCli({
 				dryRun: false,
@@ -306,42 +304,38 @@ describe('buildTierOverrideFromCli', () => {
 		});
 	});
 
-	it('builds override from --judge-model only (lands in standard slot)', () => {
+	it('does not turn --judge-model into a standard-tier override', () => {
 		const opts = parseCliArgs(['--judge-model=ollama/gemma4:26b']);
-		expect(buildTierOverrideFromCli(opts)).toEqual({
-			standard: { provider: 'ollama', model: 'gemma4:26b' },
-		});
+		expect(buildTierOverrideFromCli(opts)).toBeUndefined();
 	});
 
-	it('--judge-model WINS over --model-matrix=standard= for the standard slot', () => {
+	it('keeps model-matrix standard selection when a separate judge is supplied', () => {
 		const opts = parseCliArgs([
 			'--judge-model=ollama/gemma4:26b',
 			'--model-matrix=standard=anthropic/claude-sonnet-4-6',
 		]);
 		expect(buildTierOverrideFromCli(opts)).toEqual({
-			standard: { provider: 'ollama', model: 'gemma4:26b' },
+			standard: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
 		});
 	});
 
-	it('combines --model-matrix fast + --judge-model standard', () => {
+	it('keeps only model-matrix tiers when a judge is also supplied', () => {
 		const opts = parseCliArgs([
 			'--model-matrix=ollama/gemma4:e4b',
 			'--judge-model=ollama/gemma4:26b',
 		]);
 		expect(buildTierOverrideFromCli(opts)).toEqual({
 			fast: { provider: 'ollama', model: 'gemma4:e4b' },
-			standard: { provider: 'ollama', model: 'gemma4:26b' },
 		});
 	});
 
-	it('preserves model-matrix reasoning even when judge-model takes standard', () => {
+	it('preserves every model-matrix tier when a judge is supplied', () => {
 		const opts = parseCliArgs([
 			'--model-matrix=fast=ollama/gemma4:e4b,reasoning=anthropic/claude-opus-4-7',
 			'--judge-model=ollama/gemma4:26b',
 		]);
 		expect(buildTierOverrideFromCli(opts)).toEqual({
 			fast: { provider: 'ollama', model: 'gemma4:e4b' },
-			standard: { provider: 'ollama', model: 'gemma4:26b' },
 			reasoning: { provider: 'anthropic', model: 'claude-opus-4-7' },
 		});
 	});

@@ -490,6 +490,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
 		label: 'user wants to see nutrition information',
 		accept: [
 			'show me my macros',
+			"show me today's protein, carbs, fat, and calories",
 			"what's the nutrition info for this recipe?",
 			'how many calories are in this?',
 			"show me today's nutrition summary",
@@ -625,7 +626,7 @@ export const FOOD_PERSONAS: readonly Persona[] = [
 		accept: [
 			'I had two slices of pizza',
 			'I ate pasta carbonara for dinner',
-			'just had some leftover chicken',
+			'I ate leftover chicken for lunch',
 			'logged the salad I had for lunch',
 		],
 		deterministicRejectFor: [

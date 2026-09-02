@@ -22,7 +22,7 @@
 
 import { relative } from 'node:path';
 import { requestContext } from '@core/services/context/request-context.js';
-import type { LLMService } from '@core/types/llm.js';
+import type { LLMService, ModelRef } from '@core/types/llm.js';
 import {
 	type EvaluatedTier,
 	type PersonaCase,
@@ -58,6 +58,22 @@ import {
 } from './markdown-report.js';
 import type { ManifestDefaults } from './runner-options.js';
 
+/**
+ * Cache chatbot grades by both the tested tiers and the rubric judge. A
+ * different judge can legitimately reach a different verdict for the same
+ * reply, so reusing the prior grade would make model comparisons misleading.
+ */
+function cacheSaltForCase(
+	bucket: PersonaCase['bucket'],
+	timezone: string,
+	judgeModelRef?: ModelRef,
+): string | undefined {
+	const bucketSalt = bucketCacheSalt(bucket, timezone);
+	if (bucket !== 'chatbot' || !judgeModelRef) return bucketSalt;
+	const judgeSalt = `judge:${judgeModelRef.provider}/${judgeModelRef.model}`;
+	return bucketSalt ? `${bucketSalt}:${judgeSalt}` : judgeSalt;
+}
+
 export interface RunSuiteOptions {
 	casesDir: string;
 	cacheDir: string;
@@ -80,6 +96,8 @@ export interface RunSuiteOptions {
 	}>;
 	/** Judge LLM used by the rubric oracle. Required if any chatbot case is present. */
 	judgeLlm?: RubricJudgeLLM;
+	/** Optional explicit model for the rubric oracle, independent of the tiers under test. */
+	judgeModelRef?: ModelRef;
 	/**
 	 * LLM service for the receipt bucket. Required if any receipt case is in
 	 * the filtered set. Same instance as `judgeLlm` / production `llm` is fine.
@@ -173,7 +191,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 	const tz = opts.timezone ?? 'UTC';
 	const cacheKeys = await Promise.all(
 		filtered.map((lc) => {
-			const salt = bucketCacheSalt(lc.case.bucket, tz);
+			const salt = cacheSaltForCase(lc.case.bucket, tz, opts.judgeModelRef);
 			return computeCacheKey({
 				casePath: relative(opts.repoRoot, lc.filePath),
 				coveragePaths: lc.case.coverage,
@@ -318,7 +336,8 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 							),
 					},
 					judgeLlm: opts.judgeLlm,
-					judgeModelId: opts.modelIds.standard,
+					judgeModelId: opts.judgeModelRef?.model ?? opts.modelIds.standard,
+					...(opts.judgeModelRef ? { judgeModelRef: opts.judgeModelRef } : {}),
 					costTracker: opts.costTracker ?? ZERO_COST_METER,
 					modelIds: opts.modelIds,
 					cacheKey,
@@ -379,6 +398,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 				completedAt: new Date().toISOString(),
 				modelIds: opts.modelIds,
 				judgeOverrideApplied: opts.judgeOverrideApplied === true,
+				judgeModelId: opts.judgeModelRef?.model ?? opts.modelIds.standard,
 				bucketsRequested: opts.bucketFilter ? [opts.bucketFilter] : ['__all__'],
 				results,
 				cases,
@@ -459,8 +479,12 @@ export async function runCli(
 		write(HELP_TEXT);
 		return { exitCode: 0, outcome: null, options: cli };
 	}
+	const effectiveDeps: RunCliDeps = {
+		...deps,
+		...(cli.judgeModel ? { judgeModelRef: cli.judgeModel } : {}),
+	};
 	if (cli.listOnly) {
-		await emitCaseList(deps, write);
+		await emitCaseList(effectiveDeps, write);
 		return { exitCode: 0, outcome: null, options: cli };
 	}
 
@@ -474,14 +498,14 @@ export async function runCli(
 		manifestDefaults !== undefined ? (manifestDefaults.manifestDir ?? undefined) : undefined;
 
 	const outcome = await runSuite({
-		...deps,
+		...effectiveDeps,
 		bucketFilter: cli.bucketFilter,
 		rerunIds: cli.rerunIds,
 		noCache: cli.noCache,
 		dryRun: cli.dryRun,
 		runId: effectiveRunId,
 		manifestDir: effectiveManifestDir,
-		judgeOverrideApplied: cli.judgeModel !== undefined,
+		judgeOverrideApplied: effectiveDeps.judgeModelRef !== undefined,
 		onResult: cli.json
 			? (r) => write(`${JSON.stringify({ type: 'case-result', result: r })}\n`)
 			: undefined,
@@ -491,13 +515,13 @@ export async function runCli(
 		// `modelIds` rides as a sibling of `summary` (it is not part of
 		// `RunSummary`) so the GUI can name the model that was actually tested.
 		write(
-			`${JSON.stringify({ type: 'summary', summary: outcome.summary, modelIds: deps.modelIds })}\n`,
+			`${JSON.stringify({ type: 'summary', summary: outcome.summary, modelIds: effectiveDeps.modelIds })}\n`,
 		);
 	} else if (cli.dryRun) {
 		// Dry-run cases have empty oracleVerdicts and synthetic pass verdicts.
 		// Reporting them as pass/fail would mislead the operator — render the
 		// estimate-focused dry-run summary instead.
-		write(`${formatDryRunMarkdown(outcome.results, deps.estimateUsd)}\n`);
+		write(`${formatDryRunMarkdown(outcome.results, effectiveDeps.estimateUsd)}\n`);
 	} else {
 		write(`${formatSummaryMarkdown(outcome.results, outcome.targets)}\n`);
 	}
@@ -534,7 +558,7 @@ async function emitCaseList(deps: RunCliDeps, write: (s: string) => void): Promi
 	const tz = deps.timezone ?? 'UTC';
 	const cacheKeys = await Promise.all(
 		loaded.map((lc) => {
-			const salt = bucketCacheSalt(lc.case.bucket, tz);
+			const salt = cacheSaltForCase(lc.case.bucket, tz, deps.judgeModelRef);
 			return computeCacheKey({
 				casePath: relative(deps.repoRoot, lc.filePath),
 				coveragePaths: lc.case.coverage,

@@ -51,7 +51,7 @@
             <td>
               <code><%= row.modelId %></code>
               <% if (row.judgeOverrideApplied) { %>
-                <small class="badge badge-warn" title="--judge-model override applied at run time">(judge override)</small>
+                <small class="badge badge-warn" title="Rubric grades were produced by a separate judge model">judged by <%= row.judgeModelId ?? 'override' %></small>
               <% } %>
             </td>
             <td><time datetime="<%= row.completedAt %>"><%= row.completedAtFormatted %></time></td>

@@ -20,6 +20,7 @@ import type { SystemConfig } from '@core/types/config.js';
 import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	applyJudgeModelOverride,
 	applyModelMatrixOverride,
 	buildDryRunDeps,
 	buildMetadataDeps,
@@ -176,6 +177,19 @@ describe('build-deps — Chunk C wiring', () => {
 		});
 		expect(overridden.modelIds.fast).toBe('gemma4:e4b');
 		expect(overridden.modelIds.standard).toBe('gemma4:26b');
+	});
+
+	it('applyJudgeModelOverride preserves the standard-tier candidate', () => {
+		const baseDeps = buildDryRunDeps();
+		const overridden = applyJudgeModelOverride(baseDeps, {
+			provider: 'anthropic',
+			model: 'claude-opus-5',
+		});
+		expect(overridden.modelIds.standard).toBe(baseDeps.modelIds.standard);
+		expect(overridden.judgeModelRef).toEqual({
+			provider: 'anthropic',
+			model: 'claude-opus-5',
+		});
 	});
 
 	// Codex correction: tier override must reach the actual LLMService, not just

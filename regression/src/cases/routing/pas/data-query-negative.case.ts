@@ -18,7 +18,7 @@ const c: PersonaCase = {
 		'what apps are installed',
 		'configure my fast model',
 		'how do I install a new app',
-		'what does Hermes do',
+		'how can I search our past conversations?',
 	].map((payload) => ({
 		payload,
 		expected: {

@@ -163,12 +163,16 @@ export interface RunManifest {
 	completedAt: string; // ISO-8601
 	modelIds: TierModelSnapshot;
 	/**
-	 * Signals that `--judge-model` was passed at run time, in which case the
-	 * standard-tier slot reflects the judge override rather than the default
-	 * standard model. There is intentionally no `judgeModelId` field;
-	 * `modelIds.standard` IS the judge model when this flag is true.
+	 * Signals that `--judge-model` was passed at run time. The override is used
+	 * only to grade rubric cases; it never replaces `modelIds.standard`, which
+	 * always identifies the model actually assigned to the standard tier.
 	 */
 	judgeOverrideApplied: boolean;
+	/**
+	 * Model used by the rubric oracle. Omitted on manifests written before
+	 * judge attribution was separated from the standard-tier model.
+	 */
+	judgeModelId?: string;
 	bucketsRequested: readonly string[]; // ['routing'] | ['__all__'] | ...
 	caseResults: readonly ManifestCaseResult[];
 	summary: RunSummary;

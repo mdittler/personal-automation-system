@@ -28,6 +28,7 @@ export interface BuildManifestInput {
 	completedAt: string;
 	modelIds: TierModelSnapshot;
 	judgeOverrideApplied: boolean;
+	judgeModelId?: string;
 	bucketsRequested: readonly string[];
 	results: readonly RunResult[];
 	/** Each result's PersonaCase — needed only for its `bucket`. */
@@ -59,6 +60,7 @@ export function buildManifest(input: BuildManifestInput): RunManifest {
 		completedAt: input.completedAt,
 		modelIds: input.modelIds,
 		judgeOverrideApplied: input.judgeOverrideApplied,
+		...(input.judgeModelId ? { judgeModelId: input.judgeModelId } : {}),
 		bucketsRequested: input.bucketsRequested,
 		caseResults,
 		summary: input.summary,

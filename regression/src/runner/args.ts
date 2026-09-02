@@ -286,11 +286,10 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 }
 
 /**
- * Combine `--model-matrix` and `--judge-model` flags into a single
- * `tierOverride` object for `buildProductionDeps`. `--judge-model` wins over
- * `--model-matrix=standard=` for the standard slot (the rubric oracle is the
- * primary consumer of standard tier in the regression run, so the dedicated
- * flag takes precedence).
+ * Convert the tier portion of `--model-matrix` into transient tier overrides
+ * for `buildProductionDeps`. `--judge-model` is deliberately excluded: it
+ * selects the rubric oracle only and must never replace the model being
+ * evaluated in the standard tier.
  *
  * Extracted from `cli-main.ts` so the precedence logic is unit-testable
  * (Codex correction #3).
@@ -300,13 +299,12 @@ export function buildTierOverrideFromCli(
 ):
 	| Partial<Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>>
 	| undefined {
-	if (!opts.modelMatrix && !opts.judgeModel) return undefined;
+	if (!opts.modelMatrix) return undefined;
 	const out: Partial<
 		Record<'fast' | 'standard' | 'reasoning', { provider: string; model: string }>
 	> = {};
 	if (opts.modelMatrix?.fast) out.fast = opts.modelMatrix.fast;
-	if (opts.judgeModel) out.standard = opts.judgeModel;
-	else if (opts.modelMatrix?.standard) out.standard = opts.modelMatrix.standard;
+	if (opts.modelMatrix?.standard) out.standard = opts.modelMatrix.standard;
 	if (opts.modelMatrix?.reasoning) out.reasoning = opts.modelMatrix.reasoning;
 	return out;
 }

@@ -60,21 +60,27 @@ try {
 	};
 }
 
-// Combine --model-matrix and --judge-model into a single tier override.
-// `--judge-model` wins over `--model-matrix=standard=` for the standard slot
-// (the rubric oracle is the primary consumer of standard tier). The combiner
-// lives in `args.ts` so the precedence is unit-testable (Codex correction #3).
+// Model-matrix changes the tiers under evaluation. The optional judge is kept
+// separate so a strong oracle can grade a local standard-tier candidate
+// without silently replacing that candidate.
 const tierOverride = buildTierOverrideFromCli(peeked);
 
 let deps = isList
 	? await buildMetadataDeps()
 	: isDryRun
 		? buildDryRunDeps()
-		: await buildProductionDeps(tierOverride ? { tierOverride } : undefined);
+		: await buildProductionDeps(
+				tierOverride || peeked.judgeModel
+					? {
+							...(tierOverride ? { tierOverride } : {}),
+							...(peeked.judgeModel ? { judgeModelRef: peeked.judgeModel } : {}),
+						}
+					: undefined,
+			);
 
-// `applyModelMatrixOverride` / `applyJudgeModelOverride` are retained for the
-// dry-run / metadata paths where the LLM service was never composed and the
-// modelIds substitution is still needed to flow through cache keys.
+// The dry-run / metadata paths never compose an LLM service. Apply the same
+// selections to their dependency metadata so cache keys and GUI previews
+// match a production run.
 if ((isDryRun || isList) && peeked.modelMatrix) {
 	deps = applyModelMatrixOverride(deps, peeked.modelMatrix);
 }

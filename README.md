@@ -245,7 +245,7 @@ pnpm test:regression -- --model-matrix=ollama/gemma3:12b,anthropic/claude-sonnet
 pnpm test:regression -- --judge-model=anthropic/claude-haiku-4-5
 ```
 
-`--model-matrix` overrides the tier models (positional `fast,standard,reasoning` or named `tier=provider/model`); `--judge-model` overrides the LLM-judge oracle's model. The result cache key is **model-ID-aware**, so each model gets its own cached results and comparisons stay clean. A routing-accuracy gate (≥ 0.95 across food-routing inputs) makes the suite exit non-zero when a model regresses routing quality.
+`--model-matrix` overrides the tier models under test (positional `fast,standard,reasoning` or named `tier=provider/model`). `--judge-model` selects only the LLM rubric judge; it does not replace the standard-tier candidate. Chatbot grades are cached by both the tested tier matrix and the judge model, so comparisons remain clean. A routing-accuracy gate (≥ 0.95 across food-routing inputs) makes the suite exit non-zero when a model regresses routing quality.
 
 The `/gui/regression` admin page wraps this in a UI — a model-override form, a per-tier leaderboard, auto-generated weakness summaries, and performance-over-time charts. See [`regression/README.md`](regression/README.md) for full detail and [`docs/CREATING_AN_APP.md`](docs/CREATING_AN_APP.md#testing-model-behavior-with-the-regression-suite) for the app-developer perspective.
 

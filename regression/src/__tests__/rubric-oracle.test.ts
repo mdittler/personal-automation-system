@@ -5,7 +5,7 @@ import { StubLLMService } from './_stub-provider.js';
 
 const baseDeps = (stub: StubLLMService) => ({
 	llm: stub,
-	standardModelId: 'claude-sonnet-4-7',
+	judgeModelId: 'claude-sonnet-4-7',
 	logger: {
 		warn: () => {},
 		info: () => {},
@@ -131,6 +131,23 @@ describe('runRubricOracle', () => {
 		const stub = new StubLLMService().queue('{"score": 5, "explanation": "ok"}');
 		await runRubricOracle({ rubric: 'r', actualResponse: 'a', deps: baseDeps(stub) });
 		expect(stub.lastOptions).toMatchObject({ maxTokens: 1024 });
+	});
+
+	it('uses an explicit judge model without changing the tier being evaluated', async () => {
+		const stub = new StubLLMService().queue('{"score": 5, "explanation": "ok"}');
+		await runRubricOracle({
+			rubric: 'r',
+			actualResponse: 'a',
+			deps: {
+				...baseDeps(stub),
+				judgeModelId: 'claude-opus-5',
+				judgeModelRef: { provider: 'anthropic', model: 'claude-opus-5' },
+			},
+		});
+		expect(stub.lastOptions).toMatchObject({
+			modelRef: { provider: 'anthropic', model: 'claude-opus-5' },
+		});
+		expect(stub.lastOptions).not.toHaveProperty('tier');
 	});
 
 	it('errors when judge returns NaN', async () => {
@@ -312,7 +329,7 @@ describe('runRubricOracle', () => {
 		};
 		const deps = {
 			llm: stub,
-			standardModelId: 'claude-sonnet-4-7',
+			judgeModelId: 'claude-sonnet-4-7',
 			logger: { warn: () => {}, info: () => {}, debug: () => {}, error: () => {} },
 			costMeter: meter,
 		};
@@ -340,7 +357,7 @@ describe('runRubricOracle', () => {
 		};
 		const deps = {
 			llm: stub,
-			standardModelId: 'claude-sonnet-4-7',
+			judgeModelId: 'claude-sonnet-4-7',
 			logger: { warn: () => {}, info: () => {}, debug: () => {}, error: () => {} },
 			costMeter: meter,
 		};

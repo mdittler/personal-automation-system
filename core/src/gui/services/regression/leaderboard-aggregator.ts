@@ -45,10 +45,12 @@ export interface LeaderboardRow {
 	totalCostUsd: number;
 	buckets: LeaderboardBucketCounts[];
 	/**
-	 * Signals the manifest's `modelIds.standard` was a `--judge-model` override
-	 * at run time. Only meaningful on the `standard` tier.
+	 * Signals a separate `--judge-model` was used to grade rubric cases at run
+	 * time. Only meaningful on the `standard` tier.
 	 */
 	judgeOverrideApplied: boolean;
+	/** Separate rubric judge, when a run recorded one. */
+	judgeModelId?: string;
 	/**
 	 * Per-input REQ-REG-011 routing accuracy from the run summary. Routing
 	 * cases evaluate on the fast tier, so this is populated only on `fast`
@@ -144,6 +146,7 @@ function buildRow(m: RunManifest, tier: LeaderboardTier, modelId: string): Leade
 		totalCostUsd,
 		buckets,
 		judgeOverrideApplied: tier === 'standard' ? m.judgeOverrideApplied : false,
+		...(tier === 'standard' && m.judgeModelId ? { judgeModelId: m.judgeModelId } : {}),
 		routingAccuracy: isFast ? m.summary.routingAccuracy : null,
 		routingInputsEvaluated: isFast ? m.summary.routingInputsEvaluated : 0,
 	};

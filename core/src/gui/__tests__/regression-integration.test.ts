@@ -349,33 +349,32 @@ describe('real regression CLI --list with model overrides (REQ-REG-GUI-OV-007)',
 		expect(overriddenKey).not.toBe(baselineKey);
 	}, 60_000);
 
-	it('--judge-model=anthropic/claude-haiku-4-5-20251001 changes the standard-tier cache key', async () => {
+	it('--judge-model=anthropic/claude-haiku-4-5-20251001 changes chatbot grades, not routing cache keys', async () => {
 		const baseline = await spawnListCli([]);
 		const overridden = await spawnListCli(['--judge-model=anthropic/claude-haiku-4-5-20251001']);
 		expect(baseline.exitCode).toBe(0);
 		expect(overridden.exitCode).toBe(0);
-		const baselineKey = pickCaseKey(baseline.stdout, 'routing');
-		const overriddenKey = pickCaseKey(overridden.stdout, 'routing');
+		const baselineKey = pickCaseKey(baseline.stdout, 'chatbot');
+		const overriddenKey = pickCaseKey(overridden.stdout, 'chatbot');
 		expect(baselineKey).toBeTruthy();
 		expect(overriddenKey).toBeTruthy();
 		expect(overriddenKey).not.toBe(baselineKey);
 	}, 60_000);
 
-	it('--judge-model wins over --model-matrix=standard= (cache key reflects judge model)', async () => {
+	it('--judge-model and --model-matrix=standard= independently affect chatbot cache keys', async () => {
 		const judgeOnly = await spawnListCli(['--judge-model=anthropic/claude-haiku-4-5-20251001']);
 		const bothFlags = await spawnListCli([
-			'--model-matrix=standard=anthropic/claude-sonnet-4-6',
+			'--model-matrix=standard=anthropic/claude-opus-5',
 			'--judge-model=anthropic/claude-haiku-4-5-20251001',
 		]);
 		expect(judgeOnly.exitCode).toBe(0);
 		expect(bothFlags.exitCode).toBe(0);
-		// Because --judge-model takes precedence on the standard slot, the cache
-		// key should be the same in both invocations (both end up with
-		// standard=claude-haiku-...).
-		const judgeOnlyKey = pickCaseKey(judgeOnly.stdout, 'routing');
-		const bothKey = pickCaseKey(bothFlags.stdout, 'routing');
+		// The tier matrix controls the model under test, and the judge controls
+		// only the rubric grade. Both belong in a chatbot result's cache identity.
+		const judgeOnlyKey = pickCaseKey(judgeOnly.stdout, 'chatbot');
+		const bothKey = pickCaseKey(bothFlags.stdout, 'chatbot');
 		expect(judgeOnlyKey).toBeTruthy();
-		expect(bothKey).toBe(judgeOnlyKey);
+		expect(bothKey).not.toBe(judgeOnlyKey);
 	}, 60_000);
 
 	it('rejects invalid --model-matrix= at the CLI parser (exit non-zero, helpful error output)', async () => {

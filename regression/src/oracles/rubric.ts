@@ -29,7 +29,7 @@
  */
 
 import { buildMemoryContextBlock } from '@core/services/prompt-assembly/memory-context.js';
-import type { LLMCompletionMeta, LLMService } from '@core/types/llm.js';
+import type { LLMCompletionMeta, LLMService, ModelRef } from '@core/types/llm.js';
 import { classifyStructuredOutput, formatRawPreview } from '@core/utils/json-strip-fences.js';
 import { type CallMeter, type OracleVerdict, VERDICT } from '../shared/types.js';
 
@@ -71,7 +71,10 @@ export type RubricJudgeLLM = Pick<LLMService, 'complete' | 'completeWithMeta'>;
 
 export interface RubricOracleDeps {
 	llm: RubricJudgeLLM;
-	standardModelId: string;
+	/** Model displayed in judge diagnostics and metering. */
+	judgeModelId: string;
+	/** Explicit judge selection; omitted means use the standard tier. */
+	judgeModelRef?: ModelRef;
 	costMeter: {
 		getMonthlyTotalCost: () => number;
 		getTokenUsageTotals: () => { input: number; output: number };
@@ -132,7 +135,7 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 		// cut off at JUDGE_MAX_TOKENS must be reported as truncation, not as
 		// malformed JSON.
 		meta = await deps.llm.completeWithMeta(prompt, {
-			tier: 'standard',
+			...(deps.judgeModelRef ? { modelRef: deps.judgeModelRef } : { tier: 'standard' }),
 			maxTokens: JUDGE_MAX_TOKENS,
 			temperature: 0,
 			responseFormat: 'json',
@@ -145,7 +148,7 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 	}
 	const costAfter = deps.costMeter.getMonthlyTotalCost();
 	const meter: CallMeter = {
-		model: deps.standardModelId,
+		model: deps.judgeModelId,
 		tokenIn: Math.max(0, tokAfter.input - tokBefore.input),
 		tokenOut: Math.max(0, tokAfter.output - tokBefore.output),
 		costUsd: Math.max(0, costAfter - costBefore),

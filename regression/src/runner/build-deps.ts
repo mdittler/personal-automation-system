@@ -128,6 +128,8 @@ function resolveRepoPaths(): RepoPaths {
 
 export interface ProductionDepsOptions {
 	tierOverride?: TierOverride;
+	/** Explicit rubric judge. This is independent of the tier matrix. */
+	judgeModelRef?: ModelRef;
 }
 
 export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise<RunCliDeps> {
@@ -251,6 +253,7 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 		recallAdapter,
 		chatbotEnvFactory,
 		judgeLlm: llm,
+		judgeModelRef: opts?.judgeModelRef,
 		// Receipt bucket uses the same production LLMService instance — the
 		// receipt-runner reads `complete` + `completeWithMeta`.
 		receiptLlm: llm,
@@ -565,10 +568,9 @@ export function applyModelMatrixOverride(
 }
 
 /**
- * Substitute the rubric oracle's judge model. The rubric oracle reads its
- * model id from `deps.modelIds.standard`, so swapping that field is enough
- * to force a specific judge — the existing `judgeLlm` continues to dispatch
- * through the shared LLMService, which routes by tier.
+ * Substitute the rubric oracle's judge model without changing any tier under
+ * evaluation. The oracle dispatches this reference explicitly, while receipt
+ * parsing and standard-tier chatbot work continue to use `modelIds.standard`.
  *
  * Returns a NEW deps object — does not mutate.
  */
@@ -578,6 +580,6 @@ export function applyJudgeModelOverride(
 ): RunCliDeps {
 	return {
 		...deps,
-		modelIds: { ...deps.modelIds, standard: judgeRef.model },
+		judgeModelRef: judgeRef,
 	};
 }

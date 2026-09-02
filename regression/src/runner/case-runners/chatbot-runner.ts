@@ -18,6 +18,7 @@
  * stub instead of composing the full runtime.
  */
 
+import type { ModelRef } from '@core/types/llm.js';
 import type {
 	OracleVerdict,
 	PersonaCase,
@@ -56,6 +57,7 @@ export interface ChatbotRunnerDeps {
 	env: ChatbotEnvLike;
 	judgeLlm: RubricJudgeLLM;
 	judgeModelId: string;
+	judgeModelRef?: ModelRef;
 	costTracker: {
 		getMonthlyTotalCost: () => number;
 		getTokenUsageTotals: () => { input: number; output: number };
@@ -161,7 +163,8 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 				actualResponse: newMessages,
 				deps: {
 					llm: deps.judgeLlm,
-					standardModelId: deps.judgeModelId,
+					judgeModelId: deps.judgeModelId,
+					...(deps.judgeModelRef ? { judgeModelRef: deps.judgeModelRef } : {}),
 					logger: deps.logger,
 					costMeter: deps.costTracker,
 				},

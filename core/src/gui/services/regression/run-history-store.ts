@@ -173,6 +173,7 @@ function isValidManifest(v: unknown, expectedRunId: string): v is RunManifest {
 	if (v.runId !== expectedRunId) return false;
 	if (!isIso8601(v.startedAt) || !isIso8601(v.completedAt)) return false;
 	if (typeof v.judgeOverrideApplied !== 'boolean') return false;
+	if (v.judgeModelId !== undefined && typeof v.judgeModelId !== 'string') return false;
 	if (!isPlainObject(v.modelIds)) return false;
 	const mi = v.modelIds as Record<string, unknown>;
 	if (typeof mi.fast !== 'string' || typeof mi.standard !== 'string') return false;
