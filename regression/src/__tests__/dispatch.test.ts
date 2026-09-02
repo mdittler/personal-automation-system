@@ -75,12 +75,30 @@ function queuedCostTracker(values: number[]): CostMeterSource {
 	};
 }
 
+/**
+ * LLM stub for the foodShadow adapter.
+ *
+ * FoodShadowClassifier calls `completeWithMeta` (it needs `finishReason` to
+ * tell a reply truncated at its token cap from a malformed one), so a
+ * `complete`-only stub is not enough. `completeWithMeta` delegates to the same
+ * `complete` mock, keeping `vi.mocked(llm.complete)` assertions meaningful.
+ */
+function shadowLlm(complete: ReturnType<typeof vi.fn>, finishReason: 'stop' | 'length' = 'stop') {
+	return {
+		complete,
+		completeWithMeta: vi.fn(async (prompt: string, options?: unknown) => ({
+			text: await complete(prompt, options),
+			finishReason,
+		})),
+		classify: vi.fn(),
+	};
+}
+
 describe('foodShadow adapter — happy path', () => {
 	it('returns {action, confidence} JSON when classifier kind is ok', async () => {
-		const llm = {
-			complete: vi.fn().mockResolvedValue(JSON.stringify({ action: 'none', confidence: 0.7 })),
-			classify: vi.fn(),
-		};
+		const llm = shadowLlm(
+			vi.fn().mockResolvedValue(JSON.stringify({ action: 'none', confidence: 0.7 })),
+		);
 		const costTracker = queuedCostTracker([1.0, 1.0001]); // before, after
 		const adapters = buildClassifierAdapters({
 			llm: llm as never,
@@ -97,10 +115,7 @@ describe('foodShadow adapter — happy path', () => {
 
 describe('foodShadow adapter — parse-failed', () => {
 	it('returns the raw output WITHOUT throwing', async () => {
-		const llm = {
-			complete: vi.fn().mockResolvedValue('this is not json'),
-			classify: vi.fn(),
-		};
+		const llm = shadowLlm(vi.fn().mockResolvedValue('this is not json'));
 		const costTracker = queuedCostTracker([1.0, 1.0001]);
 		const adapters = buildClassifierAdapters({
 			llm: llm as never,
@@ -114,12 +129,9 @@ describe('foodShadow adapter — parse-failed', () => {
 	});
 
 	it('returns raw output when JSON is valid but action is not in label set', async () => {
-		const llm = {
-			complete: vi
-				.fn()
-				.mockResolvedValue(JSON.stringify({ action: 'INVALID_LABEL', confidence: 0.5 })),
-			classify: vi.fn(),
-		};
+		const llm = shadowLlm(
+			vi.fn().mockResolvedValue(JSON.stringify({ action: 'INVALID_LABEL', confidence: 0.5 })),
+		);
 		const costTracker = queuedCostTracker([1.0, 1.0001]);
 		const adapters = buildClassifierAdapters({
 			llm: llm as never,
@@ -135,10 +147,7 @@ describe('foodShadow adapter — parse-failed', () => {
 
 describe('foodShadow adapter — throws on llm-error', () => {
 	it('throws when the LLM call rejects', async () => {
-		const llm = {
-			complete: vi.fn().mockRejectedValue(new Error('network down')),
-			classify: vi.fn(),
-		};
+		const llm = shadowLlm(vi.fn().mockRejectedValue(new Error('network down')));
 		const costTracker = queuedCostTracker([1.0, 1.0]);
 		const adapters = buildClassifierAdapters({
 			llm: llm as never,
@@ -156,10 +165,7 @@ describe('foodShadow adapter — throws on llm-error', () => {
 			),
 			{ name: 'LLMEmptyOutputError' },
 		);
-		const llm = {
-			complete: vi.fn().mockRejectedValue(emptyOutput),
-			classify: vi.fn(),
-		};
+		const llm = shadowLlm(vi.fn().mockRejectedValue(emptyOutput));
 		const costTracker = queuedTracker([
 			{ cost: 1.0, tokens: { input: 100, output: 0 } },
 			{ cost: 1.0002, tokens: { input: 310, output: 176 } },
@@ -185,6 +191,44 @@ describe('foodShadow adapter — throws on llm-error', () => {
 		expect(err?.meter.tokenIn).toBe(210);
 		expect(err?.meter.tokenOut).toBe(176);
 		expect(err?.meter.costUsd).toBeCloseTo(0.0002, 7);
+	});
+
+	it('reports a cap-truncated reply as truncation, not as a JSON parse failure', async () => {
+		// Live 2026-09-01: ollama/muse-glimmer:30b-mlx overran the classifier's
+		// 80-token cap on a food-persona case and the harness reported
+		// "JSON parse failed: Unterminated string in JSON at position 369",
+		// blaming the schema for an exhausted budget.
+		const truncated =
+			'{"action": "user wants to log a meal they ate with a free text description of what it';
+		const llm = shadowLlm(vi.fn().mockResolvedValue(truncated), 'length');
+		const costTracker = queuedTracker([
+			{ cost: 1.0, tokens: { input: 100, output: 0 } },
+			{ cost: 1.0003, tokens: { input: 420, output: 80 } },
+		]);
+		const adapters = buildClassifierAdapters({
+			llm: llm as never,
+			logger: makeLogger(),
+			costTracker,
+			modelIds: MODEL_IDS,
+		});
+
+		const err = await adapters.foodShadow('had some kind of stew thing at my aunts place').then(
+			() => null,
+			(e: unknown) => e as MeteredError,
+		);
+
+		// Truncation must NOT come back as `{ kind: 'parse-failed' }` (which the
+		// adapter forwards to the structural oracle as a schema mismatch).
+		expect(err).toBeInstanceOf(MeteredError);
+		expect(err?.message).toContain('truncated-output');
+		expect(err?.message).toContain('80-token cap');
+		expect(err?.message).toContain("finishReason='length'");
+		expect(err?.message).toContain('user wants to log a meal');
+		// Truncation is terminal — the classifier does not spend a second call.
+		expect(llm.complete).toHaveBeenCalledTimes(1);
+		// The tokens burned on the truncated reply are still metered.
+		expect(err?.meter.tokenIn).toBe(320);
+		expect(err?.meter.tokenOut).toBe(80);
 	});
 });
 
@@ -393,10 +437,9 @@ describe('buildRecallAdapter', () => {
 // (1) Happy — foodShadow adapter reflects before/after token delta
 describe('foodShadow adapter — meter reflects the before/after token delta', () => {
 	it('tokenIn and tokenOut match the tracker before/after delta', async () => {
-		const llm = {
-			complete: vi.fn().mockResolvedValue(JSON.stringify({ action: 'none', confidence: 0.9 })),
-			classify: vi.fn(),
-		};
+		const llm = shadowLlm(
+			vi.fn().mockResolvedValue(JSON.stringify({ action: 'none', confidence: 0.9 })),
+		);
 		// Tracker steps from {0,0} to {412,78} over the call.
 		const costTracker = queuedTracker([
 			{ cost: 1.0, tokens: { input: 0, output: 0 } },
@@ -556,10 +599,9 @@ describe('recall adapter — prefilter skip yields tokenIn/tokenOut=0', () => {
 // (8) Security — meterCall clamps a negative token delta to 0
 describe('meterCall — clamps negative token delta to 0', () => {
 	it('tracker reports after < before; tokenIn and tokenOut are 0, never negative', async () => {
-		const llm = {
-			complete: vi.fn().mockResolvedValue(JSON.stringify({ action: 'none', confidence: 0.9 })),
-			classify: vi.fn(),
-		};
+		const llm = shadowLlm(
+			vi.fn().mockResolvedValue(JSON.stringify({ action: 'none', confidence: 0.9 })),
+		);
 		// Tracker goes backwards (mis-reporting): after.input < before.input
 		const costTracker = queuedTracker([
 			{ cost: 1.0, tokens: { input: 500, output: 200 } },
@@ -584,10 +626,9 @@ describe('meterCall — non-finite token delta is clamped to 0', () => {
 		{ label: 'Infinity after', before: 0, after: Number.POSITIVE_INFINITY },
 		{ label: '-Infinity after', before: 0, after: Number.NEGATIVE_INFINITY },
 	])('$label → tokenIn===0', async ({ before, after }) => {
-		const llm = {
-			complete: vi.fn().mockResolvedValue(JSON.stringify({ action: 'none', confidence: 0.9 })),
-			classify: vi.fn(),
-		};
+		const llm = shadowLlm(
+			vi.fn().mockResolvedValue(JSON.stringify({ action: 'none', confidence: 0.9 })),
+		);
 		const costTracker = queuedTracker([
 			{ cost: 1.0, tokens: { input: before, output: 0 } },
 			{ cost: 1.001, tokens: { input: after, output: 0 } },
@@ -607,10 +648,7 @@ describe('meterCall — non-finite token delta is clamped to 0', () => {
 // (10) Error — meterCall throws MeteredError carrying partial meter when fn() throws
 describe('meterCall — throws MeteredError carrying the partial meter when fn() throws', () => {
 	it('fn() throws after tracker advanced {50,10}; caught error is MeteredError with tokenIn===50', async () => {
-		const llm = {
-			complete: vi.fn().mockRejectedValue(new Error('network failure')),
-			classify: vi.fn(),
-		};
+		const llm = shadowLlm(vi.fn().mockRejectedValue(new Error('network failure')));
 		const costTracker = queuedTracker([
 			{ cost: 1.0, tokens: { input: 0, output: 0 } },
 			{ cost: 1.001, tokens: { input: 50, output: 10 } },
@@ -637,10 +675,7 @@ describe('meterCall — throws MeteredError carrying the partial meter when fn()
 // (11) Error — meterCall throws MeteredError with zero meter when fn() throws before any LLM call
 describe('meterCall — MeteredError with zero meter when fn() throws before any LLM call', () => {
 	it('tracker did not advance; meter.tokenIn===0', async () => {
-		const llm = {
-			complete: vi.fn().mockRejectedValue(new Error('immediate failure')),
-			classify: vi.fn(),
-		};
+		const llm = shadowLlm(vi.fn().mockRejectedValue(new Error('immediate failure')));
 		// Tracker does not advance — before and after are identical.
 		const costTracker = queuedTracker([
 			{ cost: 1.0, tokens: { input: 0, output: 0 } },
@@ -667,10 +702,9 @@ describe('meterCall — MeteredError with zero meter when fn() throws before any
 // (12) Config — provider with no usage object contributes 0 tokens
 describe('meterCall — provider with no usage object contributes 0 tokens', () => {
 	it('tracker returns identical before/after; tokenIn===0 while costUsd may be non-zero', async () => {
-		const llm = {
-			complete: vi.fn().mockResolvedValue(JSON.stringify({ action: 'none', confidence: 0.9 })),
-			classify: vi.fn(),
-		};
+		const llm = shadowLlm(
+			vi.fn().mockResolvedValue(JSON.stringify({ action: 'none', confidence: 0.9 })),
+		);
 		// Same before/after tokens (provider never reported usage), but cost advanced.
 		const costTracker = queuedTracker([
 			{ cost: 1.0, tokens: { input: 0, output: 0 } },

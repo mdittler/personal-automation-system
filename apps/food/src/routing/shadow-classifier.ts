@@ -1,14 +1,51 @@
-import type { AppLogger, LLMService } from '@pas/core/types';
+import type { AppLogger, LLMCompletionMeta, LLMService } from '@pas/core/types';
 import { classifyLLMError } from '@pas/core/utils/llm-errors';
 import type { ShadowResult } from './shadow-logger.js';
 
+/**
+ * LLM surface the shadow classifier needs. `completeWithMeta` is required (not
+ * `complete`) because the classifier must see `finishReason` to tell a reply cut
+ * off at SHADOW_MAX_TOKENS apart from a genuinely malformed one.
+ */
+export type FoodShadowClassifierLLM = Pick<LLMService, 'complete' | 'completeWithMeta'>;
+
 export interface FoodShadowClassifierOptions {
-	llm: LLMService;
+	llm: FoodShadowClassifierLLM;
 	logger: AppLogger;
 	labels: readonly string[];
 }
 
 const MAX_INPUT_CODE_UNITS = 1000;
+
+/**
+ * Output budget for the classifier call.
+ *
+ * The expected reply is one small JSON object —
+ * `{"action": "<label>", "confidence": 0.9}` — which measures 15–24 tokens for
+ * every label in FOOD_SHADOW_LABELS on the models this runs against
+ * (qwen3.8:27b-mlx, muse-glimmer:30b-mlx). 80 is ~3x that, so a well-behaved
+ * model never comes close.
+ *
+ * Deliberately NOT raised when a model overruns it. A 2026-09-01 live run had
+ * `ollama/muse-glimmer:30b-mlx` emit 369+ characters of JSON on the
+ * `food-user-wants-to-log-an-unfamiliar-meal-with-a-free-text-description`
+ * case and get cut mid-string; the harness reported
+ * `JSON parse failed: Unterminated string in JSON at position 369`, blaming the
+ * schema for what was really an exhausted budget. A model that needs 369+
+ * characters for this task is misbehaving — the fix is to say so (see the
+ * truncation branch in `interpret`), not to buy it more room.
+ */
+const SHADOW_MAX_TOKENS = 80;
+
+/** Chars of the truncated reply echoed in the diagnostic message. */
+const TRUNCATION_RAW_PREVIEW_CHARS = 200;
+
+/**
+ * `llm-error` category for a reply the provider cut at SHADOW_MAX_TOKENS.
+ * Distinct from `classifyLLMError`'s categories (which describe *thrown*
+ * provider failures) — nothing throws here, the output just stops early.
+ */
+export const TRUNCATED_OUTPUT_CATEGORY = 'truncated-output';
 
 /**
  * Truncate to maxLength UTF-16 code units and collapse runs of ≥3 consecutive
@@ -102,36 +139,71 @@ export class FoodShadowClassifier {
 
 		const prompt = buildShadowClassifierPrompt(trimmed, this.opts.labels);
 		// First call.
-		let raw: string;
+		let meta: LLMCompletionMeta;
 		try {
-			raw = await this.callLLM(prompt);
+			meta = await this.callLLM(prompt);
 		} catch (err) {
 			return this.handleLLMError(err);
 		}
 
-		const first = parseShadowResponse(raw, this.opts.labels);
+		const first = this.interpret(meta);
 		if (first.kind === 'ok') return first;
+		// Truncation is terminal: the same prompt against the same cap produces
+		// the same cut, so re-asking would only burn a second call.
+		if (first.kind === 'llm-error') return first;
 
 		// Retry ONLY when the first call returned empty output. Non-empty
 		// unparseable output (rare) likely repeats on retry and the
 		// parse-failed sentinel is the right outcome — mirrors recall-classifier.
 		// Hard cap at 2 LLM calls.
-		if (raw.trim().length > 0) return first;
+		if ((meta.text ?? '').trim().length > 0) return first;
 
-		let raw2: string;
+		let meta2: LLMCompletionMeta;
 		try {
-			raw2 = await this.callLLM(prompt + REPAIR_SUFFIX);
+			meta2 = await this.callLLM(prompt + REPAIR_SUFFIX);
 		} catch (err) {
 			return this.handleLLMError(err);
 		}
-		return parseShadowResponse(raw2, this.opts.labels);
+		return this.interpret(meta2);
 	}
 
-	private async callLLM(prompt: string): Promise<string> {
-		return this.opts.llm.complete(prompt, {
+	/**
+	 * Turn one completion into a ShadowResult, separating a reply the provider
+	 * cut at SHADOW_MAX_TOKENS from one the model actually malformed.
+	 *
+	 * Parse first: a reply that satisfies the schema is complete by construction
+	 * (exact label + in-range confidence + closing brace), so `finishReason` is
+	 * moot on the good path. Only on a parse failure does the finish reason
+	 * decide *which* failure to report.
+	 *
+	 * Empty output is deliberately excluded from the truncation branch: that is
+	 * the retry-on-empty path in `classify`, and a provider that burns its whole
+	 * budget producing nothing already raises LLMEmptyOutputError upstream.
+	 */
+	private interpret(meta: LLMCompletionMeta): ShadowResult {
+		const raw = meta.text ?? '';
+		const parsed = parseShadowResponse(raw, this.opts.labels);
+		if (parsed.kind === 'ok') return parsed;
+		if (raw.trim().length > 0 && meta.finishReason === 'length') {
+			// JSON.stringify (not a bare slice) so a multi-line reply stays on one
+			// line and control characters are escaped — this text lands in a log
+			// line and in the regression harness's MeteredError message.
+			const preview = JSON.stringify(raw.slice(0, TRUNCATION_RAW_PREVIEW_CHARS));
+			const message = `shadow classifier output truncated at the ${SHADOW_MAX_TOKENS}-token cap (finishReason='length'); the model did not finish its JSON object. raw=${preview}`;
+			this.opts.logger.warn('FoodShadowClassifier: %s', message);
+			return { kind: 'llm-error', category: TRUNCATED_OUTPUT_CATEGORY, message };
+		}
+		return parsed;
+	}
+
+	private async callLLM(prompt: string): Promise<LLMCompletionMeta> {
+		// completeWithMeta (not complete) so `finishReason` is available: a reply
+		// cut off at SHADOW_MAX_TOKENS must be reported as truncation, not as
+		// malformed JSON.
+		return this.opts.llm.completeWithMeta(prompt, {
 			tier: 'fast',
 			temperature: 0,
-			maxTokens: 80,
+			maxTokens: SHADOW_MAX_TOKENS,
 			responseFormat: 'json',
 		});
 	}

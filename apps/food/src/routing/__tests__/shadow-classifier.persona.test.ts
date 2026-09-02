@@ -33,8 +33,12 @@ import { FOOD_PERSONAS } from './shadow-classifier.personas.js';
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
 function mockLLM(response: string): LLMService {
+	// The classifier calls `completeWithMeta`; `complete` stays wired for any
+	// assertion that reaches for it.
+	const complete = vi.fn().mockResolvedValue(response);
 	return {
-		complete: vi.fn().mockResolvedValue(response),
+		complete,
+		completeWithMeta: vi.fn(async () => ({ text: response, finishReason: 'stop' as const })),
 		classify: vi.fn(),
 		extractStructured: vi.fn(),
 		getModelForTier: vi.fn(),
