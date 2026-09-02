@@ -111,7 +111,12 @@ export interface SpawnRegressionOptions extends Partial<RegressionSpawnTarget> {
 	spawnFn?: SpawnFn;
 	onEvent: (event: RegressionEvent) => void;
 	signal?: AbortSignal;
+	/** Maximum silence allowed before a wedged CLI is terminated. */
+	outputStallTimeoutMs?: number;
 }
+
+/** A model request that produces no CLI output for this long is considered wedged. */
+export const DEFAULT_OUTPUT_STALL_TIMEOUT_MS = 10 * 60 * 1000;
 
 function defaultSpawn(args: readonly string[], options: SpawnRegressionOptions): SpawnProcLike {
 	if (!options.cliPath) {
@@ -143,6 +148,8 @@ export async function spawnRegression(
 	// `gate-failed` events can name the model that was actually tested.
 	let modelIdsReceived: unknown = undefined;
 	let stderrTail = '';
+	const outputStallTimeoutMs = options.outputStallTimeoutMs ?? DEFAULT_OUTPUT_STALL_TIMEOUT_MS;
+	let outputStallTimer: NodeJS.Timeout | null = null;
 
 	// Single-shot terminal-event latch. Stream errors race normal exit, cancel
 	// races with crashes, and spawn ENOENT fires proc.on('error') without ever
@@ -162,6 +169,10 @@ export async function spawnRegression(
 	function finishOnce(event: RegressionEvent): void {
 		if (finished) return;
 		finished = true;
+		if (outputStallTimer) {
+			clearTimeout(outputStallTimer);
+			outputStallTimer = null;
+		}
 		options.onEvent(event);
 		resolveTerminated();
 		// Unstick the normal exit path so its closures can be GC'd. proc.error
@@ -257,6 +268,24 @@ export async function spawnRegression(
 			killTimer = null;
 		}
 	});
+
+	function armOutputStallWatchdog(): void {
+		if (!Number.isFinite(outputStallTimeoutMs) || outputStallTimeoutMs <= 0 || finished) return;
+		if (outputStallTimer) clearTimeout(outputStallTimer);
+		outputStallTimer = setTimeout(() => {
+			finishOnce({
+				type: 'failed',
+				exitCode: 1,
+				stderrTail: `regression subprocess produced no output for ${outputStallTimeoutMs}ms; stopped as stalled`,
+			});
+			sigtermWithSigkillFallback();
+		}, outputStallTimeoutMs);
+	}
+
+	// Any stdout chunk proves the child is alive, even if it is a diagnostic
+	// rather than one of the NDJSON event shapes parsed below.
+	proc.stdout.on('data', armOutputStallWatchdog);
+	armOutputStallWatchdog();
 
 	const whenComplete = (async () => {
 		// Wire cancel BEFORE awaiting in case the caller fires it synchronously.

@@ -392,6 +392,41 @@ describe('spawnRegression — cancel', () => {
 	});
 });
 
+describe('spawnRegression — output-stall watchdog', () => {
+	it('fails and stops a child that produces no output within the configured timeout', async () => {
+		const proc = new EventEmitter() as SpawnProcLike;
+		const stdout = new Readable({ read() {} });
+		const stderr = new Readable({ read() {} });
+		proc.stdout = stdout;
+		proc.stderr = stderr;
+		proc.pid = 1;
+		const evts: RegressionEvent[] = [];
+		const signals: Array<NodeJS.Signals | undefined> = [];
+		proc.kill = (signal) => {
+			signals.push(signal);
+			setImmediate(() => {
+				stdout.push(null);
+				stderr.push(null);
+				proc.emit('exit', null, signal ?? null);
+			});
+			return true;
+		};
+		const handle = await spawnRegression(['--json'], {
+			spawnFn: () => proc,
+			onEvent: (e) => evts.push(e),
+			outputStallTimeoutMs: 5,
+		});
+
+		await handle.whenComplete;
+
+		expect(signals).toContain('SIGTERM');
+		const failed = evts.find((event) => event.type === 'failed') as
+			| { type: 'failed'; stderrTail: string }
+			| undefined;
+		expect(failed?.stderrTail).toContain('no output for 5ms');
+	});
+});
+
 describe('validateSpawnArgs — allowlist (security)', () => {
 	it('accepts --json', () => {
 		expect(() => validateSpawnArgs(['--json'])).not.toThrow();
