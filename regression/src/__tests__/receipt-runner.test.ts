@@ -25,6 +25,7 @@ import {
 	llmShim,
 	llmShimFromMock,
 	makeCase,
+	makeChargingCostTracker,
 	makeReceiptDeps,
 	makeTempDir,
 	removeTempDir,
@@ -60,8 +61,14 @@ describe('runReceiptCase — production parser integration', () => {
 				{ name: 'Milk', totalPrice: 3.49 },
 			],
 		});
-		const llmComplete = vi.fn().mockResolvedValue(
-			JSON.stringify({
+		// The meter advances only when the LLM actually dispatches, so
+		// `result.costUsd` proves the runner reads a real CostTracker delta and
+		// not the pre-charge projection (which used to be the recorded cost, and
+		// was structurally $0 for every model).
+		const meter = makeChargingCostTracker({ costUsd: 0.021, input: 2165, output: 976 });
+		const llmComplete = vi.fn().mockImplementation(async () => {
+			meter.charge();
+			return JSON.stringify({
 				store: 'Walmart',
 				date: '2026-04-15',
 				lineItems: [
@@ -71,13 +78,14 @@ describe('runReceiptCase — production parser integration', () => {
 				subtotal: 8.48,
 				tax: 39.34,
 				total: 47.82,
-			}),
-		);
-		const deps = makeReceiptDeps(llmShimFromMock(llmComplete));
+			});
+		});
+		const deps = makeReceiptDeps(llmShimFromMock(llmComplete), { costTracker: meter });
 		const result = await runReceiptCase(makeCase(photoPath, sidecarPath), deps);
 		expect(result.verdict).toBe(VERDICT.pass);
 		expect(result.actuals).toHaveLength(1);
-		expect(result.costUsd).toBeCloseTo(0.02, 4);
+		expect(result.costUsd).toBeCloseTo(0.021, 4);
+		expect(result.tokenCounts).toEqual({ input: 2165, output: 976 });
 		expect(llmComplete).toHaveBeenCalledTimes(1);
 		const callArgs = llmComplete.mock.calls[0];
 		if (!callArgs) throw new Error('expected llm.complete to have been called');
@@ -214,8 +222,12 @@ describe('runReceiptCase — production parser integration', () => {
 			total: 4.99,
 			lineItems: [{ name: 'Eggs', totalPrice: 4.99 }],
 		});
-		const llmComplete = vi.fn().mockResolvedValue(
-			JSON.stringify({
+		// The first dispatch really bills $0.02 (metered), so the second input's
+		// $0.05 projection pushes 0.02 + 0.05 = 0.07 past the $0.05 case budget.
+		const meter = makeChargingCostTracker({ costUsd: 0.02 });
+		const llmComplete = vi.fn().mockImplementation(async () => {
+			meter.charge();
+			return JSON.stringify({
 				store: 'Walmart',
 				date: '2026-04-15',
 				lineItems: [
@@ -225,11 +237,12 @@ describe('runReceiptCase — production parser integration', () => {
 				subtotal: 104.99,
 				tax: 0,
 				total: 104.99,
-			}),
-		);
-		// estimate: first call $0.02 (fits in $0.05 budget), second call $0.05 (would push 0.02+0.05=0.07 > 0.05)
+			});
+		});
+		// estimate: first call $0.02 (fits in $0.05 budget), second call $0.05
 		let callIdx = 0;
 		const deps = makeReceiptDeps(llmShimFromMock(llmComplete), {
+			costTracker: meter,
 			estimateUsd: () => {
 				callIdx += 1;
 				return callIdx === 1 ? 0.02 : 0.05;
@@ -1041,23 +1054,26 @@ describe('runReceiptCase — transcription oracle (Batch 3)', () => {
 			total: 4.99,
 			lineItems: [{ name: 'Eggs', totalPrice: 4.99, confidence: 'high' }],
 		});
-		const llmComplete = vi.fn().mockResolvedValue(
-			JSON.stringify({
+		const meter = makeChargingCostTracker({ costUsd: 0.02 });
+		const llmComplete = vi.fn().mockImplementation(async () => {
+			meter.charge();
+			return JSON.stringify({
 				store: 'Walmart',
 				date: '2026-04-15',
 				lineItems: [{ name: 'Eggs', quantity: 1, unitPrice: 4.99, totalPrice: 4.99 }],
 				subtotal: 4.99,
 				tax: 0,
 				total: 4.99,
-			}),
-		);
-		const deps = makeReceiptDeps(llmShimFromMock(llmComplete));
+			});
+		});
+		const deps = makeReceiptDeps(llmShimFromMock(llmComplete), { costTracker: meter });
 		const result = await runReceiptCase(
 			makeCaseWithTranscription(photoPath, sidecarPath, trxPath, 'budget-once'),
 			deps,
 		);
 		expect(result.verdict).toBe(VERDICT.pass);
-		// One parser call → one charge of the estimated $0.02 (see makeReceiptDeps).
+		// Two oracles ran, but only ONE parser dispatch happened → exactly one
+		// metered charge (the delta is read once per input, not once per oracle).
 		expect(llmComplete).toHaveBeenCalledTimes(1);
 		expect(result.costUsd).toBeCloseTo(0.02, 4);
 	});

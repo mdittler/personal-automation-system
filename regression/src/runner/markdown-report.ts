@@ -18,6 +18,7 @@ import {
 	type RunSummary,
 	VERDICT,
 } from '@core/types/regression.js';
+import type { EstimateCall, EstimateUsdFn } from '../shared/types.js';
 
 export const ACCURACY_GATE_THRESHOLD = 0.95;
 export const FOOD_SHADOW_INPUT_FLOOR = 20;
@@ -77,12 +78,23 @@ export function buildSummary(
  */
 export function formatDryRunMarkdown(
 	results: readonly RunResult[],
-	estimateUsd: (call: { tokenIn: number; tokenOut: number }) => number,
+	estimateUsd: EstimateUsdFn,
 ): string {
 	const ESTIMATE_TOKENS = { tokenIn: 400, tokenOut: 80 };
 	const totalCases = results.length;
 	const totalInputs = results.reduce((n, r) => n + r.inputs.length, 0);
-	const estimatedCost = estimateUsd(ESTIMATE_TOKENS) * totalInputs;
+	// Price each case against the tier it would actually run on (recorded by
+	// `makeDryRunResult`). A single fast-tier rate for every case both
+	// under-charges receipt/chatbot and, on a mixed local/remote matrix,
+	// quotes remote rates for buckets served by a local model.
+	const estimatedCost = results.reduce((usd, r) => {
+		const tier = r.evaluatedTier;
+		const call: EstimateCall =
+			tier === 'fast' || tier === 'standard' || tier === 'reasoning'
+				? { ...ESTIMATE_TOKENS, tier }
+				: ESTIMATE_TOKENS;
+		return usd + estimateUsd(call) * r.inputs.length;
+	}, 0);
 	return [
 		'DRY RUN — no LLM calls were made. The numbers below are estimates.',
 		'',

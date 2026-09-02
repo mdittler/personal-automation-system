@@ -33,7 +33,7 @@
     </label>
     <button type="submit" class="primary" <% if (it.activeRunId) { %>disabled<% } %>>
       <% if (it.selectedBucket) { %>Run bucket: <%= it.selectedBucket %><% } else { %>Run all<% } %>
-      <span class="estimate">— est. ≈ $<%= it.estimate.totalUsd %> (cap $<%= it.estimate.ceilingUsd %>)</span>
+      <span class="estimate">— est. ≈ $<%= it.estimate.totalUsd %><% if (it.estimate.allLocal) { %> (all-local run)<% } %> (cap $<%= it.estimate.ceilingUsd %>)</span>
     </button>
     <% if (it.activeRunId) { %>
       <span class="active-run-notice">Run <%= it.activeRunId %> in progress — <a href="/gui/regression">view live</a></span>

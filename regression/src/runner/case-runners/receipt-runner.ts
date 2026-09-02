@@ -26,6 +26,7 @@ import { type StructuralExpectation, runStructuralOracle } from '../../oracles/s
 import { runTranscriptionOracle } from '../../oracles/transcription.js';
 import { todayInTimezone } from '../../shared/cache-key.js';
 import {
+	type EstimateUsdFn,
 	ORACLE_LABEL,
 	type OracleVerdict,
 	type PersonaCase,
@@ -48,11 +49,16 @@ export function combineVerdicts(prev: Verdict, next: Verdict): Verdict {
 	return prev;
 }
 
+/**
+ * Structurally identical to `routing-runner`'s `MinimalLogger`: pino-style
+ * calls put the context object FIRST (`warn({caseId}, 'message')`), so the
+ * parameters are untyped rest args rather than `(msg, ...rest)`.
+ */
 interface MinimalLogger {
-	warn: (msg: string, ...rest: unknown[]) => void;
-	info: (msg: string, ...rest: unknown[]) => void;
-	error: (msg: string, ...rest: unknown[]) => void;
-	debug: (msg: string, ...rest: unknown[]) => void;
+	warn: (...args: unknown[]) => void;
+	info: (...args: unknown[]) => void;
+	error: (...args: unknown[]) => void;
+	debug: (...args: unknown[]) => void;
 }
 
 export interface ReceiptRunnerDeps {
@@ -67,18 +73,37 @@ export interface ReceiptRunnerDeps {
 	cacheKey: string;
 	caseBudgetUsd: number;
 	/**
-	 * Estimate USD for the next LLM call. Real wiring will derive this from
+	 * Estimate USD for the next LLM call. Real wiring derives this from
 	 * `CostTracker.estimateCost`. Unit tests inject a stub.
 	 */
-	estimateUsd: (call: { tokenIn: number; tokenOut: number }) => number;
+	estimateUsd: EstimateUsdFn;
 	/**
 	 * Token + cost meter source. Read before/after each `parseReceiptFromPhoto`
-	 * call (in `finally` so tokens are counted even when the parser throws
-	 * after an LLM call completes). Real wiring passes the shared `CostTracker`.
-	 * Unit tests inject a stub.
+	 * call (in `finally` so tokens AND cost are counted even when the parser
+	 * throws after an LLM call completes). Real wiring passes the shared
+	 * `CostTracker`. Unit tests inject a stub.
 	 */
 	costTracker: CostMeterSource;
 }
+
+/**
+ * Pre-charge token budget for one receipt dispatch.
+ *
+ * A receipt photo plus the extraction prompt measures ~2.2k input tokens and
+ * ~1k output tokens against `claude-sonnet-4-6`; this is a deliberate
+ * over-estimate of that so the gate errs toward blocking. It is emphatically
+ * NOT `{tokenIn: 0, tokenOut: 0}` — zero tokens made the projection $0 for
+ * every model, which silently disabled both the per-case gate and (via the
+ * accumulator) the whole-run budget ceiling.
+ *
+ * `tier: 'standard'` because `parseReceiptFromPhoto` dispatches on the
+ * standard slot.
+ */
+export const RECEIPT_ESTIMATE_TOKENS = {
+	tokenIn: 4000,
+	tokenOut: 1200,
+	tier: 'standard',
+} as const;
 
 interface ReceiptPayload {
 	photoFixture: string;
@@ -262,9 +287,13 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 		// budget. The estimate is conservative (no usage data is available
 		// until after the call returns), so the gate prevents over-spend
 		// rather than refunding it.
-		const projectedNextCost = deps.estimateUsd({ tokenIn: 0, tokenOut: 0 });
+		const projectedNextCost = deps.estimateUsd(RECEIPT_ESTIMATE_TOKENS);
 		if (costUsd + projectedNextCost > deps.caseBudgetUsd) {
 			if (aggregateVerdict === VERDICT.pass) aggregateVerdict = VERDICT.budgetExceeded;
+			deps.logger.warn(
+				{ caseId: c.id, costUsd, projected: projectedNextCost, budget: deps.caseBudgetUsd },
+				'receipt-runner: case budget exceeded — aborting input loop',
+			);
 			break;
 		}
 
@@ -274,10 +303,18 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 		const sidecar = JSON.parse(sidecarText) as ReceiptSidecar;
 
 		let parsed: Awaited<ReturnType<typeof parseReceiptFromPhoto>>;
-		// Read token snapshot before dispatch. The `finally` block reads the
-		// snapshot again so tokens spent before a post-LLM throw are still
-		// counted (e.g. the model returned but JSON post-parsing threw).
+		// Read token + cost snapshots before dispatch. The `finally` block reads
+		// them again so spend incurred before a post-LLM throw is still counted
+		// (e.g. the model returned but JSON post-parsing threw).
+		//
+		// `costUsd` is a REAL `getMonthlyTotalCost()` delta, mirroring
+		// `chatbot-runner` and `rubric` — never the pre-charge projection. The
+		// projection existed only to gate the next call; charging it as the
+		// result's cost made every receipt case report exactly $0 (the old
+		// projection used zero tokens), which in turn fed `runBudget.add(0)`
+		// and left the whole-run ceiling unable to stop a receipt sweep.
 		const tokBefore = deps.costTracker.getTokenUsageTotals();
+		const costBefore = deps.costTracker.getMonthlyTotalCost();
 		try {
 			parsed = await parseReceiptFromPhoto(services, photoBuf, mimeFor(payload.photoFixture));
 		} catch (err) {
@@ -293,11 +330,9 @@ export async function runReceiptCase(c: PersonaCase, deps: ReceiptRunnerDeps): P
 			const tokAfter = deps.costTracker.getTokenUsageTotals();
 			tokenIn += Math.max(0, tokAfter.input - tokBefore.input);
 			tokenOut += Math.max(0, tokAfter.output - tokBefore.output);
+			costUsd += Math.max(0, deps.costTracker.getMonthlyTotalCost() - costBefore);
 		}
 		actuals.push(parsed);
-
-		// Successful call charges the budget. Failed calls don't.
-		costUsd += projectedNextCost;
 
 		// Collect the verdicts produced for THIS input (structural always,
 		// transcription conditionally) so the aggregation pass can apply

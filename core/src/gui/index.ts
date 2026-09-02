@@ -359,6 +359,7 @@ export async function registerGuiRoutes(
 				weaknessSummarizer: regressionWeaknessSummarizer,
 				modelCatalog,
 				modelSelector,
+				providerRegistry,
 				cacheDir,
 				maxRunBudgetUsd: config.regression?.maxRunBudgetUsd ?? 5,
 				logger,

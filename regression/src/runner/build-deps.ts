@@ -23,9 +23,11 @@ import { ModelCatalog } from '@core/services/llm/model-catalog.js';
 import { ModelSelector } from '@core/services/llm/model-selector.js';
 import { createProvider } from '@core/services/llm/providers/provider-factory.js';
 import { ProviderRegistry } from '@core/services/llm/providers/provider-registry.js';
+import type { ModelRef, ModelTier, ProviderType } from '@core/types/llm.js';
 import type { TierModelSnapshot } from '@core/types/regression.js';
 import { type Logger, pino } from 'pino';
 import { todayInTimezone } from '../shared/cache-key.js';
+import type { EstimateUsdFn } from '../shared/types.js';
 import type { CliOptions } from './args.js';
 import { type TierOverride, createChatbotEnvironment } from './chatbot-environment.js';
 import { buildClassifierAdapters, buildRecallAdapter } from './dispatch.js';
@@ -42,6 +44,44 @@ function applyAllTransientOverrides(selector: ModelSelector, override?: TierOver
 	if (override?.fast) selector.applyTransientOverride('fast', override.fast);
 	if (override?.standard) selector.applyTransientOverride('standard', override.standard);
 	if (override?.reasoning) selector.applyTransientOverride('reasoning', override.reasoning);
+}
+
+/**
+ * Per-tier pricing inputs for the pre-flight estimator: the resolved model id
+ * AND the provider type serving it.
+ *
+ * The provider type is the load-bearing half. `estimateCallCost` can only
+ * short-circuit local models to $0 when it is told `providerType`; given a
+ * model id alone, a local model with no `MODEL_PRICING` entry (e.g.
+ * `qwen3.8:27b-mlx`) silently falls through to `DEFAULT_REMOTE_PRICING` and
+ * gets quoted at frontier rates.
+ *
+ * Deliberately kept OUT of `TierModelSnapshot`: that type is serialized into
+ * the regression cache key (`shared/cache-key.ts`), so widening it would
+ * invalidate every cached result. Provider information rides alongside the
+ * snapshot instead of inside it.
+ */
+export interface TierPricingRef {
+	model: string;
+	providerType?: ProviderType;
+}
+
+export type TierPricingRefs = Readonly<Record<ModelTier, TierPricingRef>>;
+
+/**
+ * Build an `estimateUsd` that prices a call against the tier it will ACTUALLY
+ * run on, with that tier's provider type. Falls back to the fast tier when a
+ * caller omits `tier` (the historical behaviour of every routing/recall call
+ * site).
+ */
+export function makeTierAwareEstimator(
+	costTracker: Pick<CostTracker, 'estimateCost'>,
+	refs: TierPricingRefs,
+): EstimateUsdFn {
+	return (call) => {
+		const ref = refs[call.tier ?? 'fast'] ?? refs.fast;
+		return costTracker.estimateCost(ref.model, call.tokenIn, call.tokenOut, ref.providerType);
+	};
 }
 
 interface RepoPaths {
@@ -135,12 +175,19 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 		}
 	}
 
-	// Compose LLM service + resolve tier IDs in parallel — both read the same
+	// Compose LLM service + resolve tier refs in parallel — both read the same
 	// model-selection.yaml independently and have no other shared state.
-	const [llm, modelIds] = await Promise.all([
+	const [llm, tierRefs] = await Promise.all([
 		composeLLMService(config, costTracker, logger, registry, opts?.tierOverride),
-		resolveTierModelIds(config, logger, opts?.tierOverride),
+		resolveTierRefs(config, logger, opts?.tierOverride),
 	]);
+	const modelIds = tierRefsToSnapshot(tierRefs);
+	// Provider type per tier, resolved through the SAME registry the LLM
+	// service dispatches through — mirrors `compose-runtime.ts`'s
+	// `guardPriceLookup`. This is what makes an all-local matrix estimate $0.
+	const pricingRefs = buildTierPricingRefs(tierRefs, modelIds, (providerId) =>
+		providerId === undefined ? undefined : registry.get(providerId)?.providerType,
+	);
 	const maxRunBudgetUsd = config.regression?.maxRunBudgetUsd ?? DEFAULT_MAX_RUN_BUDGET_USD;
 
 	const minimalLogger = {
@@ -199,7 +246,7 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 		repoRoot: paths.repoRoot,
 		modelIds,
 		maxRunBudgetUsd,
-		estimateUsd: (call) => costTracker.estimateCost(modelIds.fast, call.tokenIn, call.tokenOut),
+		estimateUsd: makeTierAwareEstimator(costTracker, pricingRefs),
 		classifiers,
 		recallAdapter,
 		chatbotEnvFactory,
@@ -418,6 +465,21 @@ export async function resolveTierModelIds(
 	logger: Logger,
 	tierOverride?: TierOverride,
 ): Promise<TierModelSnapshot> {
+	return tierRefsToSnapshot(await resolveTierRefs(config, logger, tierOverride));
+}
+
+/**
+ * Resolve the full `ModelRef` (provider + model) for each tier.
+ *
+ * `resolveTierModelIds` narrows this to the cache-key snapshot; the estimator
+ * needs the provider half as well, so both derive from one `ModelSelector`
+ * load rather than loading it twice.
+ */
+export async function resolveTierRefs(
+	config: Awaited<ReturnType<typeof loadSystemConfig>>,
+	logger: Logger,
+	tierOverride?: TierOverride,
+): Promise<Readonly<Record<ModelTier, ModelRef | undefined>>> {
 	const llmConfig = config.llm;
 	const modelSelector = new ModelSelector({
 		dataDir: config.dataDir,
@@ -434,10 +496,49 @@ export async function resolveTierModelIds(
 	});
 	await modelSelector.load();
 	applyAllTransientOverrides(modelSelector, tierOverride);
-	const fast = modelSelector.getTierRef('fast')?.model ?? 'unknown';
-	const standard = modelSelector.getTierRef('standard')?.model ?? 'unknown';
-	const reasoning = modelSelector.getTierRef('reasoning')?.model ?? null;
-	return { fast, standard, reasoning };
+	return {
+		fast: modelSelector.getTierRef('fast'),
+		standard: modelSelector.getTierRef('standard'),
+		reasoning: modelSelector.getTierRef('reasoning'),
+	};
+}
+
+/**
+ * Narrow tier refs to the cache-key snapshot. The shape here is frozen:
+ * `shared/cache-key.ts` serializes exactly these three fields, so any change
+ * invalidates every cached result.
+ */
+export function tierRefsToSnapshot(
+	refs: Readonly<Record<ModelTier, ModelRef | undefined>>,
+): TierModelSnapshot {
+	return {
+		fast: refs.fast?.model ?? 'unknown',
+		standard: refs.standard?.model ?? 'unknown',
+		reasoning: refs.reasoning?.model ?? null,
+	};
+}
+
+/**
+ * Pair each tier's model id with the provider type serving it.
+ *
+ * The `reasoning` slot may be unset; it falls back to `standard` so a case
+ * that asks for it still gets a real price rather than an unknown-model
+ * remote guess.
+ */
+export function buildTierPricingRefs(
+	refs: Readonly<Record<ModelTier, ModelRef | undefined>>,
+	modelIds: TierModelSnapshot,
+	providerTypeOf: (providerId: string | undefined) => ProviderType | undefined,
+): TierPricingRefs {
+	const entry = (ref: ModelRef | undefined, model: string): TierPricingRef => {
+		const providerType = providerTypeOf(ref?.provider);
+		return providerType === undefined ? { model } : { model, providerType };
+	};
+	return {
+		fast: entry(refs.fast, modelIds.fast),
+		standard: entry(refs.standard, modelIds.standard),
+		reasoning: entry(refs.reasoning ?? refs.standard, modelIds.reasoning ?? modelIds.standard),
+	};
 }
 
 /**

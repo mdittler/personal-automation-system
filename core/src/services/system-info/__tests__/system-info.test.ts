@@ -25,14 +25,18 @@ function createMockDeps(overrides?: Record<string, unknown>) {
 		setReasoningRef: vi.fn().mockResolvedValue(undefined),
 	} as unknown as ModelSelector;
 
+	const registeredProviders: Record<string, LLMProviderClient> = {
+		anthropic: { providerId: 'anthropic', providerType: 'anthropic' } as LLMProviderClient,
+		// A local llama.cpp server. It can advertise ANY model id it likes —
+		// including one that collides with a priced remote model.
+		'local-llama': { providerId: 'local-llama', providerType: 'llama-cpp' } as LLMProviderClient,
+		ollama: { providerId: 'ollama', providerType: 'ollama' } as LLMProviderClient,
+	};
 	const providerRegistry = {
-		getAll: vi
-			.fn()
-			.mockReturnValue([
-				{ providerId: 'anthropic', providerType: 'anthropic' } as LLMProviderClient,
-			]),
-		getProviderIds: vi.fn().mockReturnValue(['anthropic']),
-		has: vi.fn().mockImplementation((id: string) => id === 'anthropic'),
+		getAll: vi.fn().mockReturnValue(Object.values(registeredProviders)),
+		getProviderIds: vi.fn().mockReturnValue(Object.keys(registeredProviders)),
+		has: vi.fn().mockImplementation((id: string) => id in registeredProviders),
+		get: vi.fn().mockImplementation((id: string) => registeredProviders[id]),
 	} as unknown as ProviderRegistry;
 
 	const modelCatalog = {
@@ -137,8 +141,11 @@ describe('SystemInfoServiceImpl', () => {
 		it('returns provider info from registry', () => {
 			const svc = new SystemInfoServiceImpl(createMockDeps());
 			const providers = svc.getProviders();
-			expect(providers).toHaveLength(1);
-			expect(providers[0]).toEqual({ id: 'anthropic', type: 'anthropic' });
+			expect(providers).toEqual([
+				{ id: 'anthropic', type: 'anthropic' },
+				{ id: 'local-llama', type: 'llama-cpp' },
+				{ id: 'ollama', type: 'ollama' },
+			]);
 		});
 
 		it('returns empty array when no providers registered', () => {
@@ -187,6 +194,31 @@ describe('SystemInfoServiceImpl', () => {
 			const svc = new SystemInfoServiceImpl(createMockDeps());
 			const pricing = svc.getModelPricing('unknown-model-xyz');
 			expect(pricing).toBeNull();
+		});
+
+		// Local inference (Ollama, llama.cpp) runs on the operator's own
+		// hardware and is never billed per token. A local server can serve a
+		// GGUF under any id it likes, so an id-only lookup would happily show
+		// admin remote pricing for a free model. Mirrors the same guard in
+		// `openai-compatible-provider.listModels`.
+		it('returns null for a local provider even when the model id collides with a priced model', () => {
+			const svc = new SystemInfoServiceImpl(createMockDeps());
+			// Same id, two providers: only the remote one is priced.
+			expect(svc.getModelPricing('gpt-4o', 'anthropic')).not.toBeNull();
+			expect(svc.getModelPricing('gpt-4o', 'local-llama')).toBeNull();
+			expect(svc.getModelPricing('gpt-4o', 'ollama')).toBeNull();
+		});
+
+		it('returns null for every priced model id served locally', () => {
+			const svc = new SystemInfoServiceImpl(createMockDeps());
+			for (const id of ['claude-sonnet-4-6', 'gemini-2.5-pro', 'gpt-4.1', 'o3']) {
+				expect(svc.getModelPricing(id, 'ollama')).toBeNull();
+			}
+		});
+
+		it('an unregistered provider id makes no locality claim (pricing preserved)', () => {
+			const svc = new SystemInfoServiceImpl(createMockDeps());
+			expect(svc.getModelPricing('gpt-4o', 'not-registered')).not.toBeNull();
 		});
 	});
 

@@ -24,6 +24,7 @@ import { relative } from 'node:path';
 import { requestContext } from '@core/services/context/request-context.js';
 import type { LLMService } from '@core/types/llm.js';
 import {
+	type EvaluatedTier,
 	type PersonaCase,
 	type RoutingTarget,
 	type RunResult,
@@ -33,13 +34,14 @@ import {
 } from '@core/types/regression.js';
 import type { RubricJudgeLLM } from '../oracles/rubric.js';
 import { bucketCacheSalt, computeCacheKey } from '../shared/cache-key.js';
+import type { EstimateCall, EstimateUsdFn } from '../shared/types.js';
 import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
 import { RunBudget } from './budget.js';
 import { CacheStore } from './cache.js';
 import { loadCases } from './case-loader.js';
-import { runChatbotCase } from './case-runners/chatbot-runner.js';
+import { CHATBOT_ESTIMATE_TOKENS, runChatbotCase } from './case-runners/chatbot-runner.js';
 import { runRecallCase } from './case-runners/recall-runner.js';
-import { runReceiptCase } from './case-runners/receipt-runner.js';
+import { RECEIPT_ESTIMATE_TOKENS, runReceiptCase } from './case-runners/receipt-runner.js';
 import {
 	ESTIMATE_TOKENS,
 	type MinimalLogger,
@@ -62,7 +64,7 @@ export interface RunSuiteOptions {
 	repoRoot: string;
 	modelIds: TierModelSnapshot;
 	maxRunBudgetUsd: number;
-	estimateUsd: (call: { tokenIn: number; tokenOut: number }) => number;
+	estimateUsd: EstimateUsdFn;
 	classifiers: RoutingClassifierAdapter;
 	/** Recall adapter (Chunk C). Required when any case has bucket === 'recall'. */
 	recallAdapter?: RecallAdapter;
@@ -113,6 +115,27 @@ export interface RunSuiteOptions {
 	manifestDir?: string;
 	/** Signals that `--judge-model` was applied at run time (recorded in manifest). */
 	judgeOverrideApplied?: boolean;
+}
+
+/**
+ * Per-bucket pre-flight estimate: how many tokens one input of that bucket
+ * costs, and — critically — which TIER slot it runs on. The tier is what lets
+ * `estimateUsd` price the call against the right model AND the right provider,
+ * so an all-local matrix estimates $0 instead of frontier rates.
+ *
+ * Keep in lockstep with `core/src/gui/services/regression/estimator.ts`'s
+ * `BUCKET_TIER` and with each runner's `evaluatedTier`.
+ */
+export const BUCKET_ESTIMATE: Readonly<Record<PersonaCase['bucket'], EstimateCall>> = {
+	routing: ESTIMATE_TOKENS,
+	recall: ESTIMATE_TOKENS,
+	chatbot: CHATBOT_ESTIMATE_TOKENS,
+	receipt: RECEIPT_ESTIMATE_TOKENS,
+};
+
+/** Tier slot each bucket's dispatch exercises (derived from BUCKET_ESTIMATE). */
+function bucketTier(bucket: PersonaCase['bucket']): EvaluatedTier {
+	return BUCKET_ESTIMATE[bucket].tier ?? 'fast';
 }
 
 export interface RunSuiteOutcome {
@@ -200,7 +223,8 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 				continue;
 			}
 
-			const caseEstimate = opts.estimateUsd(ESTIMATE_TOKENS) * Math.max(1, lc.case.inputs.length);
+			const caseEstimate =
+				opts.estimateUsd(BUCKET_ESTIMATE[lc.case.bucket]) * Math.max(1, lc.case.inputs.length);
 			if (!runBudget.canAfford(caseEstimate)) {
 				opts.logger.warn(
 					{
@@ -566,6 +590,10 @@ function makeDryRunResult(
 		tokenCounts: { input: 0, output: 0 },
 		costUsd: 0,
 		modelIds,
+		// Records the tier the case WOULD run on so `formatDryRunMarkdown` can
+		// price each bucket against its own tier/provider instead of assuming
+		// every case bills at fast-tier remote rates.
+		evaluatedTier: bucketTier(c.bucket),
 		timestamp: new Date().toISOString(),
 		durationMs: 0,
 	};

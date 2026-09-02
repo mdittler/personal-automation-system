@@ -1,7 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import type { ModelCatalog } from '../../services/llm/model-catalog.js';
+import { isLocalProvider } from '../../services/llm/model-pricing.js';
 import type { ModelSelector } from '../../services/llm/model-selector.js';
+import type { ProviderRegistry } from '../../services/llm/providers/provider-registry.js';
 import {
 	normalizeOptionalModelSpec,
 	parseJudgeModelValue,
@@ -24,7 +26,11 @@ import {
 } from '../services/regression/cache-reader.js';
 import type { CaseDiscoveryService, ListedCase } from '../services/regression/case-discovery.js';
 import { renderLineChart, renderScatter } from '../services/regression/chart-svg.js';
-import { type EstimatedCase, estimateRunCostUsd } from '../services/regression/estimator.js';
+import {
+	type EstimatedCase,
+	type EstimatorOptions,
+	estimateRunCostUsd,
+} from '../services/regression/estimator.js';
 import {
 	type LeaderboardTier,
 	type PinOverrideKey,
@@ -82,6 +88,13 @@ export interface RegressionRoutesOptions {
 	 * unavailable-current models (REQ-REG-GUI-V2-011).
 	 */
 	modelSelector?: ModelSelector;
+	/**
+	 * Resolves each tier's provider id to a `ProviderType` so the cost
+	 * estimator can charge $0 for tiers served by a local provider (Ollama,
+	 * llama.cpp). Omitted → every tier is treated as remote, i.e. the legacy
+	 * conservative constants.
+	 */
+	providerRegistry?: ProviderRegistry;
 	/**
 	 * Generates the weakness summary persisted at the polled
 	 * `/runs/:runId/summary` route (REQ-REG-GUI-V2-018/019). When omitted, the
@@ -193,7 +206,31 @@ export function registerRegressionRoutes(
 ): void {
 	const { caseDiscovery, runRegistry, cacheDir, maxRunBudgetUsd, logger } = options;
 	const { runHistoryStore, modelCatalog, modelSelector, weaknessSummarizer } = options;
+	const { providerRegistry } = options;
 	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
+
+	/**
+	 * Which tier slots are served by a local provider right now. Local models
+	 * (Ollama, llama.cpp) run on the operator's hardware and are never billed
+	 * per token, so a run whose tiers are all local costs exactly $0 — the
+	 * estimator must not quote frontier prices for it.
+	 *
+	 * Resolved per request (not memoized) because the operator can re-point a
+	 * tier at a different provider between page loads. Needs BOTH a
+	 * `ModelSelector` (tier → provider id) and a `ProviderRegistry`
+	 * (provider id → `ProviderType`); without either we cannot prove locality
+	 * and fall back to the conservative remote constants.
+	 */
+	function localTiers(): EstimatorOptions['localTiers'] {
+		if (!modelSelector || !providerRegistry) return undefined;
+		const isLocalRef = (ref: { provider: string } | undefined | null): boolean =>
+			ref ? isLocalProvider(providerRegistry.get(ref.provider)?.providerType) : false;
+		return {
+			fast: isLocalRef(modelSelector.getFastRef()),
+			standard: isLocalRef(modelSelector.getStandardRef()),
+			reasoning: isLocalRef(modelSelector.getReasoningRef()),
+		};
+	}
 
 	// REQ-REG-GUI-V2-018: auto-generate weakness summaries on run completion.
 	// The subprocess has written the RunManifest atomically before emitting
@@ -265,6 +302,7 @@ export function registerRegressionRoutes(
 			return renderRunTab(reply, {
 				modelCatalog,
 				modelSelector,
+				localTiers: localTiers(),
 				caseDiscovery,
 				maxRunBudgetUsd,
 				activeRunId: runRegistry.getActiveRunId(),
@@ -278,6 +316,7 @@ export function registerRegressionRoutes(
 			caseDiscovery,
 			cacheDir,
 			maxRunBudgetUsd,
+			localTiers: localTiers(),
 			activeRunId: runRegistry.getActiveRunId(),
 			selectedBucket,
 			compareFilters: parseCompareFilters(qAny),
@@ -473,13 +512,14 @@ export function registerRegressionRoutes(
 			if (rerunIds.size > 0) filtered = filtered.filter((c) => rerunIds.has(c.caseId));
 			const out = estimateRunCostUsd(
 				filtered.map((c) => ({ caseId: c.caseId, bucket: c.bucket as EstimatedCase['bucket'] })),
-				{ ceilingUsd: maxRunBudgetUsd },
+				{ ceilingUsd: maxRunBudgetUsd, localTiers: localTiers() },
 			);
 			const totalInputs = filtered.reduce((acc, c) => acc + c.inputCount, 0);
 			return reply.send({
 				totalUsd: out.estimateUsd,
 				ceilingUsd: out.ceilingUsd,
 				perBucketUsd: out.perBucketUsd,
+				allLocal: out.allLocal,
 				totalCases: filtered.length,
 				totalInputs,
 			});
@@ -952,6 +992,7 @@ async function renderRunTab(
 	deps: {
 		modelCatalog?: ModelCatalog;
 		modelSelector?: ModelSelector;
+		localTiers?: EstimatorOptions['localTiers'];
 		caseDiscovery: CaseDiscoveryService;
 		maxRunBudgetUsd: number;
 		activeRunId: string | null;
@@ -1017,7 +1058,7 @@ async function renderRunTab(
 		: discovery.cases;
 	const estimate = estimateRunCostUsd(
 		filtered.map((c) => ({ caseId: c.caseId, bucket: c.bucket as EstimatedCase['bucket'] })),
-		{ ceilingUsd: deps.maxRunBudgetUsd },
+		{ ceilingUsd: deps.maxRunBudgetUsd, localTiers: deps.localTiers },
 	);
 	const totalCases = filtered.length;
 	const totalInputs = filtered.reduce((acc, c) => acc + c.inputCount, 0);
@@ -1035,6 +1076,7 @@ async function renderRunTab(
 		estimate: {
 			totalUsd: estimate.estimateUsd.toFixed(2),
 			ceilingUsd: estimate.ceilingUsd.toFixed(2),
+			allLocal: estimate.allLocal,
 			totalCases,
 			totalInputs,
 		},
@@ -1241,6 +1283,7 @@ async function renderCompareTab(
 		caseDiscovery: CaseDiscoveryService;
 		cacheDir: string;
 		maxRunBudgetUsd: number;
+		localTiers?: EstimatorOptions['localTiers'];
 		activeRunId: string | null;
 		selectedBucket: DisplayedCase['bucket'] | null;
 		compareFilters?: CompareFilters;
@@ -1270,6 +1313,7 @@ async function renderCompareTab(
 				estimate: {
 					totalUsd: '0.00',
 					ceilingUsd: deps.maxRunBudgetUsd.toFixed(2),
+					allLocal: false,
 					totalCases: 0,
 					totalInputs: 0,
 				},
@@ -1324,6 +1368,7 @@ async function renderCompareTab(
 			estimate: {
 				totalUsd: '0.00',
 				ceilingUsd: deps.maxRunBudgetUsd.toFixed(2),
+				allLocal: false,
 				totalCases: 0,
 				totalInputs: 0,
 			},
@@ -1357,7 +1402,7 @@ async function renderCompareTab(
 
 	const estimate = estimateRunCostUsd(
 		filtered.map((c) => ({ caseId: c.caseId, bucket: c.bucket as EstimatedCase['bucket'] })),
-		{ ceilingUsd: deps.maxRunBudgetUsd },
+		{ ceilingUsd: deps.maxRunBudgetUsd, localTiers: deps.localTiers },
 	);
 	const totalInputs = filtered.reduce((acc, c) => acc + c.inputCount, 0);
 	return reply.viewAsync('regression', {
@@ -1373,6 +1418,7 @@ async function renderCompareTab(
 		estimate: {
 			totalUsd: estimate.estimateUsd.toFixed(2),
 			ceilingUsd: estimate.ceilingUsd.toFixed(2),
+			allLocal: estimate.allLocal,
 			totalCases: filtered.length,
 			totalInputs,
 		},

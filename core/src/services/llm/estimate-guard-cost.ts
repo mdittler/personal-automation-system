@@ -11,6 +11,22 @@ export interface TierPrice {
 export interface PriceLookup {
 	/** Returns undefined if tier unknown; estimator falls back to defaultReservationUsd. */
 	priceFor(tier: ModelTier): TierPrice | undefined;
+	/**
+	 * Whether ANY configured provider bills per token.
+	 *
+	 * Local models (Ollama, llama.cpp) run on the operator's own hardware and
+	 * are free by construction. On an all-local install a tier that cannot be
+	 * priced must estimate $0, not the `defaultReservationUsd` fallback —
+	 * charging a phantom reservation there eats a household's cost cap for
+	 * inference that is never billed.
+	 *
+	 * Return `false` only when locality is actually determinable (at least one
+	 * provider is registered and every one of them is local). Return `true`
+	 * when the answer is unknown (no providers registered yet) so the
+	 * conservative reservation still applies. Optional: lookups that cannot
+	 * answer omit it entirely and keep the legacy fallback.
+	 */
+	hasBillableProvider?(): boolean;
 }
 
 export interface EstimateInput {
@@ -76,6 +92,17 @@ export function estimateGuardCost(
 		!Number.isFinite(price.outputUsdPer1k) ||
 		price.outputUsdPer1k < 0
 	) {
+		// An install with no billable provider cannot incur a token charge, so
+		// an unresolvable tier must not invent one. When locality is unknown
+		// (no `hasBillableProvider`, or it reports `true`) keep the
+		// conservative reservation.
+		if (prices.hasBillableProvider?.() === false) {
+			logger?.warn(
+				{ tier: input.tier, price },
+				'estimateGuardCost: no valid price for tier, but every configured provider is local — estimating $0',
+			);
+			return 0;
+		}
 		logger?.warn(
 			{ tier: input.tier, price },
 			'estimateGuardCost: no valid price for tier, using defaultReservationUsd',

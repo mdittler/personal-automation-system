@@ -28,6 +28,7 @@ import type {
 import { VERDICT } from '@core/types/regression.js';
 import type { RubricJudgeLLM } from '../../oracles/rubric.js';
 import { runRubricOracle } from '../../oracles/rubric.js';
+import type { EstimateUsdFn } from '../../shared/types.js';
 import type { MinimalLogger } from './routing-runner.js';
 
 export interface ChatbotEnvLike {
@@ -62,9 +63,16 @@ export interface ChatbotRunnerDeps {
 	modelIds: TierModelSnapshot;
 	cacheKey: string;
 	caseBudgetUsd: number;
-	estimateUsd: (call: { tokenIn: number; tokenOut: number }) => number;
+	estimateUsd: EstimateUsdFn;
 	logger: MinimalLogger;
 }
+
+/**
+ * Pre-charge token budget for one chatbot turn. `tier: 'standard'` because
+ * the rubric judge (and the conversational reply itself) run on the standard
+ * slot — pricing this at the fast tier under-charges the gate.
+ */
+export const CHATBOT_ESTIMATE_TOKENS = { tokenIn: 4000, tokenOut: 400, tier: 'standard' } as const;
 
 export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): Promise<RunResult> {
 	if (c.oracle !== 'rubric') {
@@ -84,7 +92,7 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 
 	for (let i = 0; i < c.inputs.length; i++) {
 		const input = c.inputs[i]!;
-		const projected = deps.estimateUsd({ tokenIn: 4000, tokenOut: 400 });
+		const projected = deps.estimateUsd(CHATBOT_ESTIMATE_TOKENS);
 		if (costUsd + projected > deps.caseBudgetUsd) {
 			if (verdict === VERDICT.pass) verdict = VERDICT.budgetExceeded;
 			deps.logger.warn(

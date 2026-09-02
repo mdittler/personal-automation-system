@@ -277,7 +277,13 @@
 			const summary = inputs !== null
 				? 'Run ' + inputs + ' input(s) across ' + cases + ' case(s)?'
 				: 'Run ' + cases + ' case(s)?';
-			if (!confirm(summary + ' Estimated cost ≈ $' + total + ' (cap $' + cap + ').')) {
+			// Local models (Ollama, llama.cpp) run on this machine and are never
+			// billed per token, so an all-local matrix costs exactly $0 — say so
+			// instead of quoting a remote-priced figure the operator won't pay.
+			const costLine = est && est.allLocal === true
+				? ' Estimated cost $0.00 — all-local run (no per-token billing).'
+				: ' Estimated cost ≈ $' + total + ' (cap $' + cap + ').';
+			if (!confirm(summary + costLine)) {
 				return;
 			}
 		} catch (_) {

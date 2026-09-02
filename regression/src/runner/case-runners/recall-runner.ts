@@ -22,6 +22,7 @@ import type {
 } from '@core/types/regression.js';
 import { VERDICT } from '@core/types/regression.js';
 import { type StructuralExpectation, runStructuralOracle } from '../../oracles/structural.js';
+import type { EstimateUsdFn } from '../../shared/types.js';
 import { MeteredError, type RecallAdapter } from '../dispatch.js';
 import { type AdapterResult, ESTIMATE_TOKENS, type MinimalLogger } from './routing-runner.js';
 
@@ -30,7 +31,7 @@ export interface RecallRunnerDeps {
 	modelIds: TierModelSnapshot;
 	cacheKey: string;
 	caseBudgetUsd: number;
-	estimateUsd: (call: { tokenIn: number; tokenOut: number }) => number;
+	estimateUsd: EstimateUsdFn;
 	logger: MinimalLogger;
 }
 

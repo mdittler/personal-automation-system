@@ -80,8 +80,15 @@ export interface SystemInfoService {
 	/** Get available models across all providers. */
 	getAvailableModels(): Promise<AvailableModelInfo[]>;
 
-	/** Get pricing for a specific model (null if unknown). */
-	getModelPricing(modelId: string): ModelPricingInfo | null;
+	/**
+	 * Get pricing for a specific model (null if unknown).
+	 *
+	 * Pass `providerId` whenever the caller knows which provider serves the
+	 * id: a local provider (Ollama, llama.cpp) always returns null because
+	 * local inference is free, even when the model id collides with a priced
+	 * remote model (e.g. a GGUF served as `gpt-4o`).
+	 */
+	getModelPricing(modelId: string, providerId?: string): ModelPricingInfo | null;
 
 	/** Get monthly cost summary (total + per-app). */
 	getCostSummary(): CostSummary;

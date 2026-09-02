@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { type EstimatedCase, estimateRunCostUsd } from '../estimator.js';
+import { BUCKET_TIER, type EstimatedCase, estimateRunCostUsd } from '../estimator.js';
 
 describe('estimateRunCostUsd', () => {
 	it('returns 0 for an empty case list', () => {
@@ -77,5 +77,98 @@ describe('estimateRunCostUsd', () => {
 
 	it('rejects negative ceiling (defensive)', () => {
 		expect(() => estimateRunCostUsd([], { ceilingUsd: -1 })).toThrow();
+	});
+
+	it('omitting localTiers keeps the legacy remote constants', () => {
+		const cases: EstimatedCase[] = [{ caseId: 'r1', bucket: 'routing' }];
+		const out = estimateRunCostUsd(cases, { ceilingUsd: 5 });
+		expect(out.estimateUsd).toBeGreaterThan(0);
+		expect(out.allLocal).toBe(false);
+	});
+});
+
+/**
+ * The operator's invariant: local models (Ollama, llama.cpp) run on the
+ * operator's own hardware and are never billed per token, so an all-local
+ * matrix costs exactly $0. The GUI confirm dialog used to show the same
+ * dollar figure for an all-Ollama matrix as for an all-Opus one — ~$0.19 for
+ * a 37-case routing run that costs nothing.
+ *
+ * Mirrors `regression/src/__tests__/local-model-estimate.test.ts`, which pins
+ * the same invariant at the runner's own estimator.
+ */
+describe('estimateRunCostUsd — local tiers are free', () => {
+	const ALL_LOCAL = { fast: true, standard: true, reasoning: true } as const;
+
+	it('an all-local model matrix estimates $0.00', () => {
+		const cases: EstimatedCase[] = [
+			{ caseId: 'r1', bucket: 'routing' },
+			{ caseId: 'p1', bucket: 'receipt' },
+			{ caseId: 'c1', bucket: 'chatbot' },
+			{ caseId: 'n1', bucket: 'recall' },
+		];
+		const out = estimateRunCostUsd(cases, { ceilingUsd: 5, localTiers: ALL_LOCAL });
+		expect(out.estimateUsd).toBe(0);
+		expect(out.perBucketUsd).toEqual({ routing: 0, receipt: 0, chatbot: 0, recall: 0 });
+		expect(out.allLocal).toBe(true);
+	});
+
+	it('a 37-case all-local routing sweep estimates $0.00', () => {
+		const cases: EstimatedCase[] = Array.from({ length: 37 }, (_, i) => ({
+			caseId: `r${i}`,
+			bucket: 'routing' as const,
+		}));
+		// Same selection priced remotely is decidedly non-zero — that number is
+		// exactly what the operator used to be shown for a free run.
+		expect(estimateRunCostUsd(cases, { ceilingUsd: 5 }).estimateUsd).toBeGreaterThan(0.1);
+		const out = estimateRunCostUsd(cases, { ceilingUsd: 5, localTiers: ALL_LOCAL });
+		expect(out.estimateUsd).toBe(0);
+		expect(out.allLocal).toBe(true);
+	});
+
+	it('a mixed matrix prices only the buckets served by a remote tier', () => {
+		// fast local (routing + recall free), standard remote (receipt + chatbot billed).
+		const localFastOnly = { fast: true, standard: false, reasoning: false };
+		const cases: EstimatedCase[] = [
+			{ caseId: 'r1', bucket: 'routing' },
+			{ caseId: 'n1', bucket: 'recall' },
+			{ caseId: 'p1', bucket: 'receipt' },
+			{ caseId: 'c1', bucket: 'chatbot' },
+		];
+		const out = estimateRunCostUsd(cases, { ceilingUsd: 5, localTiers: localFastOnly });
+		expect(out.perBucketUsd.routing).toBe(0);
+		expect(out.perBucketUsd.recall).toBe(0);
+		expect(out.perBucketUsd.receipt).toBeGreaterThan(0);
+		expect(out.perBucketUsd.chatbot).toBeGreaterThan(0);
+		expect(out.estimateUsd).toBeCloseTo(out.perBucketUsd.receipt + out.perBucketUsd.chatbot, 8);
+		// Not every selected case is local → not an all-local run.
+		expect(out.allLocal).toBe(false);
+	});
+
+	it('a local standard tier zeroes receipt + chatbot but not routing', () => {
+		const localStandardOnly = { fast: false, standard: true, reasoning: false };
+		const cases: EstimatedCase[] = [
+			{ caseId: 'r1', bucket: 'routing' },
+			{ caseId: 'p1', bucket: 'receipt' },
+		];
+		const out = estimateRunCostUsd(cases, { ceilingUsd: 5, localTiers: localStandardOnly });
+		expect(out.perBucketUsd.receipt).toBe(0);
+		expect(out.perBucketUsd.routing).toBeGreaterThan(0);
+		expect(out.allLocal).toBe(false);
+	});
+
+	it('allLocal is false for an empty selection (nothing to run is not a free run)', () => {
+		expect(estimateRunCostUsd([], { ceilingUsd: 5, localTiers: ALL_LOCAL }).allLocal).toBe(false);
+	});
+
+	it('bucket → tier map matches what the case-runners actually dispatch on', () => {
+		// routing/recall classify on `fast`; the receipt extractor and the
+		// chatbot rubric judge both run on `standard`.
+		expect(BUCKET_TIER).toEqual({
+			routing: 'fast',
+			recall: 'fast',
+			receipt: 'standard',
+			chatbot: 'standard',
+		});
 	});
 });
