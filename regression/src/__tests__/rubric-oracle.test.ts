@@ -88,8 +88,10 @@ describe('runRubricOracle', () => {
 		expect(result.verdict.details).toMatch(/truncat/i);
 		// Names the cap that was hit...
 		expect(result.verdict.details).toContain('1024');
-		// ...shows the raw prefix so the operator can see where it stopped...
-		expect(result.verdict.details).toContain(truncated);
+		// ...shows the raw prefix so the operator can see where it stopped (JSON-
+		// escaped by formatRawPreview so a multi-line reply cannot break the
+		// report line)...
+		expect(result.verdict.details).toContain(JSON.stringify(truncated));
 		// ...and does NOT misreport it as malformed JSON.
 		expect(result.verdict.details).not.toMatch(/parse failed/i);
 		expect(result.score).toBeNull();

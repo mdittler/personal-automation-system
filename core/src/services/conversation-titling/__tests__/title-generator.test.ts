@@ -12,18 +12,26 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
+import type { LLMFinishReason } from '../../../types/llm.js';
 import { generateTitle } from '../title-generator.js';
 import type { TitleGeneratorDeps } from '../title-generator.js';
 
-function makeDeps(completion: string | (() => Promise<string> | string)): TitleGeneratorDeps {
+function makeDeps(
+	completion: string | (() => Promise<string> | string),
+	finishReason: LLMFinishReason = 'stop',
+): TitleGeneratorDeps & { logger: { warn: ReturnType<typeof vi.fn> } } {
 	return {
-		llm: {
-			complete: vi
-				.fn()
-				.mockImplementation(async () =>
-					typeof completion === 'function' ? completion() : completion,
-				),
-		} as TitleGeneratorDeps['llm'],
+		llm: withCompleteWithMeta(
+			{
+				complete: vi
+					.fn()
+					.mockImplementation(async () =>
+						typeof completion === 'function' ? completion() : completion,
+					),
+			},
+			finishReason,
+		) as TitleGeneratorDeps['llm'],
 		logger: { warn: vi.fn() },
 	};
 }
@@ -100,7 +108,7 @@ describe('generateTitle', () => {
 	it('strips < and > from untrusted user/assistant content before fencing', async () => {
 		const completeMock = vi.fn().mockResolvedValue('{"title": "Topic discussion thread"}');
 		const deps: TitleGeneratorDeps = {
-			llm: { complete: completeMock } as TitleGeneratorDeps['llm'],
+			llm: withCompleteWithMeta({ complete: completeMock }) as TitleGeneratorDeps['llm'],
 			logger: { warn: vi.fn() },
 		};
 		await generateTitle(
@@ -112,5 +120,50 @@ describe('generateTitle', () => {
 		expect(userPrompt).not.toContain('<fake-tag>');
 		expect(userPrompt).not.toContain('</fake-tag>');
 		expect(userPrompt).toContain('fake-taginjected');
+	});
+});
+
+// ─── Truncation at the output cap ────────────────────────────────────────────
+//
+// maxTokens is 60 here, so a verbose model gets cut mid-title. That used to be
+// logged as 'LLM returned invalid JSON', which points the reader at the model
+// instead of at the budget.
+
+describe('generateTitle — truncated output', () => {
+	const TRUNCATED = '{"title": "Planning the weekend trip to the';
+
+	it('still returns null (fire-and-forget contract is unchanged)', async () => {
+		const deps = makeDeps(TRUNCATED, 'length');
+		expect(await generateTitle('q', 'a', deps)).toBeNull();
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('logs truncation naming the cap, not "invalid JSON"', async () => {
+		const deps = makeDeps(TRUNCATED, 'length');
+		await generateTitle('q', 'a', deps);
+		const [, msg] = deps.logger.warn.mock.calls[0] as [unknown, string];
+		expect(msg).toContain('truncated');
+		expect(msg).toContain('60-token');
+		expect(msg).not.toMatch(/invalid JSON/i);
+	});
+
+	it('keeps the invalid-JSON diagnostic for a complete but malformed reply', async () => {
+		const deps = makeDeps(TRUNCATED, 'stop');
+		expect(await generateTitle('q', 'a', deps)).toBeNull();
+		const [, msg] = deps.logger.warn.mock.calls[0] as [unknown, string];
+		expect(msg).toMatch(/invalid JSON/i);
+		expect(msg).not.toMatch(/truncat/i);
+	});
+
+	it('parse-first: a complete title still succeeds when finishReason is "length"', async () => {
+		const deps = makeDeps('{"title": "Weekly grocery planning"}', 'length');
+		expect(await generateTitle('q', 'a', deps)).toBe('Weekly grocery planning');
+	});
+
+	it('passes maxTokens 60 on the completeWithMeta call', async () => {
+		const deps = makeDeps('{"title": "Weekly grocery planning"}');
+		await generateTitle('q', 'a', deps);
+		const options = (deps.llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]?.[1];
+		expect(options).toMatchObject({ maxTokens: 60 });
 	});
 });

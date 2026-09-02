@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
 import { buildClassifierPrompt, classifyRecallIntent } from '../recall-classifier.js';
 
 describe('buildClassifierPrompt', () => {
@@ -46,7 +47,7 @@ describe('buildClassifierPrompt', () => {
 describe('classifyRecallIntent — today parameter', () => {
 	it('throws (synchronously via rejection) when today is empty string', async () => {
 		const deps = {
-			llm: { complete: vi.fn().mockResolvedValue('{}') },
+			llm: withCompleteWithMeta({ complete: vi.fn().mockResolvedValue('{}') }),
 			logger: { warn: vi.fn() },
 			today: '',
 		};

@@ -9,7 +9,8 @@
  * flip a real failure to pass.
  *
  * Truncation vs. malformed output: the judge is called through
- * `completeWithMeta`, so `finishReason === 'length'` (the reply hit
+ * `completeWithMeta` and its reply classified by `classifyStructuredOutput`
+ * (order `'check-length-first'`), so `finishReason === 'length'` (the reply hit
  * `JUDGE_MAX_TOKENS`) is reported as truncation naming the cap, and only
  * genuinely malformed complete output falls through to the generic
  * "JSON parse failed" verdict.
@@ -29,7 +30,7 @@
 
 import { buildMemoryContextBlock } from '@core/services/prompt-assembly/memory-context.js';
 import type { LLMCompletionMeta, LLMService } from '@core/types/llm.js';
-import { UNPARSEABLE_JSON, tryParseJsonStripFences } from '@core/utils/json-strip-fences.js';
+import { classifyStructuredOutput, formatRawPreview } from '@core/utils/json-strip-fences.js';
 import { type CallMeter, type OracleVerdict, VERDICT } from '../shared/types.js';
 
 const PASS_THRESHOLD = 4;
@@ -165,32 +166,42 @@ export async function runRubricOracle(input: RubricOracleInput): Promise<RubricO
 	const resolvedMeta = meta as LLMCompletionMeta;
 	const resolvedRaw = resolvedMeta.text ?? '';
 
-	// Truncation is checked BEFORE parsing, not only in the parse-failure branch:
-	// a reply the provider cut at the cap is untrustworthy even in the rare case
-	// its prefix happens to parse, and per this file's trust-boundary contract a
-	// judge we cannot trust maps to `error`, never to a pass/fail grade.
-	if (resolvedMeta.finishReason === 'length') {
+	// 'check-length-first': truncation is decided BEFORE parsing, not only in the
+	// parse-failure branch. A reply the provider cut at the cap is untrustworthy
+	// even in the rare case its prefix happens to parse (the cut almost always
+	// lands in `explanation`, so a "valid" prefix is a graded verdict with its
+	// reasoning amputated), and per this file's trust-boundary contract a judge
+	// we cannot trust maps to `error`, never to a pass/fail grade.
+	const outcome = classifyStructuredOutput(resolvedMeta, {
+		order: 'check-length-first',
+		maxTokens: JUDGE_MAX_TOKENS,
+	});
+
+	if (outcome.kind === 'truncated') {
 		return {
 			verdict: {
 				verdict: VERDICT.error,
-				details: `judge reply truncated at the ${JUDGE_MAX_TOKENS}-token output cap (finishReason='length'; raise JUDGE_MAX_TOKENS in regression/src/oracles/rubric.ts); raw="${resolvedRaw.slice(0, 200)}"`,
+				details: `judge reply truncated at the ${JUDGE_MAX_TOKENS}-token output cap (finishReason='length'; raise JUDGE_MAX_TOKENS in regression/src/oracles/rubric.ts); raw=${formatRawPreview(outcome.raw)}`,
 			},
 			meter,
 			score: null,
 		};
 	}
 
-	const parsed = tryParseJsonStripFences(resolvedRaw);
-	if (parsed === UNPARSEABLE_JSON) {
+	// Empty and unparseable share one verdict here: for a judge, "said nothing"
+	// and "said something unusable" are the same unusable grade.
+	if (outcome.kind === 'empty' || outcome.kind === 'unparseable') {
 		return {
 			verdict: {
 				verdict: VERDICT.error,
-				details: `judge JSON parse failed (empty or invalid); raw="${resolvedRaw.slice(0, 200)}"`,
+				details: `judge JSON parse failed (empty or invalid); raw=${formatRawPreview(resolvedRaw)}`,
 			},
 			meter,
 			score: null,
 		};
 	}
+
+	const parsed = outcome.value;
 
 	if (!parsed || typeof parsed !== 'object') {
 		return {

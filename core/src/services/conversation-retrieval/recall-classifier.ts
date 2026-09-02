@@ -8,11 +8,13 @@
  * The LLM output is treated as untrusted and coerced to a safe default on any
  * parse failure. shouldRecall=true with no valid query string is rejected.
  *
- * LLM interface matches LLMService.complete signature (prompt: string, options?) => Promise<string>.
+ * LLM interface matches the LLMService `complete` / `completeWithMeta` pair;
+ * the classifier calls `completeWithMeta` so it can tell a reply truncated at
+ * its token cap from a genuinely malformed one.
  */
 
-import type { LLMCompletionOptions } from '../../types/llm.js';
-import { UNPARSEABLE_JSON, tryParseJsonStripFences } from '../../utils/json-strip-fences.js';
+import type { LLMCompletionMeta, LLMCompletionOptions } from '../../types/llm.js';
+import { classifyStructuredOutput, formatRawPreview } from '../../utils/json-strip-fences.js';
 import { isCalendarStrict } from '../../utils/temporal.js';
 import { sanitizeInput } from '../prompt-assembly/sanitization.js';
 
@@ -75,9 +77,24 @@ export const RECALL_SAFE_DEFAULT: RecallVerdict = {
 
 // ─── LLM classifier interface ─────────────────────────────────────────────────
 
+/**
+ * LLM surface the recall classifier needs. `completeWithMeta` is required (not
+ * just `complete`) because the classifier must see `finishReason` to tell a
+ * reply cut off at RECALL_MAX_TOKENS apart from a genuinely malformed one —
+ * the same widening `RubricJudgeLLM` and `FoodShadowClassifierLLM` did.
+ */
 export interface RecallClassifierLLM {
 	complete(prompt: string, options?: LLMCompletionOptions): Promise<string>;
+	completeWithMeta(prompt: string, options?: LLMCompletionOptions): Promise<LLMCompletionMeta>;
 }
+
+/**
+ * Output budget for the classifier call. The expected reply is one small JSON
+ * object; 150 is generous for it. A model that overruns it is misbehaving, and
+ * the truncation branch in `classifyRecallIntent` now says so instead of
+ * reporting "failed to parse".
+ */
+const RECALL_MAX_TOKENS = 150;
 
 // ─── Prompt template ─────────────────────────────────────────────────────────
 
@@ -405,56 +422,91 @@ export async function classifyRecallIntent(
 	const systemPrompt = buildClassifierPrompt(deps.today, maxWindowDays);
 	const sanitized = sanitizeInput(message);
 
+	const callOptions: LLMCompletionOptions = {
+		tier: 'fast',
+		systemPrompt,
+		maxTokens: RECALL_MAX_TOKENS,
+		temperature: 0,
+		responseFormat: 'json',
+	};
+
+	// 'parse-first': the recall verdict is a small closed object that
+	// `parseRecallVerdict` fully validates field by field, so a reply that parses
+	// is complete by construction and `finishReason` only decides WHICH failure
+	// to report. (The rubric judge uses 'check-length-first' for the opposite
+	// reason — see classifyStructuredOutput's docs.)
+	const order = 'parse-first' as const;
+
 	// First call.
-	let raw: string;
+	let meta: LLMCompletionMeta;
 	try {
-		raw = await deps.llm.complete(sanitized, {
-			tier: 'fast',
-			systemPrompt,
-			maxTokens: 150,
-			temperature: 0,
-			responseFormat: 'json',
-		});
+		// completeWithMeta (not complete) so `finishReason` is visible: a reply cut
+		// off at RECALL_MAX_TOKENS must be reported as truncation, not as a
+		// malformed classifier response.
+		meta = await deps.llm.completeWithMeta(sanitized, callOptions);
 	} catch (err) {
 		deps.logger.warn({ err }, 'recall classifier LLM call failed');
 		return { shouldRecall: false, query: null, timeAnchor: null, reason: 'llm-error' };
 	}
 
-	const firstParsed = tryParseJsonStripFences(raw);
-	if (firstParsed !== UNPARSEABLE_JSON) {
-		return parseRecallVerdict(firstParsed, { today: deps.today, maxWindowDays });
+	const first = classifyStructuredOutput(meta, { order, maxTokens: RECALL_MAX_TOKENS });
+	if (first.kind === 'ok') {
+		return parseRecallVerdict(first.value, { today: deps.today, maxWindowDays });
 	}
-
-	// Retry ONLY on empty output — the specific failure mode Codex's Chunk C
-	// verification surfaced (Gemma returns "" for ambiguous prompts even with
-	// JSON mode). Non-empty-but-unparseable output is rarer and the safe-default
-	// path is sufficient; retrying it adds load + LLM calls without changing
-	// the verdict for stub/mock scenarios. Hard cap at 2 LLM calls.
-	if (raw.trim().length > 0) {
+	// Truncation is checked above the non-empty/retry branch below and is
+	// terminal: the same prompt against the same cap cuts the same way, so a
+	// retry would only burn a second call.
+	if (first.kind === 'truncated') return truncatedVerdict(first, deps.logger);
+	if (first.kind === 'unparseable') {
+		// Retry ONLY on empty output — the specific failure mode Codex's Chunk C
+		// verification surfaced (Gemma returns "" for ambiguous prompts even with
+		// JSON mode). Non-empty-but-unparseable output is rarer and the safe-default
+		// path is sufficient; retrying it adds load + LLM calls without changing
+		// the verdict for stub/mock scenarios. Hard cap at 2 LLM calls.
 		deps.logger.warn('recall classifier: failed to parse LLM response (non-empty, no retry)');
 		return RECALL_SAFE_DEFAULT;
 	}
 
-	let raw2: string;
+	let meta2: LLMCompletionMeta;
 	try {
-		raw2 = await deps.llm.complete(`${sanitized}${RECALL_REPAIR_SUFFIX}`, {
-			tier: 'fast',
-			systemPrompt,
-			maxTokens: 150,
-			temperature: 0,
-			responseFormat: 'json',
-		});
+		meta2 = await deps.llm.completeWithMeta(`${sanitized}${RECALL_REPAIR_SUFFIX}`, callOptions);
 	} catch (err) {
 		deps.logger.warn({ err }, 'recall classifier LLM retry failed');
 		return { shouldRecall: false, query: null, timeAnchor: null, reason: 'llm-error' };
 	}
 
-	const secondParsed = tryParseJsonStripFences(raw2);
-	if (secondParsed === UNPARSEABLE_JSON) {
+	const second = classifyStructuredOutput(meta2, { order, maxTokens: RECALL_MAX_TOKENS });
+	if (second.kind === 'truncated') return truncatedVerdict(second, deps.logger);
+	if (second.kind !== 'ok') {
 		deps.logger.warn('recall classifier: failed to parse LLM response (after retry)');
 		return RECALL_SAFE_DEFAULT;
 	}
-	return parseRecallVerdict(secondParsed, { today: deps.today, maxWindowDays });
+	return parseRecallVerdict(second.value, { today: deps.today, maxWindowDays });
+}
+
+/**
+ * Safe verdict for a reply the provider cut at the output cap.
+ *
+ * Built as a fresh object rather than by spreading RECALL_SAFE_DEFAULT: that
+ * module-level constant is returned by identity from a dozen sites and is not
+ * frozen, so mutating a spread of it is a foot-gun. The distinct
+ * `reason: 'truncated'` is what stops the next reader from blaming the model
+ * for malformed output; the regression recall fixtures type `reason` as a plain
+ * string with no enum, so a new value is safe there.
+ */
+function truncatedVerdict(
+	outcome: { raw: string; maxTokens?: number },
+	logger: { warn(...args: unknown[]): void },
+): RecallVerdict {
+	const cap =
+		outcome.maxTokens === undefined
+			? 'the output cap'
+			: `the ${outcome.maxTokens}-token output cap`;
+	logger.warn(
+		{ raw: formatRawPreview(outcome.raw) },
+		`recall classifier: LLM response truncated at ${cap} (finishReason='length') — not a malformed response`,
+	);
+	return { shouldRecall: false, query: null, timeAnchor: null, reason: 'truncated' };
 }
 
 const RECALL_REPAIR_SUFFIX =

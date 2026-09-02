@@ -12,6 +12,7 @@ import { join } from 'node:path';
  * set before use — unauthorized paths are silently dropped.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
 import type { AppLogger } from '../../../types/app-module.js';
 import type { DataQueryOptions } from '../../../types/data-query.js';
 import type { LLMService } from '../../../types/llm.js';
@@ -60,12 +61,12 @@ function makeMockLogger(): AppLogger {
 }
 
 function makeMockLlm(response: string): LLMService {
-	return {
+	return withCompleteWithMeta({
 		complete: vi.fn().mockResolvedValue(response),
 		classify: vi.fn(),
 		extractStructured: vi.fn(),
 		getModelForTier: vi.fn().mockReturnValue('mock-model'),
-	} as unknown as LLMService;
+	}) as unknown as LLMService;
 }
 
 interface MockSpaceService {

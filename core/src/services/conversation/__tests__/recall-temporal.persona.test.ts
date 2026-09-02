@@ -28,6 +28,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
 import type { AppLogger } from '../../../types/app-module.js';
 import type { LLMService } from '../../../types/llm.js';
 import type { ConversationRetrievalService } from '../../conversation-retrieval/index.js';
@@ -49,10 +50,10 @@ function makeLogger(): AppLogger {
 }
 
 function makeLLM(verdictJson: string): LLMService {
-	return {
+	return withCompleteWithMeta({
 		complete: vi.fn().mockResolvedValue(verdictJson),
 		getModelForTier: vi.fn().mockReturnValue('claude-haiku'),
-	} as unknown as LLMService;
+	}) as unknown as LLMService;
 }
 
 function makeRetrieval(searchSessionsSpy: ReturnType<typeof vi.fn>): ConversationRetrievalService {

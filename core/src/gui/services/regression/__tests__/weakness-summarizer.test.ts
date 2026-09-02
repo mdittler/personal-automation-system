@@ -14,7 +14,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LLMService } from '../../../../types/llm.js';
+import { withCompleteWithMeta } from '../../../../testing/llm-meta-stub.js';
+import type { LLMCompletionMeta, LLMService } from '../../../../types/llm.js';
 import type { RunManifest, RunResult } from '../../../../types/regression.js';
 import { VERDICT } from '../../../../types/regression.js';
 import { createWeaknessSummarizer } from '../weakness-summarizer.js';
@@ -109,7 +110,10 @@ interface Harness {
 	manifestDir: string;
 	cacheDir: string;
 	summaryDir: string;
-	llm: { complete: ReturnType<typeof vi.fn> };
+	llm: {
+		complete: ReturnType<typeof vi.fn>;
+		completeWithMeta(prompt: string, options?: unknown): Promise<LLMCompletionMeta>;
+	};
 }
 
 async function makeHarness(): Promise<Harness> {
@@ -118,7 +122,7 @@ async function makeHarness(): Promise<Harness> {
 	const summaryDir = join(tempDir, 'summaries');
 	await mkdir(manifestDir, { recursive: true });
 	await mkdir(cacheDir, { recursive: true });
-	const llm = {
+	const llm = withCompleteWithMeta({
 		complete: vi.fn().mockResolvedValue(
 			JSON.stringify({
 				summary: 'Mis-routes macro questions to generic data-query.',
@@ -131,7 +135,7 @@ async function makeHarness(): Promise<Harness> {
 				],
 			}),
 		),
-	};
+	});
 	return { manifestDir, cacheDir, summaryDir, llm };
 }
 
@@ -388,5 +392,89 @@ describe('createWeaknessSummarizer — robustness', () => {
 			expect(prompt).toContain(`failing-${i}`);
 		}
 		expect(prompt).not.toContain('failing-29');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Truncation at the output cap
+//
+// `errorMessage` is rendered verbatim in the GUI, so it must say the output was
+// cut short — not that the model produced invalid JSON.
+// ---------------------------------------------------------------------------
+
+describe('createWeaknessSummarizer — truncated LLM output', () => {
+	async function runTruncated(finishReason: 'stop' | 'length') {
+		const h = await makeHarness();
+		await seedCacheFile(h.cacheDir, 'failing-case', VALID_KEY, makeRunResult());
+		h.llm.complete.mockResolvedValue('{"summary": "The model struggles with');
+		h.llm.completeWithMeta = async (prompt: string, options?: unknown) => ({
+			text: (await h.llm.complete(prompt, options)) as string,
+			finishReason,
+		});
+		const summarizer = createWeaknessSummarizer({
+			...h,
+			llm: h.llm as unknown as LLMService,
+			logger: silentLogger,
+		});
+		const out = await summarizer.summarize({ manifest: makeManifest(), tier: 'fast' });
+		return { h, out };
+	}
+
+	it('persists status "error" whose message names the cap, not invalid JSON', async () => {
+		const { out } = await runTruncated('length');
+		expect(out.status).toBe('error');
+		expect(out.errorMessage).toContain('truncated');
+		expect(out.errorMessage).toContain('1500-token');
+		expect(out.errorMessage).not.toMatch(/not valid JSON/i);
+	});
+
+	it('does NOT retry a truncated reply — re-asking hits the same cap', async () => {
+		const { h } = await runTruncated('length');
+		expect(h.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps the "not valid JSON" message for a complete but malformed reply', async () => {
+		const { out } = await runTruncated('stop');
+		expect(out.status).toBe('error');
+		expect(out.errorMessage).toMatch(/not valid JSON/i);
+		expect(out.errorMessage).not.toMatch(/truncated/i);
+	});
+
+	it('still retries once on empty output, even when finishReason is "length"', async () => {
+		const h = await makeHarness();
+		await seedCacheFile(h.cacheDir, 'failing-case', VALID_KEY, makeRunResult());
+		h.llm.complete.mockResolvedValueOnce('').mockResolvedValueOnce(
+			JSON.stringify({
+				summary: 'retry-recovered summary',
+				failureCategories: [{ label: 'lbl', count: 1, exampleCaseIds: ['failing-case'] }],
+			}),
+		);
+		h.llm.completeWithMeta = async (prompt: string, options?: unknown) => ({
+			text: (await h.llm.complete(prompt, options)) as string,
+			finishReason: 'length',
+		});
+		const summarizer = createWeaknessSummarizer({
+			...h,
+			llm: h.llm as unknown as LLMService,
+			logger: silentLogger,
+		});
+		const out = await summarizer.summarize({ manifest: makeManifest(), tier: 'fast' });
+		expect(h.llm.complete).toHaveBeenCalledTimes(2);
+		expect(out.status).toBe('ready');
+	});
+
+	it('passes maxTokens 1500 on the completeWithMeta call', async () => {
+		const h = await makeHarness();
+		await seedCacheFile(h.cacheDir, 'failing-case', VALID_KEY, makeRunResult());
+		const summarizer = createWeaknessSummarizer({
+			...h,
+			llm: h.llm as unknown as LLMService,
+			logger: silentLogger,
+		});
+		await summarizer.summarize({ manifest: makeManifest(), tier: 'fast' });
+		expect(h.llm.complete.mock.calls[0]?.[1]).toMatchObject({
+			maxTokens: 1500,
+			responseFormat: 'json',
+		});
 	});
 });

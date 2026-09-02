@@ -15,6 +15,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { withCompleteWithMeta } from '../../../testing/llm-meta-stub.js';
+import type { LLMFinishReason } from '../../../types/llm.js';
 import {
 	MAX_SEGMENTS,
 	type SegmenterDeps,
@@ -24,13 +26,20 @@ import {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeDeps(rawResponse: string): SegmenterDeps & {
+function makeDeps(
+	rawResponse: string,
+	finishReason: LLMFinishReason = 'stop',
+): SegmenterDeps & {
 	llm: { complete: ReturnType<typeof vi.fn> };
+	logger: { warn: ReturnType<typeof vi.fn> };
 } {
 	return {
-		llm: {
-			complete: vi.fn().mockResolvedValue(rawResponse),
-		},
+		llm: withCompleteWithMeta(
+			{
+				complete: vi.fn().mockResolvedValue(rawResponse),
+			},
+			finishReason,
+		),
 		logger: { warn: vi.fn() },
 	};
 }
@@ -43,9 +52,9 @@ function makeThrowingDeps(): SegmenterDeps & {
 	llm: { complete: ReturnType<typeof vi.fn> };
 } {
 	return {
-		llm: {
+		llm: withCompleteWithMeta({
 			complete: vi.fn().mockRejectedValue(new Error('LLM timeout')),
-		},
+		}),
 		logger: { warn: vi.fn() },
 	};
 }
@@ -376,5 +385,78 @@ describe('segmentMessage', () => {
 
 	it('exports MAX_SEGMENTS = 3', () => {
 		expect(MAX_SEGMENTS).toBe(3);
+	});
+});
+
+// ─── Truncation at the output cap ────────────────────────────────────────────
+//
+// The segmenter is the one site in this migration that MUST check finishReason
+// BEFORE parsing: its payload is an array, so a reply cut between elements
+// still parses into a shorter valid `segments` list — a confident, silent drop
+// of the user's last request.
+
+describe('segmentMessage — truncated output', () => {
+	const TEXT =
+		'Can you add milk to the grocery list? Also what is for dinner tomorrow, and remind me to call the dentist.';
+
+	it('returns the single-segment fallback when the reply parses but was cut at the cap', async () => {
+		// This is the dangerous case: valid JSON, valid strings, just SHORT. Parsing
+		// first would return two segments and drop "remind me to call the dentist".
+		const deps = makeDeps(
+			JSON.stringify({
+				segments: ['Can you add milk to the grocery list?', 'what is for dinner tomorrow'],
+			}),
+			'length',
+		);
+
+		const result = await segmentMessage(TEXT, deps);
+
+		expect(result).toEqual([TEXT]);
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('returns the fallback for an unparseable reply cut at the cap', async () => {
+		const deps = makeDeps('{"segments":["add milk to the grocery lis', 'length');
+		expect(await segmentMessage(TEXT, deps)).toEqual([TEXT]);
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('logs truncation naming the cap instead of claiming unparseable JSON', async () => {
+		const deps = makeDeps('{"segments":["add milk to the grocery lis', 'length');
+		await segmentMessage(TEXT, deps);
+		const [, msg] = deps.logger.warn.mock.calls[0] as [unknown, string];
+		expect(msg).toContain('truncated');
+		expect(msg).toContain('400-token');
+		expect(msg).not.toMatch(/unparseable/i);
+	});
+
+	it('keeps the unparseable diagnostic for a complete but malformed reply', async () => {
+		const deps = makeDeps('not json at all', 'stop');
+		expect(await segmentMessage(TEXT, deps)).toEqual([TEXT]);
+		const [, msg] = deps.logger.warn.mock.calls[0] as [unknown, string];
+		expect(msg).toContain('unparseable');
+		expect(msg).not.toMatch(/truncat/i);
+	});
+
+	it('adds no retry — truncation costs exactly one LLM call', async () => {
+		const deps = makeDeps('{"segments":["a"', 'length');
+		await segmentMessage(TEXT, deps);
+		expect(deps.llm.complete).toHaveBeenCalledTimes(1);
+	});
+
+	it('passes maxTokens 400 on the completeWithMeta call', async () => {
+		const deps = makeDeps(JSON.stringify({ segments: [TEXT] }));
+		await segmentMessage(TEXT, deps);
+		const options = deps.llm.complete.mock.calls[0]?.[1];
+		expect(options).toMatchObject({ maxTokens: 400, responseFormat: 'json' });
+	});
+
+	it('tolerates a missing logger on the truncation path', async () => {
+		// `deps.logger` is optional; the truncation branch must not assume it.
+		const llm = withCompleteWithMeta(
+			{ complete: vi.fn().mockResolvedValue('{"segments":[') },
+			'length',
+		);
+		await expect(segmentMessage(TEXT, { llm })).resolves.toEqual([TEXT]);
 	});
 });

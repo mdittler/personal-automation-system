@@ -23,6 +23,10 @@
 			"import": "./dist/utils/file-mutex.js",
 			"types": "./dist/utils/file-mutex.d.ts"
 		},
+		"./utils/json-strip-fences": {
+			"import": "./dist/utils/json-strip-fences.js",
+			"types": "./dist/utils/json-strip-fences.d.ts"
+		},
 		"./utils/llm-errors": {
 			"import": "./dist/utils/llm-errors.js",
 			"types": "./dist/utils/llm-errors.d.ts"

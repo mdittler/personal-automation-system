@@ -18,6 +18,7 @@ import type { LLMService } from '../../types/llm.js';
 import type { MessageContext, PhotoContext, SentMessage } from '../../types/telegram.js';
 import type { TelegramService } from '../../types/telegram.js';
 import { escapeMarkdown } from '../../utils/escape-markdown.js';
+import { classifyStructuredOutput, formatRawPreview } from '../../utils/json-strip-fences.js';
 import type { AppRegistry } from '../app-registry/index.js';
 import { buildVerificationPrompt } from '../llm/prompt-templates.js';
 import type { PendingEntry, PendingVerificationStore } from './pending-verification-store.js';
@@ -67,27 +68,21 @@ interface VerifierResponse {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Parse the verifier LLM's JSON response. Returns undefined if unparseable. */
-function parseVerifierResponse(raw: string): VerifierResponse | undefined {
-	const stripped = raw
-		.trim()
-		.replace(/^```(?:json)?\s*/i, '')
-		.replace(/\s*```$/, '')
-		.trim();
-	try {
-		const parsed: unknown = JSON.parse(stripped);
-		if (typeof parsed !== 'object' || parsed === null) return undefined;
-		const obj = parsed as Record<string, unknown>;
-		if (typeof obj.agrees !== 'boolean') return undefined;
-		return {
-			agrees: obj.agrees,
-			suggestedAppId: typeof obj.suggestedAppId === 'string' ? obj.suggestedAppId : undefined,
-			suggestedIntent: typeof obj.suggestedIntent === 'string' ? obj.suggestedIntent : undefined,
-			reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : undefined,
-		};
-	} catch {
-		return undefined;
-	}
+/**
+ * Validate an already-parsed verifier payload. Returns undefined when the
+ * payload is not the expected shape — the caller treats that exactly like an
+ * LLM failure and degrades (or, in strict mode, falls back).
+ */
+function validateVerifierResponse(parsed: unknown): VerifierResponse | undefined {
+	if (typeof parsed !== 'object' || parsed === null) return undefined;
+	const obj = parsed as Record<string, unknown>;
+	if (typeof obj.agrees !== 'boolean') return undefined;
+	return {
+		agrees: obj.agrees,
+		suggestedAppId: typeof obj.suggestedAppId === 'string' ? obj.suggestedAppId : undefined,
+		suggestedIntent: typeof obj.suggestedIntent === 'string' ? obj.suggestedIntent : undefined,
+		reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : undefined,
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -227,10 +222,36 @@ export class RouteVerifier {
 		// Call verifier LLM — degrade gracefully on any failure
 		let verifierResponse: VerifierResponse | undefined;
 		try {
-			const raw = await this.llm.complete(prompt, { tier: 'standard', temperature: 0.1 });
-			verifierResponse = parseVerifierResponse(raw);
+			// completeWithMeta (not complete) so `finishReason` is visible. This call
+			// passes no maxTokens and inherits the provider default (1024), so there
+			// is no cap of ours to name — but a reply the provider cut is still
+			// truncation, not a verifier that emitted garbage.
+			//
+			// 'parse-first': the verifier payload is a closed object whose only
+			// required field is the leading `agrees` boolean, fully validated by
+			// validateVerifierResponse. Fail-open behaviour is unchanged — every
+			// branch here still yields `undefined`, which degrades (non-strict) or
+			// returns {action:'fallback'} (strict). Only the log line changes.
+			const meta = await this.llm.completeWithMeta(prompt, {
+				tier: 'standard',
+				temperature: 0.1,
+			});
+			const outcome = classifyStructuredOutput(meta, { order: 'parse-first' });
+			verifierResponse =
+				outcome.kind === 'ok' ? validateVerifierResponse(outcome.value) : undefined;
 			if (verifierResponse === undefined) {
-				this.logger.warn({ raw }, 'RouteVerifier: unparseable LLM response — degrading gracefully');
+				const raw = meta.text ?? '';
+				if (outcome.kind === 'truncated') {
+					this.logger.warn(
+						{ raw: formatRawPreview(raw) },
+						"RouteVerifier: LLM response truncated at the provider's output cap (finishReason='length') — degrading gracefully",
+					);
+				} else {
+					this.logger.warn(
+						{ raw },
+						'RouteVerifier: unparseable LLM response — degrading gracefully',
+					);
+				}
 			}
 		} catch (err) {
 			this.logger.warn({ err }, 'RouteVerifier: LLM call failed — degrading gracefully');

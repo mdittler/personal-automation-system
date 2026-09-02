@@ -1243,6 +1243,31 @@ describe('FoodShadowClassifier.classify — truncated output vs malformed output
 		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
 	});
 
+	it('a reply whose JSON closes but whose label is invalid, cut at the cap, is truncation', async () => {
+		// The JSON envelope closed, so `classifyStructuredOutput` reports 'ok', but
+		// the payload fails the closed-schema check. With finishReason 'length' the
+		// offending field is a casualty of the cut — preserved behaviour from the
+		// pre-helper `raw.trim().length > 0 && finishReason === 'length'` gate.
+		const llm = queuedLLM(['{"action": "user wants to log a mea", "confidence": 0.9}'], 'length');
+		const c = makeClassifier({ llm });
+
+		const r = await c.classify('had some stew', 1.0);
+
+		expect(r).toMatchObject({ kind: 'llm-error', category: 'truncated-output' });
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+	});
+
+	it('the same schema-invalid reply with finishReason "stop" stays parse-failed', async () => {
+		const raw = '{"action": "user wants to log a mea", "confidence": 0.9}';
+		const llm = queuedLLM([raw], 'stop');
+		const c = makeClassifier({ llm });
+
+		const r = await c.classify('had some stew', 1.0);
+
+		expect(r).toEqual({ kind: 'parse-failed', raw });
+		expect(vi.mocked(llm.complete)).toHaveBeenCalledTimes(1);
+	});
+
 	it('the classifier call carries maxTokens 80 through completeWithMeta', async () => {
 		const label = 'user wants to add items to the grocery list';
 		const llm = mockLLM(makeOkJson(label, 0.9));

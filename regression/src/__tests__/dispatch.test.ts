@@ -1,3 +1,4 @@
+import { withCompleteWithMeta } from '@core/testing/llm-meta-stub.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	type CostMeterSource,
@@ -269,14 +270,14 @@ describe('sessionControl adapter — prefilter zero-cost', () => {
 
 describe('sessionControl adapter — NL path calls LLM and meters', () => {
 	it('calls LLM and accrues cost for non-command phrasings', async () => {
-		const llm = {
+		const llm = withCompleteWithMeta({
 			complete: vi
 				.fn()
 				.mockResolvedValue(
 					JSON.stringify({ intent: 'new_session', confidence: 0.9, reason: 'NL clear-new' }),
 				),
 			classify: vi.fn(),
-		};
+		});
 		const costTracker = queuedCostTracker([1.0, 1.00005]);
 		const adapters = buildClassifierAdapters({
 			llm: llm as never,

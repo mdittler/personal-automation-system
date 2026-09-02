@@ -18,14 +18,30 @@
  * wording in the plan as contradictory; the correct behaviour is merge-overflow.)
  */
 
-import type { LLMCompletionOptions } from '../../types/llm.js';
-import { UNPARSEABLE_JSON, tryParseJsonStripFences } from '../../utils/json-strip-fences.js';
+import type { LLMCompletionMeta, LLMCompletionOptions } from '../../types/llm.js';
+import { classifyStructuredOutput, formatRawPreview } from '../../utils/json-strip-fences.js';
 import { sanitizeInput } from '../prompt-assembly/sanitization.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 /** Maximum number of segments returned to the caller. Overflow merges into the last. */
 export const MAX_SEGMENTS = 3;
+
+/**
+ * Output budget for the segmenter call.
+ *
+ * Truncation is a LOG-ONLY signal here: `segmentMessage` returns `string[]`, so
+ * there is nowhere in the return type to report it, and the caller already
+ * treats "one segment" as the safe answer. There is no retry on this path and
+ * none is added.
+ *
+ * The reason the segmenter reads `finishReason` at all is that its payload is
+ * an ARRAY. A reply cut between elements still parses into a shorter valid
+ * `segments` array — a silent, confident drop of the user's last request —
+ * unlike the closed single-object schemas elsewhere, where a cut reply simply
+ * fails to parse. Hence `'check-length-first'` in `segmentMessage`.
+ */
+const SEGMENTER_MAX_TOKENS = 400;
 
 /**
  * Minimum length (chars) before the prefilter will consider a message as
@@ -157,10 +173,13 @@ const SENTENCE_FINAL_QUESTION_RE = /\?\s+\S/;
 
 /**
  * LLM client surface required by `segmentMessage`. Matches the
- * `LLMService.complete` signature so a real service can be injected directly.
+ * `LLMService.complete` / `completeWithMeta` signatures so a real service can be
+ * injected directly. `completeWithMeta` is required because the segmenter must
+ * see `finishReason` — see `SEGMENTER_MAX_TOKENS`.
  */
 export interface SegmenterLLM {
 	complete(prompt: string, options?: LLMCompletionOptions): Promise<string>;
+	completeWithMeta(prompt: string, options?: LLMCompletionOptions): Promise<LLMCompletionMeta>;
 }
 
 export interface SegmenterDeps {
@@ -229,12 +248,15 @@ Rules:
 export async function segmentMessage(text: string, deps: SegmenterDeps): Promise<string[]> {
 	const fallback: string[] = [text];
 
-	let raw: string;
+	let meta: LLMCompletionMeta;
 	try {
-		raw = await deps.llm.complete(fenceUntrusted(text), {
+		// completeWithMeta (not complete) so `finishReason` is visible — see
+		// SEGMENTER_MAX_TOKENS for why a truncated reply is especially dangerous
+		// here.
+		meta = await deps.llm.completeWithMeta(fenceUntrusted(text), {
 			tier: 'fast',
 			systemPrompt: SEGMENTER_SYSTEM_PROMPT,
-			maxTokens: 400,
+			maxTokens: SEGMENTER_MAX_TOKENS,
 			temperature: 0,
 			responseFormat: 'json',
 		});
@@ -243,11 +265,30 @@ export async function segmentMessage(text: string, deps: SegmenterDeps): Promise
 		return fallback;
 	}
 
-	const parsed = tryParseJsonStripFences(raw);
-	if (parsed === UNPARSEABLE_JSON) {
-		deps.logger?.warn({ raw }, 'segmentMessage: LLM returned unparseable JSON');
+	// 'check-length-first' — the ordering matters here more than anywhere else in
+	// the repo. A reply cut between array elements still parses into a SHORTER
+	// valid `segments` array, so parsing first would hand the router a
+	// confidently-wrong split that silently drops the user's last request. When
+	// the provider says the reply was cut, the split is not trustworthy at all.
+	const outcome = classifyStructuredOutput(meta, {
+		order: 'check-length-first',
+		maxTokens: SEGMENTER_MAX_TOKENS,
+	});
+
+	if (outcome.kind === 'truncated') {
+		deps.logger?.warn(
+			{ raw: formatRawPreview(outcome.raw), maxTokens: SEGMENTER_MAX_TOKENS },
+			`segmentMessage: LLM reply truncated at the ${SEGMENTER_MAX_TOKENS}-token cap (finishReason='length') — a cut-off segments array would silently drop a request; degrading to single segment`,
+		);
 		return fallback;
 	}
+	if (outcome.kind !== 'ok') {
+		// 'empty' and 'unparseable' share the pre-existing diagnostic: either way
+		// the model produced nothing usable and there is no retry on this path.
+		deps.logger?.warn({ raw: outcome.raw }, 'segmentMessage: LLM returned unparseable JSON');
+		return fallback;
+	}
+	const parsed = outcome.value;
 
 	// Must be {segments: unknown[]} shape; reject null, arrays, primitives.
 	if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
