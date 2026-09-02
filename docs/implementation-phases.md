@@ -3908,7 +3908,33 @@ No consumer requires `/` to be excluded, so nothing was widened past what it can
 | `regression/` `pnpm test` | 40 test files, **676 passed**, zero failures |
 | `pnpm lint` | **zero errors** (warnings unchanged from the baseline) |
 
-**Live `pnpm test:regression` runs:** _placeholder — the operator was running these live while this section was written and the figures had not arrived. Fill in the run table here (bucket, model matrix, pass/fail/error counts, reported cost, wall time) before treating this section as complete. The specific claim to check is the cost line: an all-local matrix must report **$0.00** at the pre-flight estimate, in the GUI confirm dialog, and in the final report — the three places that disagreed before `f4a8767`._
+**Live `pnpm test:regression` runs (2026-09-02):**
+
+| Run | Result |
+|---|---|
+| `--bucket=receipt`, all 5 cases `--rerun` (forced fresh dispatch, standard tier `claude-sonnet-4-6`) | 5 cases, 1 pass / 4 fail / 0 error, **total cost $0.070911**, 47.4s |
+| `--bucket=routing --model-matrix=fast=ollama/muse-glimmer:30b-mlx` | 37 cases, 22 pass / 15 fail / **0 error**, routing accuracy 80.19%, $0.000000, 590.5s |
+| `--bucket=routing --model-matrix=fast=ollama/qwen3.8:27b-mlx` (2026-09-01 baseline, re-confirmed unchanged) | 37 cases, 34 pass / 3 fail / 0 error, 98.11%, $0.000000 |
+
+**The receipt figure is the headline result of `f4a8767`.** The identical sweep reported `$0.000000` on 2026-09-01 and reports **$0.070911** now — about $0.014/case, consistent with the measured 2165 input / 976 output tokens per case on Sonnet. Pass/fail is *unchanged*, so the pre-existing line-item extraction gap (tracked separately in `docs/open-items.md`) is untouched: only the accounting changed. That is precisely what restores the run-budget ceiling, which previously could not stop a receipt sweep of any size.
+
+`muse-glimmer:30b-mlx` went from 1 error to **0 errors** — the shadow-classifier truncation that produced the 2026-09-01 error is gone. Its accuracy moving 79.25% → 80.19% is run-to-run variance on a model that genuinely fails the 95% REQ-REG-011 gate; that remains a legitimate model-quality finding, not a defect.
+
+**Local-model $0 invariant, checked directly against `estimateRunCostUsd`** (37 routing + 10 chatbot cases):
+
+```
+ALL-LOCAL  -> total $0.00,   allLocal: true,  perBucket all $0
+MIXED      -> total $0.40    (routing/fast local = $0; chatbot/standard remote = $0.40)
+UNKNOWN    -> total $0.585   (locality unprovable -> conservative legacy constants)
+```
+
+`isLocalProvider`: `ollama` → true, `llama-cpp` → true, `anthropic` → false.
+
+**What was NOT verified live — read this before treating the section as complete:**
+
+1. **The truncation path was not reproduced live.** The muse-glimmer rerun of `food-user-wants-to-log-an-unfamiliar-meal-with-a-free-text-description` — the case that truncated on 2026-09-01 — did *not* truncate this time. The model returned complete output on all three inputs (96 / 96 / 35 characters) and failed honestly on content (`expected ~"user wants to log an unfamiliar meal with a free-text description", got "none"`). A search across all 35 results from that run found no truncation diagnostic at all. So `ddb0c3c`'s classification is covered by **unit tests under both orderings, not by a live reproduction.** The absence of the error verdict is consistent with the fix but does not by itself demonstrate the truncated branch executing.
+2. **The GUI confirm dialog was not verified live.** The `gui-verify` harness stubs its LLM provider as `providerType: 'openai-compatible'`, which is not local, so `GET /gui/regression/estimate?bucket=routing` returned `{"totalUsd":0.185,"allLocal":false}` — the documented conservative fallback behaving correctly, not a failure. The harness cannot exercise the local path at all. The $0.00 evidence for the GUI estimator is the direct `estimateRunCostUsd` check above plus its unit tests.
+3. **`1fcc3e1`'s `reasoning_content` guard is unit-tested only.** No live OpenAI-compatible local server (LM Studio / vLLM / SGLang / llama-server) was available to probe. Its two open uncertainties — other servers using `message.reasoning` or nesting under `delta` when streaming, and whether such a server reports `finish_reason: 'length'` rather than `'stop'` when the budget burns inside the reasoning block — are recorded in `docs/open-items.md`.
 
 **URS:** 6 new entries — REQ-LLM-041 (one shared truncation classifier, ordering an explicit caller choice), REQ-LLM-042 (OpenAI-compatible/llama.cpp empty-output guard + `reasoning_content` never substituted), REQ-LLM-043 (local-provider models estimate $0 in every estimator), REQ-REG-021 (estimates price the tier that actually serves the bucket), REQ-REG-022 (receipt bucket meters real cost so the run-budget ceiling binds), REQ-SEC-013 (model-id validation accepts namespaced ids consistently across GUI, system-info and the regression path) — plus **Fixes** annotations on REQ-LLM-039 (the systemic-coverage assessment), REQ-LLM-040 (superseded by the shared helper) and REQ-SEC-010 (the widened pattern and its audit).
 

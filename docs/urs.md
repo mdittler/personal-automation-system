@@ -12736,6 +12736,8 @@ Ten sites are migrated, each widening its narrow LLM interface to require `compl
 
 **Test-stub hazard closed by the same commit.** Several test stubs hand a `complete`-only object over with `as unknown as`, so a missing `completeWithMeta` surfaces at *runtime*, not at compile time — and in `classifySessionControl` the resulting `TypeError` was swallowed by the surrounding `try/catch`, returned the safe default, and made `regression/src/__tests__/dispatch.test.ts` silently assert the wrong intent. `core/src/testing/llm-meta-stub.ts#withCompleteWithMeta` delegates to the same `complete` mock so existing call-count and prompt assertions stay meaningful, and `createMockCoreServices` now delegates too instead of returning an independent always-empty `completeWithMeta`. The underlying reason this was invisible — no tsconfig in the repo typechecks test files — is tracked in `docs/open-items.md`.
 
+**Verification note:** the truncation branch is verified by unit tests under **both** orderings, not by a live reproduction. A 2026-09-02 `--bucket=routing --model-matrix=fast=ollama/muse-glimmer:30b-mlx` rerun of the case that truncated on 2026-09-01 (`food-user-wants-to-log-an-unfamiliar-meal-with-a-free-text-description`) returned complete output on all three inputs and failed honestly on content; no truncation diagnostic appeared anywhere in that run's 35 results. The error verdict is gone, which is consistent with the fix, but the run does not by itself demonstrate the truncated branch executing.
+
 **Standard tests:**
 - `json-strip-fences.test.ts` > classifyStructuredOutput > order=check-length-first > parses a complete valid reply
 - `json-strip-fences.test.ts` > classifyStructuredOutput > order=parse-first > parses a complete valid reply
@@ -12868,6 +12870,8 @@ Local models run on the operator's own hardware and are always free; adding a ne
 **Phase:** Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02) | **Status:** Implemented
 
 `runReceiptCase` charged its budget through `estimateUsd({tokenIn: 0, tokenOut: 0})`, which is structurally `$0` for every model. That zero was then recorded as the case's `costUsd` *and* added to the accumulated run spend, so **the run-budget ceiling could not stop a receipt sweep** no matter how much it really cost — the one bucket that sends multi-thousand-token vision payloads was the one bucket that reported nothing. The runner now meters a real `getMonthlyTotalCost()` delta the way every other case-runner does, and gates the pre-charge check on a realistic `RECEIPT_ESTIMATE_TOKENS` projection instead of on zero.
+
+**Verification (real `pnpm test:regression` runs):** the identical `--bucket=receipt` sweep (all 5 cases `--rerun`, forced fresh dispatch, standard tier `claude-sonnet-4-6`) reported **$0.000000 on 2026-09-01** and **$0.070911 on 2026-09-02** — about $0.014/case, consistent with the measured 2165 input / 976 output tokens per case. Verdicts are unchanged at 1 pass / 4 fail / 0 error, so the pre-existing line-item extraction gap is untouched and only the accounting moved.
 
 **Standard tests:**
 - `orchestrator-receipt-dispatch.test.ts` > runSuite — receipt bucket cost metering + run budget > records the real CostTracker delta, not the pre-charge projection
