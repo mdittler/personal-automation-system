@@ -13,6 +13,7 @@ import type {
 	LLMFinishReason,
 	ProviderModel,
 } from '../../../types/llm.js';
+import { LLMEmptyOutputError } from '../errors.js';
 import { supportsTemperature } from '../model-capabilities.js';
 import { getModelPricing, isLocalProvider } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
@@ -30,6 +31,9 @@ type CompatibleProviderType = 'openai-compatible' | 'llama-cpp';
  * but the server ignores the value.
  */
 const LOCAL_NO_AUTH_API_KEY = 'sk-no-auth-required';
+
+/** Output cap applied when the caller doesn't specify one. */
+const DEFAULT_MAX_TOKENS = 1024;
 
 /**
  * Map OpenAI-compatible `finish_reason` to the unified LLMFinishReason.
@@ -110,20 +114,71 @@ export class OpenAICompatibleProvider extends BaseProvider {
 			messages.push({ role: 'user', content: prompt });
 		}
 
+		// Hoisted so the diagnostic below can name the cap that actually went on
+		// the wire, not just the caller-supplied (possibly undefined) value.
+		const maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;
+
 		const response = await this.client.chat.completions.create({
 			model,
 			messages,
-			max_tokens: options?.maxTokens ?? 1024,
+			max_tokens: maxTokens,
 			...(supportsTemperature(model) ? { temperature: options?.temperature } : {}),
 			...(options?.responseFormat === 'json'
 				? { response_format: { type: 'json_object' as const } }
 				: {}),
 		});
 
-		const text = response.choices[0]?.message?.content ?? '';
-		const finishReason: LLMFinishReason = response.choices[0]
-			? mapOpenAIFinishReason(response.choices[0].finish_reason)
+		const choice = response.choices[0];
+		const text = choice?.message?.content ?? '';
+		const finishReason: LLMFinishReason = choice
+			? mapOpenAIFinishReason(choice.finish_reason)
 			: 'other';
+
+		// Reasoning models served over an OpenAI-compatible API (LM Studio, vLLM,
+		// SGLang, llama-server) emit their chain of thought in the NON-STANDARD
+		// `message.reasoning_content` field and leave `content` empty. The `openai`
+		// SDK types don't declare it, so read it through a narrow cast — the same
+		// shape OllamaProvider uses for `done_reason`/`thinking`.
+		//
+		// We deliberately do NOT substitute reasoning text for the answer. It is
+		// unstructured prose, so handing it back would feed narration to every
+		// `responseFormat: 'json'` caller (classifiers, receipt parsing, the
+		// regression judge) and let a non-answer masquerade as a real one — a
+		// quieter failure than the empty string it replaced. It is used only as
+		// evidence in the diagnostic below, mirroring how OllamaProvider reports
+		// `thinking` length without ever returning it.
+		const reasoning = (choice?.message as { reasoning_content?: unknown } | undefined)
+			?.reasoning_content;
+		const reasoningChars = typeof reasoning === 'string' ? reasoning.length : undefined;
+
+		if (text.trim() === '') {
+			// Empty output + budget exhausted is unambiguously a failure: there is
+			// nothing to return and no budget left to produce it with. Gated on the
+			// finish reason rather than on a reasoning block being present, so a
+			// model that burns its budget without reporting one is caught too.
+			//
+			// Empty output + `stop` deliberately still returns '': some local models
+			// legitimately answer ambiguous prompts with an empty string, and the
+			// shadow/recall classifiers already retry that case themselves.
+			if (finishReason === 'length') {
+				throw new LLMEmptyOutputError({
+					provider: this.providerId,
+					model,
+					maxTokens,
+					...(reasoningChars !== undefined ? { thinkingChars: reasoningChars } : {}),
+				});
+			}
+
+			if (reasoningChars) {
+				// Not fatal (see above) but never silent: an operator seeing this
+				// knows the model reasoned and then declined to answer, rather than
+				// guessing why a caller got ''.
+				this.logger.warn(
+					{ provider: this.providerId, model, finishReason, reasoningChars },
+					'Model returned empty content alongside a reasoning block; returning "" unchanged',
+				);
+			}
+		}
 
 		return {
 			text,

@@ -123,6 +123,48 @@ describe('LlamaCppProvider — chat completions (REQ-LLM-LLAMA-CPP-003, REQ-LLM-
 	});
 });
 
+describe('LlamaCppProvider — inherits the empty-output guard', () => {
+	// LlamaCppProvider overrides only supportsVision and the constructor, so the
+	// reasoning/empty-output handling must arrive purely by inheritance. These
+	// tests fail if someone re-implements doComplete on the subclass.
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('throws the diagnostic when a reasoning model burns its budget', async () => {
+		mockChatCreate.mockResolvedValue({
+			choices: [
+				{
+					message: { content: '', reasoning_content: 'z'.repeat(500) },
+					finish_reason: 'length',
+				},
+			],
+			usage: { prompt_tokens: 20, completion_tokens: 120 },
+		});
+		const provider = makeProvider();
+
+		const err = await provider.complete('classify', { maxTokens: 120 }).then(
+			() => null,
+			(e: unknown) => e as Error,
+		);
+
+		expect(err?.name).toBe('LLMEmptyOutputError');
+		expect(err?.message).toContain('local-model');
+		expect(err?.message).toContain('120');
+		expect(err?.message).toContain('500');
+		expect(mockChatCreate).toHaveBeenCalledTimes(1); // non-retryable
+	});
+
+	it('still resolves to "" for empty content + finish_reason stop', async () => {
+		mockChatCreate.mockResolvedValue({
+			choices: [{ message: { content: '' }, finish_reason: 'stop' }],
+			usage: { prompt_tokens: 5, completion_tokens: 1 },
+		});
+		const provider = makeProvider();
+		await expect(provider.complete('hi', { maxTokens: 120 })).resolves.toBe('');
+	});
+});
+
 describe('LlamaCppProvider — listModels (REQ-LLM-LLAMA-CPP-005)', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();

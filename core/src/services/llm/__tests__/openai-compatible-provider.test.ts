@@ -193,6 +193,127 @@ describe('OpenAICompatibleProvider — providerType override + llama-cpp dummy k
 	});
 });
 
+describe('OpenAICompatibleProvider — empty output after budget exhaustion', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	/**
+	 * The reasoning-model failure shape: LM Studio / vLLM / SGLang / llama-server
+	 * put the chain of thought in the non-standard `reasoning_content` field and
+	 * leave `content` empty once the cap is hit.
+	 */
+	function budgetBurnedInReasoning() {
+		return {
+			choices: [
+				{
+					message: { content: '', reasoning_content: 'x'.repeat(762) },
+					finish_reason: 'length',
+				},
+			],
+			usage: { prompt_tokens: 210, completion_tokens: 176 },
+		};
+	}
+
+	it('throws a diagnostic naming the model, the budget and the reasoning length', async () => {
+		mockChatCreate.mockResolvedValue(budgetBurnedInReasoning());
+		const provider = makeProvider();
+
+		const err = await provider
+			.complete('classify this', { responseFormat: 'json', maxTokens: 176 })
+			.then(
+				() => null,
+				(e: unknown) => e as Error,
+			);
+
+		expect(err).toBeInstanceOf(Error);
+		expect(err?.name).toBe('LLMEmptyOutputError');
+		expect(err?.message).toContain('gpt-4o-mini'); // the model
+		expect(err?.message).toContain('openai'); // the provider
+		expect(err?.message).toContain('176'); // the token cap
+		expect(err?.message).toContain('762'); // the reasoning block length
+	});
+
+	it('names the provider default cap when the caller supplied none', async () => {
+		mockChatCreate.mockResolvedValue({
+			choices: [{ message: { content: '' }, finish_reason: 'length' }],
+			usage: { prompt_tokens: 10, completion_tokens: 1024 },
+		});
+		const provider = makeProvider();
+		await expect(provider.complete('hi')).rejects.toThrow(/1024/);
+	});
+
+	it('throws even when the model reports no reasoning block (empty + length is enough)', async () => {
+		mockChatCreate.mockResolvedValue({
+			choices: [{ message: { content: '   ' }, finish_reason: 'length' }],
+			usage: { prompt_tokens: 10, completion_tokens: 80 },
+		});
+		const provider = makeProvider();
+		await expect(provider.complete('hi', { maxTokens: 80 })).rejects.toThrow(
+			/returned empty output/i,
+		);
+	});
+
+	it('still resolves to "" for empty content + finish_reason stop (callers retry that themselves)', async () => {
+		mockChatCreate.mockResolvedValue({
+			choices: [{ message: { content: '' }, finish_reason: 'stop' }],
+			usage: { prompt_tokens: 10, completion_tokens: 1 },
+		});
+		const provider = makeProvider();
+		await expect(provider.complete('hi', { maxTokens: 80 })).resolves.toBe('');
+	});
+
+	it('still resolves to "" for empty content + reasoning_content + finish_reason stop', async () => {
+		// Reasoning text is NOT substituted for the answer: it is prose, and a
+		// responseFormat:'json' caller would choke on it. Empty-on-stop stays ''.
+		mockChatCreate.mockResolvedValue({
+			choices: [
+				{
+					message: { content: '', reasoning_content: 'Let me think about this...' },
+					finish_reason: 'stop',
+				},
+			],
+			usage: { prompt_tokens: 10, completion_tokens: 40 },
+		});
+		const provider = makeProvider();
+		await expect(provider.complete('hi', { maxTokens: 80 })).resolves.toBe('');
+	});
+
+	it('ignores reasoning_content entirely when content is present', async () => {
+		mockChatCreate.mockResolvedValue({
+			choices: [
+				{
+					message: { content: '{"a":1}', reasoning_content: 'lots of deliberation here' },
+					finish_reason: 'stop',
+				},
+			],
+			usage: { prompt_tokens: 10, completion_tokens: 8 },
+		});
+		const provider = makeProvider();
+		const result = await provider.completeWithUsage('hi', { maxTokens: 80 });
+		expect(result.text).toBe('{"a":1}');
+		expect(result.finishReason).toBe('stop');
+	});
+
+	it('resolves normally for truncated-but-non-empty output (the oracle judges that)', async () => {
+		mockChatCreate.mockResolvedValue({
+			choices: [{ message: { content: '{"a":1' }, finish_reason: 'length' }],
+			usage: { prompt_tokens: 10, completion_tokens: 80 },
+		});
+		const provider = makeProvider();
+		const result = await provider.completeWithUsage('hi', { maxTokens: 80 });
+		expect(result.text).toBe('{"a":1');
+		expect(result.finishReason).toBe('length');
+	});
+
+	it('is attempted exactly once — the failure is deterministic, not transient', async () => {
+		mockChatCreate.mockResolvedValue(budgetBurnedInReasoning());
+		const provider = makeProvider();
+		await expect(provider.complete('hi', { maxTokens: 176 })).rejects.toThrow(/empty output/i);
+		expect(mockChatCreate).toHaveBeenCalledTimes(1);
+	});
+});
+
 describe('OpenAICompatibleProvider — temperature capability gate', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
