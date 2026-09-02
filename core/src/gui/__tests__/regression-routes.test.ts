@@ -509,6 +509,29 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 		}
 	});
 
+	it('renders a latest-performance snapshot chart for every tier with results', async () => {
+		const history = fakeHistoryStore([
+			overviewManifest({
+				runId: 'snapshot-run',
+				caseResults: [
+					manifestCase({ caseId: 'fast-case', evaluatedTier: 'fast' }),
+					manifestCase({ caseId: 'standard-case', evaluatedTier: 'standard' }),
+				],
+				routingAccuracy: null,
+				routingInputsEvaluated: 0,
+			}),
+		]);
+		const { app } = await buildApp({ listedCases: [makeListedCase()], runHistoryStore: history });
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=overview');
+			expect(res.body).toContain('data-testid="latest-performance-chart-fast"');
+			expect(res.body).toContain('data-testid="latest-performance-chart-standard"');
+			expect(res.body).not.toContain('data-testid="latest-performance-chart-reasoning"');
+		} finally {
+			await app.close();
+		}
+	});
+
 	it('REQ-REG-GUI-V2-007: ?view=trends renders the trends partial', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {

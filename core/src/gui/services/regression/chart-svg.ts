@@ -55,6 +55,23 @@ export interface ScatterChartOptions {
 	yLabel?: string;
 }
 
+/** One model's latest pass rate in a per-tier snapshot chart. */
+export interface BarDatum {
+	label: string;
+	tier: string;
+	modelId: string;
+	/** Pass rate in the inclusive range 0..1. */
+	value: number;
+}
+
+export interface HorizontalBarChartOptions {
+	bars: readonly BarDatum[];
+	width: number;
+	/** Optional fixed height; otherwise grows one row per model. */
+	height?: number;
+	title?: string;
+}
+
 const MARGIN = { top: 16, right: 16, bottom: 32, left: 48 };
 
 /**
@@ -310,6 +327,50 @@ export function renderScatter(opts: ScatterChartOptions): string {
 		lines.push(
 			`<text x="${opts.width / 2}" y="${opts.height / 2}" text-anchor="middle" font-size="12" fill="#94a3b8">no data</text>`,
 		);
+	}
+
+	lines.push('</svg>');
+	return lines.join('');
+}
+
+/**
+ * Render a compact, horizontal snapshot histogram. Unlike the Trends charts,
+ * each model appears exactly once: its newest recorded run for this tier.
+ */
+export function renderHorizontalBarChart(opts: HorizontalBarChartOptions): string {
+	const bars = opts.bars.filter((bar) => Number.isFinite(bar.value));
+	const rowHeight = 30;
+	const left = 220;
+	const right = 54;
+	const top = 26;
+	const bottom = 24;
+	const height = opts.height ?? Math.max(90, top + bottom + bars.length * rowHeight);
+	const innerW = Math.max(1, opts.width - left - right);
+	const title = opts.title ?? 'Latest pass rate by model';
+	const lines: string[] = [
+		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${opts.width} ${height}" role="img" aria-label="latest pass rate bar chart">`,
+		`<title>${escapeSvg(title)}</title>`,
+		`<text x="${left}" y="14" font-size="10" fill="#475569">0%</text>`,
+		`<text x="${left + innerW}" y="14" text-anchor="end" font-size="10" fill="#475569">100%</text>`,
+	];
+
+	if (bars.length === 0) {
+		lines.push(
+			`<text x="${opts.width / 2}" y="${height / 2}" text-anchor="middle" font-size="12" fill="#94a3b8">no data</text>`,
+		);
+	} else {
+		for (const [index, bar] of bars.entries()) {
+			const value = Math.max(0, Math.min(1, bar.value));
+			const y = top + index * rowHeight;
+			const slot = paletteSlotFor(bar.tier, bar.modelId);
+			const shortLabel = bar.label.length > 30 ? `${bar.label.slice(0, 29)}…` : bar.label;
+			lines.push(
+				`<text x="${left - 8}" y="${y + 14}" text-anchor="end" font-size="11" fill="#1e293b">${escapeSvg(shortLabel)}</text>`,
+				`<rect x="${left}" y="${y}" width="${innerW}" height="16" rx="3" fill="#e2e8f0" />`,
+				`<rect x="${left}" y="${y}" width="${innerW * value}" height="16" rx="3" fill="${escapeSvg(slot.color)}" />`,
+				`<text x="${left + innerW + 6}" y="${y + 13}" font-size="11" fill="#1e293b">${(value * 100).toFixed(1)}%</text>`,
+			);
+		}
 	}
 
 	lines.push('</svg>');

@@ -32,6 +32,11 @@
       <% } %>
     </header>
     <% if (table.rows.length > 0) { %>
+      <section class="chart-block" aria-labelledby="snapshot-<%= table.tier %>">
+        <h3 id="snapshot-<%= table.tier %>">Latest performance by model</h3>
+        <p><small>Each bar is that model’s most recent completed run in this tier.</small></p>
+        <div data-testid="latest-performance-chart-<%= table.tier %>"><%~ table.snapshotSvg %></div>
+      </section>
       <table class="regression-table">
         <thead>
           <tr>

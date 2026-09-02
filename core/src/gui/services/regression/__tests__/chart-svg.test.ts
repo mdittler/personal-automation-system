@@ -13,6 +13,7 @@ import {
 	computeLineExtents,
 	computeScatterExtents,
 	escapeSvg,
+	renderHorizontalBarChart,
 	renderLineChart,
 	renderScatter,
 } from '../chart-svg.js';
@@ -157,6 +158,22 @@ describe('computeScatterExtents', () => {
 		]);
 		expect(flat.xMax).toBeGreaterThan(flat.xMin);
 		expect(flat.yMax).toBeGreaterThan(flat.yMin);
+	});
+});
+
+describe('renderHorizontalBarChart', () => {
+	it('renders one bounded bar and escaped model label per datum', () => {
+		const svg = renderHorizontalBarChart({
+			bars: [
+				{ label: '<candidate>', tier: 'fast', modelId: 'candidate', value: 1.2 },
+				{ label: 'other', tier: 'fast', modelId: 'other', value: -1 },
+			],
+			width: 720,
+		});
+		expect(svg).toContain('latest pass rate bar chart');
+		expect(svg).toContain('&lt;candidate&gt;');
+		expect(svg).toContain('100.0%');
+		expect(svg).toContain('0.0%');
 	});
 });
 

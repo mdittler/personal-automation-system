@@ -25,7 +25,11 @@ import {
 	readHistoryForCase,
 } from '../services/regression/cache-reader.js';
 import type { CaseDiscoveryService, ListedCase } from '../services/regression/case-discovery.js';
-import { renderLineChart, renderScatter } from '../services/regression/chart-svg.js';
+import {
+	renderHorizontalBarChart,
+	renderLineChart,
+	renderScatter,
+} from '../services/regression/chart-svg.js';
 import {
 	type EstimatedCase,
 	type EstimatorOptions,
@@ -964,6 +968,19 @@ async function renderOverviewTab(
 	const tierTables = aggregated.map(({ tier, label, rows }) => ({
 		tier,
 		label,
+		snapshotSvg:
+			rows.length > 0
+				? renderHorizontalBarChart({
+						bars: rows.map((r) => ({
+							label: r.modelId,
+							tier,
+							modelId: r.modelId,
+							value: r.passRate,
+						})),
+						width: 720,
+						title: `Latest ${label.toLowerCase()}-tier performance by model`,
+					})
+				: null,
 		rows: rows.map((r) => ({
 			...r,
 			completedAtFormatted: formatRunDate(r.completedAt),
