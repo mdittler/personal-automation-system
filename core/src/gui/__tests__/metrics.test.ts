@@ -36,6 +36,18 @@ const logger = pino({ level: 'silent' });
 const moduleDir = join(fileURLToPath(import.meta.url), '..', '..');
 const viewsDir = join(moduleDir, 'views');
 
+/**
+ * Both endpoints only return rows inside a rolling lookback window, so the
+ * fixture days must stay relative to "now" — hardcoded calendar dates silently
+ * fall out of range as time passes and take the whole file red with them.
+ * DAY_1 is the older of the two days, DAY_2 the more recent.
+ */
+function utcDaysAgo(daysAgo: number): string {
+	return new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+const DAY_1 = utcDaysAgo(3);
+const DAY_2 = utcDaysAgo(2);
+
 const ADMIN_ID = 'admin1';
 const MEMBER_A_ID = 'member-a';
 const MEMBER_B_ID = 'member-b';
@@ -113,11 +125,11 @@ async function buildApp(
 	const transcriptIndex: Pick<ChatTranscriptIndex, 'countMessagesByDay'> = {
 		countMessagesByDay: async (opts) => {
 			if (opts.userId === MEMBER_A_ID) {
-				return [{ date: '2026-07-01', count: 3 }];
+				return [{ date: DAY_1, count: 3 }];
 			}
 			if (opts.userId) return [];
 			// Admin (no userId filter): aggregate across all users
-			return [{ date: '2026-07-01', count: 5 }];
+			return [{ date: DAY_1, count: 5 }];
 		},
 	};
 
@@ -215,9 +227,9 @@ describe('GET /gui/api/metrics/llm-daily', () => {
 		const usageLines = [
 			HEADER_8,
 			SEP_8,
-			row8('2026-07-01T10:00:00Z', 'anthropic', 'claude', '0.10', 'food', MEMBER_A_ID),
-			row8('2026-07-01T11:00:00Z', 'anthropic', 'claude', '0.20', 'food', MEMBER_B_ID),
-			row8('2026-07-02T10:00:00Z', 'anthropic', 'claude', '0.05', 'food', MEMBER_A_ID),
+			row8(`${DAY_1}T10:00:00Z`, 'anthropic', 'claude', '0.10', 'food', MEMBER_A_ID),
+			row8(`${DAY_1}T11:00:00Z`, 'anthropic', 'claude', '0.20', 'food', MEMBER_B_ID),
+			row8(`${DAY_2}T10:00:00Z`, 'anthropic', 'claude', '0.05', 'food', MEMBER_A_ID),
 		];
 		await writeFile(join(tempDir, 'system', 'llm-usage.md'), `${usageLines.join('\n')}\n`, 'utf-8');
 
@@ -232,8 +244,8 @@ describe('GET /gui/api/metrics/llm-daily', () => {
 		const body = res.json();
 		expect(body.days).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ date: '2026-07-01', cost: 0.1 }),
-				expect.objectContaining({ date: '2026-07-02', cost: 0.05 }),
+				expect.objectContaining({ date: DAY_1, cost: 0.1 }),
+				expect.objectContaining({ date: DAY_2, cost: 0.05 }),
 			]),
 		);
 		// Member B's cost never appears in member A's totals.
@@ -246,8 +258,8 @@ describe('GET /gui/api/metrics/llm-daily', () => {
 		const usageLines = [
 			HEADER_9,
 			SEP_9,
-			row9('2026-07-01T10:00:00Z', 'anthropic', 'claude', '0.10', 'food', MEMBER_A_ID, 'hh-1'),
-			row9('2026-07-01T11:00:00Z', 'anthropic', 'claude', '0.20', 'food', MEMBER_B_ID, 'hh-1'),
+			row9(`${DAY_1}T10:00:00Z`, 'anthropic', 'claude', '0.10', 'food', MEMBER_A_ID, 'hh-1'),
+			row9(`${DAY_1}T11:00:00Z`, 'anthropic', 'claude', '0.20', 'food', MEMBER_B_ID, 'hh-1'),
 		];
 		await writeFile(join(tempDir, 'system', 'llm-usage.md'), `${usageLines.join('\n')}\n`, 'utf-8');
 
@@ -260,7 +272,7 @@ describe('GET /gui/api/metrics/llm-daily', () => {
 
 		expect(res.statusCode).toBe(200);
 		const body = res.json();
-		const day = body.days.find((d: { date: string }) => d.date === '2026-07-01');
+		const day = body.days.find((d: { date: string }) => d.date === DAY_1);
 		expect(day.cost).toBeCloseTo(0.3, 5);
 		expect(body.perUser).toEqual(
 			expect.arrayContaining([
@@ -284,7 +296,7 @@ describe('GET /gui/api/metrics/llm-daily', () => {
 	});
 
 	it('handles a 6-column legacy usage log (no provider/user columns)', async () => {
-		const usageLines = [HEADER_6, SEP_6, row6('2026-07-01T10:00:00Z', 'claude', '0.42', 'food')];
+		const usageLines = [HEADER_6, SEP_6, row6(`${DAY_1}T10:00:00Z`, 'claude', '0.42', 'food')];
 		await writeFile(join(tempDir, 'system', 'llm-usage.md'), `${usageLines.join('\n')}\n`, 'utf-8');
 
 		const cookies = await login(app, ADMIN_ID, 'admin-pass-123');
@@ -344,7 +356,7 @@ describe('GET /gui/api/metrics/activity-daily', () => {
 	it('returns member-scoped message + alert-firing counts', async () => {
 		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-a'), { recursive: true });
 		await writeFile(
-			join(tempDir, 'system', 'alert-history', 'alert-a', '2026-07-01_09-00-00-000.md'),
+			join(tempDir, 'system', 'alert-history', 'alert-a', `${DAY_1}_09-00-00-000.md`),
 			'fired\n',
 			'utf-8',
 		);
@@ -358,7 +370,7 @@ describe('GET /gui/api/metrics/activity-daily', () => {
 
 		expect(res.statusCode).toBe(200);
 		const body = res.json();
-		const day = body.days.find((d: { date: string }) => d.date === '2026-07-01');
+		const day = body.days.find((d: { date: string }) => d.date === DAY_1);
 		expect(day.messages).toBe(3); // from the stubbed transcript index, member A path
 		expect(day.alertFirings).toBe(1);
 	});
@@ -366,18 +378,18 @@ describe('GET /gui/api/metrics/activity-daily', () => {
 	it("does not count another member's alert firings", async () => {
 		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-a'), { recursive: true });
 		await writeFile(
-			join(tempDir, 'system', 'alert-history', 'alert-a', '2026-07-01_09-00-00-000.md'),
+			join(tempDir, 'system', 'alert-history', 'alert-a', `${DAY_1}_09-00-00-000.md`),
 			'fired\n',
 			'utf-8',
 		);
 		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-b'), { recursive: true });
 		await writeFile(
-			join(tempDir, 'system', 'alert-history', 'alert-b', '2026-07-01_09-05-00-000.md'),
+			join(tempDir, 'system', 'alert-history', 'alert-b', `${DAY_1}_09-05-00-000.md`),
 			'fired\n',
 			'utf-8',
 		);
 		await writeFile(
-			join(tempDir, 'system', 'alert-history', 'alert-b', '2026-07-01_09-06-00-000.md'),
+			join(tempDir, 'system', 'alert-history', 'alert-b', `${DAY_1}_09-06-00-000.md`),
 			'fired\n',
 			'utf-8',
 		);
@@ -391,7 +403,7 @@ describe('GET /gui/api/metrics/activity-daily', () => {
 
 		expect(res.statusCode).toBe(200);
 		const body = res.json();
-		const day = body.days.find((d: { date: string }) => d.date === '2026-07-01');
+		const day = body.days.find((d: { date: string }) => d.date === DAY_1);
 		// Member A only sees alert-a's single firing, never alert-b's two firings.
 		expect(day.alertFirings).toBe(1);
 	});
@@ -399,13 +411,13 @@ describe('GET /gui/api/metrics/activity-daily', () => {
 	it('returns an aggregated admin view including all alerts', async () => {
 		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-a'), { recursive: true });
 		await writeFile(
-			join(tempDir, 'system', 'alert-history', 'alert-a', '2026-07-01_09-00-00-000.md'),
+			join(tempDir, 'system', 'alert-history', 'alert-a', `${DAY_1}_09-00-00-000.md`),
 			'fired\n',
 			'utf-8',
 		);
 		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-b'), { recursive: true });
 		await writeFile(
-			join(tempDir, 'system', 'alert-history', 'alert-b', '2026-07-01_09-05-00-000.md'),
+			join(tempDir, 'system', 'alert-history', 'alert-b', `${DAY_1}_09-05-00-000.md`),
 			'fired\n',
 			'utf-8',
 		);
@@ -419,7 +431,7 @@ describe('GET /gui/api/metrics/activity-daily', () => {
 
 		expect(res.statusCode).toBe(200);
 		const body = res.json();
-		const day = body.days.find((d: { date: string }) => d.date === '2026-07-01');
+		const day = body.days.find((d: { date: string }) => d.date === DAY_1);
 		expect(day?.messages).toBe(5); // stubbed admin (all-users) path
 		expect(day?.alertFirings).toBe(2); // both alert-a and alert-b counted for admin
 	});
@@ -453,7 +465,7 @@ describe('legacy shared-token session (no request.user)', () => {
 				// Only the admin (unscoped, userId undefined) path returns rows —
 				// proves the endpoint took the admin branch rather than scoping to
 				// a (nonexistent) actor.userId.
-				if (opts.userId === undefined) return [{ date: '2026-07-01', count: 7 }];
+				if (opts.userId === undefined) return [{ date: DAY_1, count: 7 }];
 				return [];
 			},
 		};
@@ -523,7 +535,7 @@ describe('legacy shared-token session (no request.user)', () => {
 			[
 				HEADER_8,
 				SEP_8,
-				row8('2026-07-01T09:00:00Z', 'anthropic', 'claude', '0.05', 'food', 'u1'),
+				row8(`${DAY_1}T09:00:00Z`, 'anthropic', 'claude', '0.05', 'food', 'u1'),
 			].join('\n'),
 			'utf-8',
 		);
@@ -544,13 +556,13 @@ describe('legacy shared-token session (no request.user)', () => {
 	it('activity-daily returns unscoped admin message + alert-firing counts (not zeroed by a missing actor.userId)', async () => {
 		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-a'), { recursive: true });
 		await writeFile(
-			join(tempDir, 'system', 'alert-history', 'alert-a', '2026-07-01_09-00-00-000.md'),
+			join(tempDir, 'system', 'alert-history', 'alert-a', `${DAY_1}_09-00-00-000.md`),
 			'fired\n',
 			'utf-8',
 		);
 		await mkdir(join(tempDir, 'system', 'alert-history', 'alert-b'), { recursive: true });
 		await writeFile(
-			join(tempDir, 'system', 'alert-history', 'alert-b', '2026-07-01_09-05-00-000.md'),
+			join(tempDir, 'system', 'alert-history', 'alert-b', `${DAY_1}_09-05-00-000.md`),
 			'fired\n',
 			'utf-8',
 		);
@@ -564,7 +576,7 @@ describe('legacy shared-token session (no request.user)', () => {
 
 		expect(res.statusCode).toBe(200);
 		const body = res.json();
-		const day = body.days.find((d: { date: string }) => d.date === '2026-07-01');
+		const day = body.days.find((d: { date: string }) => d.date === DAY_1);
 		expect(day?.messages).toBe(7);
 		// Both alert-a and alert-b counted — a member-scoped branch would only
 		// see alerts whose delivery includes actor.userId, which is undefined

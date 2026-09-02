@@ -12,6 +12,7 @@ import type {
 	LLMFinishReason,
 	ProviderModel,
 } from '../../../types/llm.js';
+import { supportsTemperature } from '../model-capabilities.js';
 import { getModelPricing } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 
@@ -78,7 +79,7 @@ export class AnthropicProvider extends BaseProvider {
 			model,
 			max_tokens: options?.maxTokens ?? 1024,
 			messages: [{ role: 'user', content }],
-			temperature: options?.temperature,
+			...(supportsTemperature(model) ? { temperature: options?.temperature } : {}),
 			...(options?.systemPrompt ? { system: options.systemPrompt } : {}),
 		});
 

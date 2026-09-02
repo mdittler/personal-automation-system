@@ -350,13 +350,22 @@ describe('Activity feed (/gui/activity)', () => {
 		// which yields midnight UTC. Rendering that with
 		// toLocaleDateString(undefined, ...) uses the SERVER'S local timezone,
 		// so a server west of UTC (or any TZ behind UTC at midnight) renders the
-		// PREVIOUS calendar day. An entry timestamped 2026-07-06T08:00:00Z must
-		// show a "July 6" header regardless of the server's local timezone.
+		// PREVIOUS calendar day. An entry timestamped at 08:00Z must show that
+		// same UTC day's header regardless of the server's local timezone.
+		//
+		// The timestamp is relative (yesterday) so it always falls inside the
+		// activity window — a hardcoded date silently rots out of range.
+		const entryDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+		entryDate.setUTCHours(8, 0, 0, 0);
+		const dayBefore = new Date(entryDate.getTime() - 24 * 60 * 60 * 1000);
+		const label = (d: Date) =>
+			d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', timeZone: 'UTC' });
+
 		app = await buildApp(tempDir, {});
 		await writeFile(
 			logPath,
 			jsonlLine({
-				timestamp: '2026-07-06T08:00:00Z',
+				timestamp: entryDate.toISOString(),
 				operation: 'write',
 				path: 'data/users/member-a/food/pantry.md',
 				appId: 'food',
@@ -370,8 +379,8 @@ describe('Activity feed (/gui/activity)', () => {
 		const res = await app.inject({ method: 'GET', url: '/gui/activity', cookies });
 
 		expect(res.statusCode).toBe(200);
-		expect(res.body).toContain('July 6');
-		expect(res.body).not.toContain('July 5');
+		expect(res.body).toContain(label(entryDate));
+		expect(res.body).not.toContain(label(dayBefore));
 	});
 
 	it('empty state is an invitation, not an apology', async () => {

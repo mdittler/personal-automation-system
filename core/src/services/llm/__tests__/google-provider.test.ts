@@ -112,3 +112,41 @@ describe('GoogleProvider — finishReason mapping (REQ-FOOD-RECEIPT-INTEGRITY-00
 		expect(result.finishReason).toBe('other');
 	});
 });
+
+describe('GoogleProvider — temperature capability gate', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockGenerateContent.mockResolvedValue(makeGoogleResponse('STOP'));
+	});
+
+	// MODEL_CAPABILITIES is keyed by model id and shared across providers, so the
+	// gate is exercised here with the one model id we have hard evidence for.
+	it('omits temperature from config for a model that rejects it', async () => {
+		const provider = makeProvider();
+		await provider.complete('hi', {
+			modelRef: { provider: 'google', model: 'claude-opus-5' },
+			temperature: 0,
+		});
+
+		const config = mockGenerateContent.mock.calls[0]?.[0]?.config;
+		expect(config).not.toHaveProperty('temperature');
+		expect(config).toMatchObject({ maxOutputTokens: 1024 });
+	});
+
+	it('still sends temperature for a model that supports it', async () => {
+		const provider = makeProvider();
+		await provider.complete('hi', {
+			modelRef: { provider: 'google', model: 'claude-sonnet-4-6' },
+			temperature: 0,
+		});
+
+		expect(mockGenerateContent.mock.calls[0]?.[0]?.config).toMatchObject({ temperature: 0 });
+	});
+
+	it('still sends temperature for an unprobed model (default is supported)', async () => {
+		const provider = makeProvider();
+		await provider.complete('hi', { temperature: 0.9 });
+
+		expect(mockGenerateContent.mock.calls[0]?.[0]?.config).toMatchObject({ temperature: 0.9 });
+	});
+});

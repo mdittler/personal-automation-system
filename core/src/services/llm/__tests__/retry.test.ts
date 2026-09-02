@@ -90,4 +90,56 @@ describe('withRetry', () => {
 		expect(result).toBe('ok');
 		expect(fn).toHaveBeenCalledTimes(2);
 	});
+
+	describe('shouldRetry predicate', () => {
+		it('fails fast without burning the backoff schedule when shouldRetry returns false', async () => {
+			const fn = vi.fn().mockRejectedValue(new Error('deterministic'));
+
+			await expect(
+				withRetry(fn, { maxRetries: 3, initialDelayMs: 10_000, shouldRetry: () => false }),
+			).rejects.toThrow('deterministic');
+
+			expect(fn).toHaveBeenCalledOnce();
+		});
+
+		it('keeps retrying while shouldRetry returns true', async () => {
+			const fn = vi.fn().mockRejectedValueOnce(new Error('transient')).mockResolvedValue('ok');
+
+			const result = await withRetry(fn, {
+				maxRetries: 2,
+				initialDelayMs: 1,
+				shouldRetry: () => true,
+			});
+
+			expect(result).toBe('ok');
+			expect(fn).toHaveBeenCalledTimes(2);
+		});
+
+		it('retries every error when no predicate is supplied (unchanged default)', async () => {
+			const fn = vi.fn().mockRejectedValue(new Error('fail'));
+
+			await expect(withRetry(fn, { maxRetries: 2, initialDelayMs: 1 })).rejects.toThrow('fail');
+
+			expect(fn).toHaveBeenCalledTimes(3);
+		});
+
+		it('passes a normalized Error to the predicate for non-Error throws', async () => {
+			const seen: Error[] = [];
+			const fn = vi.fn().mockRejectedValue('a bare string');
+
+			await expect(
+				withRetry(fn, {
+					maxRetries: 2,
+					initialDelayMs: 1,
+					shouldRetry: (err) => {
+						seen.push(err);
+						return false;
+					},
+				}),
+			).rejects.toThrow('a bare string');
+
+			expect(seen).toHaveLength(1);
+			expect(seen[0]).toBeInstanceOf(Error);
+		});
+	});
 });

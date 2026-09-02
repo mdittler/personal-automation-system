@@ -192,3 +192,46 @@ describe('OpenAICompatibleProvider — providerType override + llama-cpp dummy k
 		expect(result.provider).toBe('llama-cpp');
 	});
 });
+
+describe('OpenAICompatibleProvider — temperature capability gate', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockChatCreate.mockResolvedValue(makeChoicesResponse('stop'));
+	});
+
+	// MODEL_CAPABILITIES is keyed by model id, not by provider — OpenAI-compatible
+	// gateways (OpenRouter, LiteLLM) proxy Anthropic model ids verbatim, so the
+	// same gate has to apply on this transport.
+	it('omits temperature entirely for a model that rejects it', async () => {
+		const provider = makeProvider();
+		await provider.complete('hi', {
+			modelRef: { provider: 'openai', model: 'claude-opus-5' },
+			temperature: 0,
+		});
+
+		const callArgs = mockChatCreate.mock.calls[0]?.[0];
+		expect(callArgs).toMatchObject({ model: 'claude-opus-5' });
+		expect(callArgs).not.toHaveProperty('temperature');
+	});
+
+	it('still sends temperature for a model that supports it', async () => {
+		const provider = makeProvider();
+		await provider.complete('hi', {
+			modelRef: { provider: 'openai', model: 'claude-sonnet-4-6' },
+			temperature: 0,
+		});
+
+		expect(mockChatCreate).toHaveBeenCalledWith(
+			expect.objectContaining({ model: 'claude-sonnet-4-6', temperature: 0 }),
+		);
+	});
+
+	it('still sends temperature for an unprobed model (default is supported)', async () => {
+		const provider = makeProvider();
+		await provider.complete('hi', { temperature: 0.7 });
+
+		expect(mockChatCreate).toHaveBeenCalledWith(
+			expect.objectContaining({ model: 'gpt-4o-mini', temperature: 0.7 }),
+		);
+	});
+});

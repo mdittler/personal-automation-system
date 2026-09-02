@@ -13,6 +13,7 @@ import type {
 	LLMFinishReason,
 	ProviderModel,
 } from '../../../types/llm.js';
+import { supportsTemperature } from '../model-capabilities.js';
 import { getModelPricing, isLocalProvider } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 
@@ -113,7 +114,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
 			model,
 			messages,
 			max_tokens: options?.maxTokens ?? 1024,
-			temperature: options?.temperature,
+			...(supportsTemperature(model) ? { temperature: options?.temperature } : {}),
 			...(options?.responseFormat === 'json'
 				? { response_format: { type: 'json_object' as const } }
 				: {}),
