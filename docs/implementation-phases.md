@@ -3702,6 +3702,110 @@ Tests: `pnpm test` — 574 test files, 12458 passed, 3 skipped, 1 todo, zero fai
 
 ---
 
+## Regression Run Unblock — Model Capability Guards + Live Progress (2026-09-01)
+
+**Goal:** A live `pnpm test:regression` sweep returned **100% `error` verdicts** while the systems under test were answering correctly. Find out why, fix the infrastructure so verdicts reflect model behaviour rather than request shape, and make a long-running regression sweep observable from the GUI while it runs.
+
+**Outcome:** two independent root causes, a third and fourth instance of one recurring defect class, and a long-latent test-rot bug found along the way — six commits, `449cc40` → `9b15027`.
+
+---
+
+### Root cause 1 — `temperature` rejected by the judge model (`449cc40`)
+
+`regression/src/oracles/rubric.ts` sends `temperature: 0`; `anthropic-provider.ts` forwarded it unconditionally; `claude-opus-5` answered ``400 invalid_request_error: `temperature` is deprecated for this model.`` All 10 chatbot cases errored **at the judge**, not in the chatbot.
+
+A live probe (1-token calls against the real API, 2026-09-01) established the boundary:
+
+- **Reject `temperature`:** `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-opus-4-7`
+- **Accept:** `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-sonnet-4-5-20250929`, `claude-opus-4-5-20251101`, `claude-haiku-4-5`, `claude-haiku-4-5-20251001`
+- **404 / no longer served:** `claude-sonnet-4-20250514` (which is the repo's built-in Anthropic default in `core/src/services/config/default-providers.ts`), `claude-opus-4-20250514`, `claude-3-5-sonnet-20241022`, `claude-haiku-3-5-20241022`, `claude-sonnet-4-7`
+
+No OpenAI or Google key is configured, so those providers are unprobed and rely on the permissive default plus the self-healing retry. Both facts are tracked in `docs/open-items.md`.
+
+### Root cause 2 — thinking models return empty text (`9f9f2fb`)
+
+`apps/food/src/routing/shadow-classifier.ts` calls with `maxTokens: 80`; `ollama-provider.ts` sends that as `num_predict` and read only `response.response`. Thinking-capable models default to thinking ON, burn the whole budget inside the SDK's separate `thinking` field, and return `""` with `done_reason: "length"`. All 16 routing cases then failed with `JSON parse failed: Unexpected end of JSON input` — while output token counts were non-zero.
+
+Live probe evidence: `qwen3.8:27b-mlx` and `muse-glimmer:30b-mlx` both returned empty content with 762- and 856-character thinking blocks at `num_predict: 176`; with `think: false` at the real production shape (`format: json`, `temp 0`, `num_predict: 80`) they returned correct JSON in 24 and 15 tokens respectively. `think: false` is accepted and ignored by non-thinking models (`gemma4:31b`, `gemma4:e4b`).
+
+### The recurring defect class
+
+A fixed `maxTokens` budget feeding a structured-output parse, where truncation is reported as **malformed output** rather than as **truncation**. Four instances found this phase:
+
+1. Ollama empty output (`9f9f2fb`) — reported as `Unexpected end of JSON input`.
+2. Rubric judge (`e90e8f0`) — observed live as `judge JSON parse failed ... raw="{"score": 2, "explanation": "The reply g`.
+3. Food shadow classifier (`9b15027`) — observed as `Unterminated string in JSON at position 369` from `muse-glimmer:30b-mlx`. `9f9f2fb`'s guard deliberately requires *empty* text, so non-empty truncation fell straight through to the structural oracle's generic parse failure one layer down.
+4. Two further call sites found and **deliberately not fixed** (recall classifier, message segmenter, plus a lower-risk third in the weakness summarizer) — tracked in `docs/open-items.md`.
+
+---
+
+### Commit-by-commit
+
+**`449cc40` — per-model temperature capability gate + self-healing fallback + non-retryable deterministic 400s**
+
+- New `core/src/services/llm/model-capabilities.ts`, mirroring `model-pricing.ts`: `ModelCapabilities` / `MODEL_CAPABILITIES` / `getModelCapabilities()` / `supportsTemperature()`. Table seeded from the live probe above. Unknown models default to **supported**, so nothing unprobed changes behaviour; an `Object.hasOwn` guard stops a model id like `constructor` resolving through `Object.prototype`.
+- Anthropic, OpenAI-compatible and Google providers spread `temperature` conditionally, matching the existing `systemPrompt` / `responseFormat` style. Ollama is untouched — local models accept it and rely on the `?? 0.1` default.
+- `BaseProvider.completeWithTemperatureFallback` self-heals an unlisted model: a parameter-rejection 400 that names `temperature` triggers exactly one retry with the field stripped, plus a `warn` carrying the model id so a table entry can be added. Narrower than the general classifier on purpose — stripping the temperature only helps when the temperature is what the model objected to.
+- `classifyLLMError` gains a non-retryable `parameter-rejection` category (five message patterns, gated on status 400, checked after the billing 400 so it cannot hijack it) whose user message states the real reason instead of "try again later". `withRetry` gains an optional `shouldRetry` predicate (default unchanged) so `BaseProvider` fails out of a deterministic 400 immediately instead of burning 1s + 2s of backoff before the strip-and-retry.
+- Also fixed two pre-existing red suites caused by hardcoded calendar dates rotting out of their rolling lookback windows (`gui/activity`, `gui/metrics`) — both now build fixtures relative to now, per the CLAUDE.md rule.
+- Verified against the live API: `claude-opus-5` and `claude-sonnet-4-6` both complete, and a table entry removed at runtime self-heals in ~1.3s.
+
+**`9f9f2fb` — Ollama thinking disabled by default; loud `LLMEmptyOutputError` on empty-output-at-length**
+
+- New `LLMCompletionOptions.thinking`, defaulting OFF. `OllamaProvider` sends `think` **unconditionally** (not a conditional spread) so `think: false` actually reaches the wire. The flag is deliberately **not** gated on `responseFormat === 'json'` — the tightest budget in the repo is `pas-classifier`'s `maxTokens: 10` with no `responseFormat` at all — and not set per call site either, because opt-out defaults are how this recurs. A caller wanting a reasoning phase sets `thinking: true` and raises `maxTokens`.
+- `LLMEmptyOutputError` is thrown when Ollama returns empty text with a `length` finish reason, naming the model, the `num_predict` budget and the thinking-block length. Gated on empty + truncated rather than on a thinking block being present. Empty + `stop` still returns `""` — the pre-existing Gemma ambiguity that the shadow/recall classifiers already retry themselves.
+- Classified as the non-retryable `empty-output` category; `BaseProvider`'s `shouldRetry` skips it (re-exhausting the same budget is as pointless as re-sending a rejected parameter). The message is carried through `ShadowResult`'s `llm-error` variant into the regression `MeteredError`, so a report says what broke instead of "food-shadow infrastructure error: unknown".
+
+**`2767b93` — regression GUI live-run progress bar + `activeRunId` wired up**
+
+- `run-registry`: `RunProgress {completed, total}` rides every dispatched event. `RunState` gains `totalCases` (0 = unknown) plus a monotonic `completedCases`; `eventLog` entries become `{id, event, progress}`. The counter is monotonic state rather than an `eventLog` scan (the ring buffer evicts past `MAX_EVENT_LOG_ENTRIES`), and each entry carries its own snapshot so replay reports historical counts instead of stamping every frame with the final one. New `getActiveRunId()`.
+- Routes: the progress denominator is the **bucket-filtered** case count — `--rerun` only forces a cache miss (`regression/src/runner/index.ts:171`) while the bucket filter (`:134-136`) is what actually narrows selection, so every bucket-filtered case still reports a result. The bucket filter is hoisted out of the `forceFresh` block; `totalCases` rides `createRun` and the 202 body; `case-completed` SSE frames carry `completed` / `total` (two numbers, no new XSS surface). `GET /estimate` is deliberately untouched — its rerun-narrowing is correct for cost and pinned by existing tests.
+- `activeRunId`: all six render paths passed `null`, leaving `data-runid`, the client bootstrap reattach, and the summary-bar guard as dead code. Threaded through each renderer's deps from `getActiveRunId()`; the "view live" link drops the `?runId=` nobody parsed; compare's three estimate literals gain the missing `totalCases` / `totalInputs`.
+- Client: `setProgress()` writes element properties + `textContent` only (never `innerHTML`), clamps the bar with `Math.min` while the text keeps the true count, and runs before the row fetch so the bar advances even if the row partial 404s. Terminal handlers leave the final count in place. Native `<progress>` styled from PAS tokens (`pas.css` section 9b).
+- Counts are computed server-side by design: there is no jsdom harness for `regression-live.eta`'s inline script, so server-side counts are testable through SSE frames while client-side counting would not be.
+
+**`a37462d` — 17 pre-existing regression-package test failures fixed**
+
+`cd regression && pnpm test` had 17 failures, all pre-existing. The package is not in the root `vitest.config.ts` `projects` list (REQ-REG-001), so nothing was watching.
+
+- *Group 1 — 13 receipt failures, a wall-clock time bomb.* `parseReceiptFromPhoto` refuses receipt dates older than `MAX_RECEIPT_AGE_DAYS` (90), overwriting `date` with today and preserving the model's extraction in `rawExtractedDate`. `buildExpectation` asserted the sidecar date verbatim on `date`, so every date-bearing receipt case went red exactly 90 days after the receipt was issued — `receipt-costco-long` (2026-04-27) crossed that line on 2026-07-26 and `receipt-trader-joes-correction` on 2026-08-10. Photo fixtures carry an immutable real-world date, so this was never going to resolve itself, and it hits real `pnpm test:regression` runs against a *perfect* model, not only the mocked tests. `buildExpectation` now models the parser's rejection branch: outside the acceptance window it pins `date` to today and asserts the ground-truth date on `rawExtractedDate`. Assertion strength preserved, not relaxed — verified by mutation, with four clock-frozen tests covering both branches (before, which branch ran depended on how long ago the date literals happened to be authored).
+- *Group 2 — 4 chatbot-environment failures.* `loadSystemConfig` validates the environment with envalid, which calls `process.exit(1)` on a missing required var, killing the vitest worker. The repo ships only `.env.example` (`.env` is gitignored), so these passed solely on the maintainer's primary checkout and died in any worktree, fresh clone, or CI. The test now stubs the two required vars plus one provider key (`buildLLMConfig` refuses a config with no usable provider); dotenv does not override already-set vars, so the stubs win where a real `.env` exists, and the values are inert.
+- Deliberately left alone: the fixture sidecar dates (real receipts, immutable), and the root vitest `projects` array — REQ-REG-001 mandates the exclusion, so changing it needs a URS amendment (recorded as a proposal in `docs/open-items.md`).
+
+**`e90e8f0` — rubric judge truncation diagnosed as truncation**
+
+- `JUDGE_MAX_TOKENS` 400 → 1024. The old comment claimed frontier judges reply in ~100 tokens; the live run disproved it, so the comment now records the evidence. 1024 matches the provider-default `max_tokens` in core and costs nothing when the judge stops at its own EOS.
+- The oracle calls `completeWithMeta` and, on `finishReason === 'length'`, returns an error verdict naming the cap and showing the raw prefix. Checked **before** parsing: a cap-truncated reply is untrusted even if its prefix happens to parse. Genuinely malformed complete output still falls through to the generic parse-failure verdict. `CallMeter` accounting in the `finally` is unchanged, so spend on throws is still captured.
+- `RubricJudgeLLM` (`complete` + `completeWithMeta`) replaces the `Pick<LLMService, 'complete'>` narrow at every judge construction site: rubric deps, `ChatbotRunnerDeps`, `RunSuiteOptions.judgeLlm`, and the orchestrator test casts. `StubLLMService` gains `completeWithMeta` (delegating to `this.complete` so cost-simulating test wrappers keep working) and an optional `finishReason` on `queue()`.
+
+**`9b15027` — food shadow classifier truncation diagnosed as truncation (third instance)**
+
+- `FoodShadowClassifierLLM` (`complete` + `completeWithMeta`) replaces the full `LLMService` in the classifier options — the same widening `RubricJudgeLLM` did for the judge — and `callLLM` goes through `completeWithMeta` so `finishReason` is visible.
+- New `interpret()` maps one completion to a `ShadowResult`. It parses first (a reply satisfying the schema is complete by construction), and only on a parse failure does `finishReason === 'length'` decide *which* failure to report: `{kind: 'llm-error', category: 'truncated-output', message}` naming the cap and echoing a `JSON.stringify`-escaped raw prefix (one log line), plus a `logger.warn`. That reuses the `llm-error.message` channel `9f9f2fb` added, which `dispatch.ts` already surfaces in the `MeteredError` — no new `ShadowResult` variant.
+- `SHADOW_MAX_TOKENS` stays 80 and now records why: the good path is 15–24 tokens on both models in use, so a reply needing 369+ characters is misbehaviour to report, not to fund.
+- Retry-on-empty is untouched. The truncation branch fires only for non-empty output, so an empty reply still takes its one repair retry (and a retry that itself comes back truncated is reported as truncation). Truncation is terminal: the same prompt against the same cap cuts the same way. Production callers keep failing open — `dispatchShadow` falls through for every non-`ok` kind and `computeVerdict` already maps `llm-error` to `error`.
+
+---
+
+### Verification — real `pnpm test:regression` runs
+
+| Run | Result |
+|-----|--------|
+| `--bucket=routing --model-matrix=fast=ollama/qwen3.8:27b-mlx` | 37 cases, 34 pass / 3 fail / **0 error**, routing accuracy **98.11%**, REQ-REG-011 gate PASSED, $0.00, 697s |
+| `--bucket=routing --model-matrix=fast=ollama/muse-glimmer:30b-mlx` | 37 cases, 22 pass / 14 fail / 1 error, routing accuracy **79.25%**, gate FAILED on genuine accuracy, $0.00, 610s. The single error was the truncation later fixed in `9b15027`. |
+| `--bucket=chatbot --judge-model=anthropic/claude-opus-5` (before `e90e8f0`) | 10 cases, 3 pass / 6 fail / 1 error (judge truncation), $0.307 |
+| same, after `e90e8f0` | 10 cases, 3 pass / 7 fail / **0 error**, $0.305 |
+
+Before the fixes the same suite was **0 pass / 26 error**. `muse-glimmer:30b-mlx` failing the accuracy gate is a legitimate model-quality finding, not a defect — preserving that distinction is the point of the phase.
+
+**Tests / lint:** root `pnpm test` — 575 test files, 12547 passed, 3 skipped, 1 todo, zero failures. `regression/` — 665 passed (was 17 failing). `pnpm lint` — zero errors.
+
+**URS:** 8 new entries — REQ-LLM-037 (temperature capability registry + self-heal), REQ-LLM-038 (deterministic rejections not retried), REQ-LLM-039 (Ollama thinking off by default + loud empty-output error), REQ-LLM-040 (truncation reported as truncation), REQ-REG-019 (no infrastructure `error` verdicts), REQ-REG-020 (receipt date-acceptance window in expectations), REQ-REG-GUI-V2-027 (server-computed live progress), REQ-REG-GUI-V2-028 (`activeRunId` threading) — plus a **Fixes** annotation on REQ-REG-001 recording the 17-failure test rot and why the vitest exclusion was left in place.
+
+**Doc footprint:** `docs/urs.md` (8 entries + REQ-REG-001 Fixes + 8 traceability rows + Totals recount), this section, one CLAUDE.md Implementation Status bullet, and nine `docs/open-items.md` entries (5-series `MODEL_PRICING` gap, dead built-in Anthropic default, unprobed Google/OpenAI temperature support, the two unfixed truncation-misdiagnosis call sites, `pas-classifier`'s 10-token budget vs larger local models, the regression-vitest-exclusion proposal, date-bearing fixture shelf life, the missing jsdom harness for `regression-live.eta`, and the run-tab submit button that ignores `activeRunId`).
+
+---
+
 # Planned Phases — Pre-Open-Source Audit Remediation (2026-07-06)
 
 > **Status: PLANNED, not yet implemented.** These are forward-looking phase definitions, not completed-work records like the sections above. They are derived from the nine-pass audit in `docs/superpowers/plans/2026-06-11-ux-review-findings-and-fix-plan.md`; every finding cited below was confirmed against code (passes 4–9 during the 2026-07-06 audit sessions; the anchor findings of passes 1–3 re-verified 2026-07-06). Per-item actionables live in `docs/open-items.md`.

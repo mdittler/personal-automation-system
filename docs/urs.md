@@ -10377,6 +10377,9 @@ The regression workspace is registered as a pnpm package but not listed in the r
 
 **Standard tests:** verified by composition (root vitest config + workspace exclusion).
 
+**Fixes:**
+- **(2026-09-01, Regression Run Unblock):** the exclusion was found to cover more than it was written for. `cd regression && pnpm test` had accumulated **17 pre-existing failures** that nothing was watching — 13 from the receipt date rot now fixed under REQ-REG-020, and 4 from `loadSystemConfig`'s envalid validation calling `process.exit(1)` on a missing required var (the repo ships only `.env.example`, so those 4 passed solely on the maintainer's primary checkout and died in any worktree, fresh clone, or CI). The chatbot-environment test now stubs the two required vars plus one provider key (`buildLLMConfig` refuses a config with no usable provider); dotenv does not override already-set vars, so the stubs win where a real `.env` exists, and the values are inert (the runtime is wired to `fakeTelegramService`, no LLM call is dispatched). The exclusion itself was **deliberately left in place** — changing the root `projects` array would contradict this requirement's text. The underlying question (this requirement's cost concern is the CLI harness `pnpm test:regression`, which vitest never invokes; the excluded workspace is 660+ fully-mocked unit tests costing ~5s and zero network) is recorded as a proposal in `docs/open-items.md` and would need an amendment here before the exclusion is narrowed. CL: `regression-test-rot`.
+
 ---
 
 ### REQ-REG-002 — Each persona case MUST declare a `coverage` array of repo-relative file paths; the cache key MUST include their git blob hashes
@@ -12492,6 +12495,219 @@ Every redesigned or new page (Home, wizards, Household hub, Conversations, Backu
 
 ---
 
+## Regression Run Unblock — Model Capability Guards + Live Progress (2026-09-01)
+
+**Context.** A live `pnpm test:regression` sweep returned 100% `error` verdicts across the chatbot and routing buckets while the systems under test were answering correctly. Two independent infrastructure root causes were responsible: (1) `claude-opus-5` rejects `temperature` outright (``400 invalid_request_error: `temperature` is deprecated for this model.``) and the rubric judge sends `temperature: 0`, so every chatbot case died at the judge call; (2) thinking-capable Ollama models default to thinking ON and spend the entire `num_predict` budget inside the SDK's separate `thinking` field, returning `response: ''` with `done_reason: 'length'`, so every routing case failed with `JSON parse failed: Unexpected end of JSON input`. Both surfaced as *malformed output* rather than as what they actually were — a recurring defect class in which a fixed `maxTokens` budget feeding a structured-output parse reports truncation as a broken model. Two further instances of that class (the rubric judge at its 400-token cap, the Food shadow classifier at its 80-token cap) were diagnosed and fixed in the same phase, and a latent wall-clock time bomb in the receipt oracle was found alongside them.
+
+### REQ-LLM-037 — Models that reject a `temperature` parameter MUST NOT receive one; unknown models MUST default permissive and self-heal
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+`core/src/services/llm/model-capabilities.ts` is a per-model capability registry mirroring `model-pricing.ts`: `ModelCapabilities` / `MODEL_CAPABILITIES` / `getModelCapabilities()` / `supportsTemperature()`. The table is seeded from a live probe of the Anthropic catalog (2026-09-01): `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8` and `claude-opus-4-7` reject the parameter; `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-sonnet-4-5(-20250929)`, `claude-opus-4-5-20251101` and `claude-haiku-4-5(-20251001)` accept it. The Anthropic, OpenAI-compatible and Google providers spread `temperature` conditionally on `supportsTemperature(model)`, matching the existing `systemPrompt` / `responseFormat` style; the Ollama provider is unchanged (local models accept the parameter). Models absent from the table default to **supported**, so nothing unprobed changes behaviour; `getModelCapabilities` uses an `Object.hasOwn` guard so a model id like `constructor` cannot resolve through `Object.prototype`. When an unlisted model turns out to reject the parameter, `BaseProvider.completeWithTemperatureFallback` retries **exactly once** with the field stripped and emits a `logger.warn` carrying the provider and model id so a table entry can be added. The strip-and-retry is narrower than the general parameter-rejection classifier on purpose — it fires only when the 400 message names `temperature`, and only when the caller actually supplied one.
+
+**Standard tests:**
+- `model-capabilities.test.ts` > model-capabilities > getModelCapabilities > returns the record for a known model
+- `model-capabilities.test.ts` > model-capabilities > supportsTemperature > returns false for a probed model that rejects temperature
+- `model-capabilities.test.ts` > model-capabilities > supportsTemperature > returns true for a probed model that accepts temperature
+- `model-capabilities.test.ts` > model-capabilities > MODEL_CAPABILITIES table > lists every entry with an explicit boolean flag
+- `model-capabilities.test.ts` > model-capabilities > MODEL_CAPABILITIES table > marks the Claude 5 family as not supporting temperature
+- `anthropic-provider.test.ts` > AnthropicProvider > temperature capability gate > omits temperature entirely for a model that rejects it
+- `anthropic-provider.test.ts` > AnthropicProvider > temperature capability gate > still sends temperature for a model that supports it
+- `google-provider.test.ts` > GoogleProvider — temperature capability gate > omits temperature from config for a model that rejects it
+- `google-provider.test.ts` > GoogleProvider — temperature capability gate > still sends temperature for a model that supports it
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — temperature capability gate > omits temperature entirely for a model that rejects it
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — temperature capability gate > still sends temperature for a model that supports it
+- `base-provider.test.ts` > BaseProvider > temperature strip-and-retry fallback > retries once without temperature when the model rejects the parameter
+
+**Edge case tests:**
+- `model-capabilities.test.ts` > model-capabilities > getModelCapabilities > returns null for an unknown model
+- `model-capabilities.test.ts` > model-capabilities > supportsTemperature > defaults to true for an unknown model so behaviour is unchanged
+- `model-capabilities.test.ts` > model-capabilities > supportsTemperature > defaults to true for an empty model id
+- `anthropic-provider.test.ts` > AnthropicProvider > temperature capability gate > still sends temperature for an unprobed model (default is supported)
+- `google-provider.test.ts` > GoogleProvider — temperature capability gate > still sends temperature for an unprobed model (default is supported)
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — temperature capability gate > still sends temperature for an unprobed model (default is supported)
+- `base-provider.test.ts` > BaseProvider > temperature strip-and-retry fallback > does not swallow the error when the retry without temperature also fails
+- `base-provider.test.ts` > BaseProvider > temperature strip-and-retry fallback > does not retry when no temperature was requested
+- `base-provider.test.ts` > BaseProvider > temperature strip-and-retry fallback > rethrows unrelated errors unchanged without stripping temperature
+- `base-provider.test.ts` > BaseProvider > temperature strip-and-retry fallback > does not strip temperature for a 400 naming a different parameter
+
+**Security tests:**
+- `model-capabilities.test.ts` > model-capabilities > supportsTemperature > does not resolve inherited Object.prototype keys as capability entries
+
+---
+
+### REQ-LLM-038 — Deterministic provider rejections MUST NOT be retried
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+`classifyLLMError` gains a `parameter-rejection` category, matched from a table of provider message shapes (`is deprecated for this model`, `Unsupported parameter`, `Unrecognized request argument`, `Unknown name "temperature"`, `Extra inputs are not permitted`) and gated on HTTP 400 so the same wording on a 500 still classifies as `overloaded`. It is checked after the existing billing 400 so billing errors are not hijacked. The category is **non-retryable** and its user message states the real reason ("the selected AI model rejected one of the request settings… retrying will not help") rather than the generic "try again later". `withRetry` gains an optional `shouldRetry(error): boolean` predicate — default unchanged (retry everything) — and `BaseProvider` passes `err => !isParameterRejectionError(err)`, so a deterministic 400 fails out immediately instead of burning the 1s + 2s backoff schedule before the useful strip-and-retry. The same predicate also skips retries for `LLMEmptyOutputError` (REQ-LLM-039): re-exhausting the identical budget is as pointless as re-sending a rejected parameter.
+
+**Standard tests:**
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > classifies the observed Anthropic temperature deprecation as parameter-rejection
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > is NOT retryable — the same request fails identically every time
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > states the real reason rather than telling the user to try again later
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > isParameterRejectionError is true for a parameter 400 and false otherwise
+- `retry.test.ts` > withRetry > shouldRetry predicate > fails fast without burning the backoff schedule when shouldRetry returns false
+- `retry.test.ts` > withRetry > shouldRetry predicate > keeps retrying while shouldRetry returns true
+- `retry.test.ts` > withRetry > shouldRetry predicate > retries every error when no predicate is supplied (unchanged default)
+
+**Edge case tests:**
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > only applies to status 400 — the same wording on a 500 stays overloaded
+- `llm-errors.test.ts` > classifyLLMError > parameter rejection > does not hijack the billing 400, which is checked first
+- `retry.test.ts` > withRetry > shouldRetry predicate > passes a normalized Error to the predicate for non-Error throws
+- `base-provider.test.ts` > BaseProvider > empty-output errors are not retried > is attempted exactly once — exhausting the same budget again cannot help
+- `base-provider.test.ts` > BaseProvider > empty-output errors are not retried > is not retried even when a temperature was requested (no strip-and-retry pass)
+
+---
+
+### REQ-LLM-039 — Ollama requests MUST suppress the thinking phase by default, and empty output at the budget MUST raise a descriptive error
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+`LLMCompletionOptions.thinking` is a new opt-in flag defaulting **OFF**. `OllamaProvider` sends `think: options?.thinking === true` **unconditionally** — not as a conditional spread — because `think: false` has to reach the wire: thinking-capable models (`qwen3.8:27b-mlx`, `muse-glimmer:30b-mlx`) default to thinking ON and spend the whole `num_predict` allowance inside the separate `thinking` field, returning `response: ''`. Non-thinking models (`gemma4:31b`, `gemma4:e4b`) accept and ignore the flag. The flag is deliberately **not** gated on `responseFormat === 'json'` — the tightest budget in the repo (`pas-classifier`, `maxTokens: 10`) declares no `responseFormat` — and not set per call site, because opt-out defaults are how this class of bug recurs. A caller that wants a reasoning phase sets `thinking: true` **and** raises `maxTokens`. When Ollama returns empty text with `finishReason === 'length'`, the provider throws `LLMEmptyOutputError` naming the model, the provider, the `num_predict` budget and the thinking-block length, instead of silently returning `""`. The guard is keyed on empty + truncated rather than on a thinking block being present, so a model that burns its budget without reporting `thinking` is caught too; empty + `stop` still returns `""` (the pre-existing Gemma ambiguity that the shadow and recall classifiers already retry themselves). The error classifies as the non-retryable `empty-output` category (REQ-LLM-038), and its message is carried through `ShadowResult`'s `llm-error` variant into the regression harness's `MeteredError` so a report says what broke instead of "food-shadow infrastructure error: unknown".
+
+**Standard tests:**
+- `ollama-provider.test.ts` > OllamaProvider — thinking flag (defaults OFF) > sends think: false by default — an omitted field would leave thinking ON
+- `ollama-provider.test.ts` > OllamaProvider — thinking flag (defaults OFF) > sends think: true when options.thinking === true
+- `ollama-provider.test.ts` > OllamaProvider — thinking flag (defaults OFF) > sends think even when responseFormat is unset — the flag is NOT gated on JSON mode
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > throws a diagnostic naming the model, the budget and the thinking length
+- `llm-errors.test.ts` > classifyLLMError > empty output > classifies LLMEmptyOutputError as empty-output
+- `llm-errors.test.ts` > classifyLLMError > empty output > is NOT retryable — the same request exhausts the same budget every time
+- `llm-errors.test.ts` > classifyLLMError > empty output > states the real reason rather than telling the user to try again later
+- `llm-errors.test.ts` > classifyLLMError > empty output > isEmptyOutputError is true for that error and false otherwise
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — llm-error message passthrough > carries the underlying error message so callers can report something useful
+- `dispatch.test.ts` > foodShadow adapter — throws on llm-error > includes the underlying error message and a non-zero meter
+
+**Edge case tests:**
+- `ollama-provider.test.ts` > OllamaProvider — thinking flag (defaults OFF) > treats thinking: false the same as omitted
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > throws even when the model reports no thinking block (empty + length is enough)
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > still resolves to "" for empty + done_reason stop (Gemma ambiguity, handled upstream)
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > resolves normally for truncated-but-non-empty output (the oracle judges that)
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > also fires on the older-Ollama path where length is inferred from eval_count
+- `ollama-provider.test.ts` > OllamaProvider — empty output after budget exhaustion > is attempted exactly once — the failure is deterministic, not transient
+- `llm-errors.test.ts` > classifyLLMError > empty output > does not classify by message text — only the error name counts
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — llm-error message passthrough > does NOT trigger the empty-output repair retry — a throw bypasses parseShadowResponse
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — llm-error message passthrough > stringifies non-Error throws rather than dropping them
+
+---
+
+### REQ-LLM-040 — A structured-output call that fails to parse at `finishReason === 'length'` MUST be reported as truncation naming the cap
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+Where a fixed `maxTokens` budget feeds a structured-output parse, an unparseable reply at `finishReason === 'length'` MUST be reported as budget exhaustion — naming the cap, the constant to raise, and a bounded prefix of the raw reply — never as malformed model output. Two call sites implement this:
+
+- **Rubric judge** (`regression/src/oracles/rubric.ts`). `JUDGE_MAX_TOKENS` is 1024 (was 400 — the old comment assumed frontier judges reply in ~100 tokens, which a 2026-09-01 live run disproved; 1024 matches core's provider-default `max_tokens` and costs nothing when the judge stops at its own EOS). The oracle calls `completeWithMeta` and, on `finishReason === 'length'`, returns `verdict: 'error'` naming the cap and echoing a 200-char raw prefix. The check runs **before** parsing: a cap-truncated reply is untrusted even when its prefix happens to parse. Genuinely malformed but complete output still falls through to the generic parse-failure verdict, and `CallMeter` accounting in the `finally` is unchanged so spend on throws is still captured. `RubricJudgeLLM` (`complete` + `completeWithMeta`) replaces the `Pick<LLMService, 'complete'>` narrow at every judge construction site.
+- **Food shadow classifier** (`apps/food/src/routing/shadow-classifier.ts`). `SHADOW_MAX_TOKENS` stays 80 and now records why (the good path is 15–24 tokens on both models in use, so a reply needing 369+ characters is misbehaviour to report, not to fund). `callLLM` goes through `completeWithMeta`; the new `interpret()` parses first — a reply satisfying the schema is complete by construction — and only on a parse failure does `finishReason` decide *which* failure to report, returning `{kind: 'llm-error', category: 'truncated-output', message}` plus a `logger.warn`. The raw prefix is `JSON.stringify`-escaped so the diagnostic stays one log line. Truncation is terminal (no retry: the same prompt against the same cap cuts the same way), while empty output still takes its one repair retry. Production callers keep failing open — `dispatchShadow` falls through for every non-`ok` kind and `computeVerdict` already maps `llm-error` to `error` — so a truncated shadow reply lands in the regex cascade exactly as the old parse-failure did.
+
+**Standard tests:**
+- `rubric-oracle.test.ts` > runRubricOracle > reports truncation (not a parse failure) when finishReason is "length"
+- `rubric-oracle.test.ts` > runRubricOracle > gives the judge a 1024-token output budget
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > unparseable + finishReason "length" → llm-error naming the token cap, no retry
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > the classifier call carries maxTokens 80 through completeWithMeta
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > logs a warn naming the cap so the truncation is visible outside the return value
+- `dispatch.test.ts` > foodShadow adapter — throws on llm-error > reports a cap-truncated reply as truncation, not as a JSON parse failure
+
+**Edge case tests:**
+- `rubric-oracle.test.ts` > runRubricOracle > errors on finishReason "length" even when the truncated prefix parses
+- `rubric-oracle.test.ts` > runRubricOracle > keeps the generic parse-failure verdict for malformed-but-complete output
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > the truncation diagnostic is a single line even when the raw reply has newlines
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > unparseable + finishReason "stop" keeps parse-failed and its no-retry policy
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > empty + finishReason "stop" still takes the one repair retry (unchanged)
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > a retry that comes back truncated is reported as truncation (2 calls)
+- `shadow-classifier.test.ts` > FoodShadowClassifier.classify — truncated output vs malformed output > a valid reply still parses even when finishReason is "length" (schema is complete)
+
+---
+
+### REQ-REG-019 — The suite MUST complete without infrastructure `error` verdicts when the judge rejects `temperature` or the fast-tier model is thinking-capable
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+A regression run's verdicts must reflect the behaviour of the system under test, not the request shape the harness happens to send. Two harness-side infrastructure failures previously converted every case into an `error`: a judge model that rejects `temperature` (all 10 chatbot cases errored at the judge while the chatbot answered correctly), and a thinking-capable fast-tier model that returns empty text (all 16 routing cases errored on `Unexpected end of JSON input`). The requirement is satisfied by the guards in REQ-LLM-037..040; this entry records the suite-level contract and the real-run evidence for it.
+
+**Verification (real `pnpm test:regression` runs, 2026-09-01):**
+
+| Run | Result |
+|-----|--------|
+| `--bucket=routing --model-matrix=fast=ollama/qwen3.8:27b-mlx` | 37 cases, 34 pass / 3 fail / **0 error**, routing accuracy **98.11%**, REQ-REG-011 gate PASSED, $0.00, 697s |
+| `--bucket=routing --model-matrix=fast=ollama/muse-glimmer:30b-mlx` | 37 cases, 22 pass / 14 fail / 1 error, routing accuracy **79.25%**, gate FAILED on genuine accuracy, $0.00, 610s — the single error was the shadow-classifier truncation subsequently fixed under REQ-LLM-040 |
+| `--bucket=chatbot --judge-model=anthropic/claude-opus-5` (before the judge-truncation fix) | 10 cases, 3 pass / 6 fail / 1 error (judge truncation), $0.307 |
+| same, after the judge-truncation fix | 10 cases, 3 pass / 7 fail / **0 error**, $0.305 |
+
+Before the fixes the same suite reported 0 pass / 26 error. `muse-glimmer:30b-mlx` failing the REQ-REG-011 accuracy gate is a legitimate model-quality finding, not a defect — which is exactly the distinction this requirement exists to preserve.
+
+**Standard tests:**
+- `dispatch.test.ts` > foodShadow adapter — throws on llm-error > includes the underlying error message and a non-zero meter
+- `dispatch.test.ts` > foodShadow adapter — throws on llm-error > reports a cap-truncated reply as truncation, not as a JSON parse failure
+
+---
+
+### REQ-REG-020 — Receipt case expectations MUST model the parser's date-acceptance window so ground-truth fixtures do not rot
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+`parseReceiptFromPhoto` refuses a receipt date older than `MAX_RECEIPT_AGE_DAYS` (90), overwriting `date` with today and preserving the model's reading in `rawExtractedDate`. `buildExpectation` in `regression/src/runner/case-runners/receipt-runner.ts` asserted the sidecar date verbatim on `date`, so every date-bearing receipt case went red exactly 90 days after the receipt was issued — a wall-clock time bomb that hit real `pnpm test:regression` runs against a *perfect* model, not only the mocked unit tests (`receipt-costco-long` crossed the line on 2026-07-26, `receipt-trader-joes-correction` on 2026-08-10). Photo fixtures carry an immutable real-world date, so the failure was never going to resolve itself. `buildExpectation` now branches on `isValidReceiptDate(sidecar.date, today)`: in-window dates are asserted verbatim on `date` (unchanged path); an aged-out date pins `date` to the today-fallback and asserts the ground-truth date on `rawExtractedDate` instead. Assertion strength is **preserved, not relaxed** — the model must still read the exact date off the photo — and both branches are pinned by clock-frozen tests including mutation checks, since which branch runs would otherwise depend on how long ago the date literals were authored.
+
+**Standard tests:**
+- `receipt-runner.test.ts` > runReceiptCase — sidecar date acceptance window > in-window sidecar date is asserted verbatim on the parsed date
+- `receipt-runner.test.ts` > runReceiptCase — sidecar date acceptance window > aged-out sidecar date expects the today-fallback and pins rawExtractedDate
+
+**Edge case tests:**
+- `receipt-runner.test.ts` > runReceiptCase — sidecar date acceptance window > in-window sidecar date fails when the parser reads a different in-window date
+- `receipt-runner.test.ts` > runReceiptCase — sidecar date acceptance window > aged-out sidecar date still fails when the parser reads the wrong date
+
+---
+
+### REQ-REG-GUI-V2-027 — The live run view MUST show case-completion progress, server-computed and absolute on every frame
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+The live-run banner renders a native `<progress>` element plus a `completed / total cases` label. Counts are computed **in the run registry, not the client**: `RunProgress {completed, total}` rides every dispatched event, `RunState` gains `totalCases` (0 = unknown) and a monotonic `completedCases` incremented on `case-result` only, and each `eventLog` entry carries its own `{id, event, progress}` snapshot so a `Last-Event-ID` replay reports historical counts rather than stamping every replayed frame with the final one. The counter is monotonic state rather than an `eventLog` scan, because the ring buffer evicts entries past `MAX_EVENT_LOG_ENTRIES` (REQ-REG-GUI-V2-022) and a scan would plateau at the buffer size. Counts are therefore absolute on every `case-completed` frame and reconnect-safe. The denominator is the **bucket-filtered** case count: `--rerun` forces a cache miss (`regression/src/runner/index.ts:171`) but does not narrow selection (the bucket filter is at `:134-136`), so every bucket-filtered case still reports a result; the bucket filter is hoisted out of the `forceFresh` block and `totalCases` rides `createRun` and the 202 body. `GET /gui/regression/estimate` is deliberately untouched — its rerun-narrowing is correct for cost. Client-side, `setProgress()` writes element properties and `textContent` only (never `innerHTML` — the frame carries two numbers, no new XSS surface), clamps the bar with `Math.min` while the text keeps the true count, and runs before the row fetch so the bar advances even if the row partial 404s; terminal handlers leave the final count in place. The `<progress>` element is styled from PAS tokens (`pas.css` section 9b).
+
+**Standard tests:**
+- `run-registry.test.ts` > run-registry — progress counters > createRun stores totalCases
+- `run-registry.test.ts` > run-registry — progress counters > completedCases increments on case-result only
+- `run-registry.test.ts` > run-registry — progress counters > attach replays the per-entry snapshot to listeners
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — progress denominator > 202 body reports totalCases for an all-bucket run
+- `regression-routes-write.test.ts` > GET /gui/regression/runs/:runId/events — progress frames > case-completed frames carry completed/total
+- `regression-routes.test.ts` > GET /gui/regression — client wiring (Codex P1) > page carries the progress-bar wiring (server-computed counts)
+- `regression-routes.test.ts` > pas.css — terminal banner state styling > the live-run progress bar is styled from PAS tokens
+
+**Edge case tests:**
+- `run-registry.test.ts` > run-registry — progress counters > omitting totalCases defaults to 0 (unknown denominator)
+- `run-registry.test.ts` > run-registry — progress counters > each event log entry carries its own progress snapshot (1 then 2, not 2 then 2)
+- `run-registry.test.ts` > run-registry — progress counters > counter survives ring-buffer eviction (monotonic, not an eventLog scan)
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — progress denominator > rerun does NOT narrow the denominator — bucket count wins
+- `regression-routes-write.test.ts` > POST /gui/regression/runs — progress denominator > forceFresh on a bucket keeps the bucket denominator
+- `regression-routes-write.test.ts` > GET /gui/regression/runs/:runId/events — progress frames > replayed frames carry their historical counts, not the final one
+
+---
+
+### REQ-REG-GUI-V2-028 — `activeRunId` MUST be threaded to every regression render path
+
+**Phase:** Regression Run Unblock (2026-09-01) | **Status:** Implemented
+
+All six `/gui/regression` render paths previously passed `activeRunId: null`, leaving the `data-runid` attribute, the client bootstrap's reattach, and the compare summary bar's "a run is already going" submit guard as dead code — the live banner vanished on page reload. The registry exposes `getActiveRunId()` (null before the first run, null after a terminal event, and null after a rejecting `runFactory` so no phantom active run is reported), and every renderer threads it through its deps. The "view live" link drops the `?runId=` query nobody parsed, and compare's three estimate literals gain the missing `totalCases` / `totalInputs`.
+
+**Standard tests:**
+- `run-registry.test.ts` > run-registry — getActiveRunId > returns the active runId while a run is in flight
+- `run-registry.test.ts` > run-registry — getActiveRunId > returns null after a terminal event
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=overview renders data-runid for the active run
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=run renders data-runid for the active run
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=compare renders data-runid for the active run
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > compare summary-bar submit is disabled during an active run
+
+**Edge case tests:**
+- `run-registry.test.ts` > run-registry — getActiveRunId > returns null after a rejecting runFactory (no phantom active run)
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=overview renders an empty data-runid when no run is active
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=run renders an empty data-runid when no run is active
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > ?view=compare renders an empty data-runid when no run is active
+- `regression-routes.test.ts` > GET /gui/regression — activeRunId reaches every view > compare summary-bar submit is enabled when no run is active
+
+**Known gap:** `regression-tab-run.eta`'s own submit button does not consult `activeRunId` (only the compare tab's summary bar does), so it is not disabled during an active run. Tracked in `docs/open-items.md`.
+
+---
+
 ## Traceability Matrix
 
 The matrix includes only implemented requirements. Planned requirements (REQ-DATA-004, REQ-NFR-005, REQ-LLM-021) will be added when implemented. Std/Edge column sums slightly exceed the unique test count because some tests are cross-referenced across multiple requirements. REQ-REG-* rows reference tests in the separate `regression/` workspace AND in `core/src/gui/__tests__/` (GUI surface for Chunk B.2); the regression-workspace tests are excluded from root `pnpm test` and are not summed into the totals row below.
@@ -12622,6 +12838,10 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-034 | shadow-verdict.test.ts, shadow-integration.test.ts, route-dispatch.test.ts | 10 | 16 | Implemented |
 | REQ-LLM-035 | shadow-dispatch.test.ts, shadow-handlers-parity.test.ts, shadow-primary.integration.test.ts, shadow-verdict.test.ts, shadow-logger.test.ts, shadow-taxonomy.test.ts | 14 | 29 | Implemented |
 | REQ-LLM-036 | analyze-shadow-log.test.ts | 15 | 6 | Implemented |
+| REQ-LLM-037 | model-capabilities.test.ts, anthropic-provider.test.ts, google-provider.test.ts, openai-compatible-provider.test.ts, base-provider.test.ts | 12 | 11 | Implemented |
+| REQ-LLM-038 | llm-errors.test.ts, retry.test.ts, base-provider.test.ts | 7 | 5 | Implemented |
+| REQ-LLM-039 | ollama-provider.test.ts, llm-errors.test.ts, shadow-classifier.test.ts, dispatch.test.ts | 10 | 9 | Implemented |
+| REQ-LLM-040 | rubric-oracle.test.ts, shadow-classifier.test.ts, dispatch.test.ts | 6 | 7 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -12991,6 +13211,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-016 | run-registry.test.ts, regression-routes-write.test.ts, subprocess.test.ts, codex-corrections.test.ts | 3 | 10 | Implemented |
 | REQ-REG-017 | estimator.test.ts, regression-routes.test.ts | 6 | 5 | Implemented |
 | REQ-REG-018 | cost-tracker.test.ts, dispatch.test.ts, routing-runner.test.ts, recall-runner.test.ts, chatbot-runner.test.ts, receipt-runner.test.ts, rubric-oracle.test.ts, build-deps.test.ts, evaluated-tier.test.ts | 25 | 25 | Implemented |
+| REQ-REG-019 | dispatch.test.ts | 2 | 0 | Implemented |
+| REQ-REG-020 | receipt-runner.test.ts | 2 | 2 | Implemented |
 | REQ-REG-GUI-OV-001 | regression-routes-write.test.ts | 5 | 0 | Implemented |
 | REQ-REG-GUI-OV-002 | model-spec.test.ts | 7 | 14 | Implemented |
 | REQ-REG-GUI-OV-003 | regression-routes-write.test.ts | 4 | 6 | Implemented |
@@ -13027,6 +13249,8 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-GUI-V2-024 | regression-routes.test.ts | 1 | 0 | Implemented |
 | REQ-REG-GUI-V2-025 | terminal-banner.test.ts, subprocess.test.ts, regression-routes-write.test.ts, regression-routes.test.ts | 8 | 11 | Implemented |
 | REQ-REG-GUI-V2-026 | leaderboard-aggregator.test.ts, regression-routes.test.ts | 2 | 5 | Implemented |
+| REQ-REG-GUI-V2-027 | run-registry.test.ts, regression-routes-write.test.ts, regression-routes.test.ts | 7 | 6 | Implemented |
+| REQ-REG-GUI-V2-028 | run-registry.test.ts, regression-routes.test.ts | 6 | 5 | Implemented |
 | REQ-REG-CLI-MAN-001 | args.test.ts, runner-options.test.ts | 14 | 10 | Implemented |
 | REQ-FOOD-RECEIPT-INTEGRITY-001 | receipt-parser.test.ts | 0 | 4 | Implemented |
 | REQ-FOOD-RECEIPT-INTEGRITY-002 | receipt-parser.test.ts | 2 | 0 | Implemented |
@@ -13123,4 +13347,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **445 test files** | **2946** | **2860** | **5806 tests** |
+| **Totals** | **441 test files** | **3023** | **2933** | **5956 tests** |
