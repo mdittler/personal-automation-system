@@ -122,7 +122,7 @@ async function buildApp(opts: { listedCases?: ListedCase[] } = {}): Promise<Buil
 	// Wrap registry.createRun so tests can inject a fake run factory that
 	// records args + lets the test drive event emission.
 	const originalCreateRun = runRegistry.createRun.bind(runRegistry);
-	runRegistry.createRun = async ({ args, runFactory: _ignored }) => {
+	runRegistry.createRun = async ({ args, totalCases, runFactory: _ignored }) => {
 		let captured!: FakeRunHandle;
 		const factory = async (onEvent: (e: RegressionEvent) => void, signal: AbortSignal) => {
 			let resolveComplete!: () => void;
@@ -141,7 +141,7 @@ async function buildApp(opts: { listedCases?: ListedCase[] } = {}): Promise<Buil
 			signal.addEventListener('abort', () => captured.cancel());
 			return { whenComplete };
 		};
-		const out = await originalCreateRun({ args, runFactory: factory });
+		const out = await originalCreateRun({ args, totalCases, runFactory: factory });
 		pendingRuns.push(captured);
 		return out;
 	};
@@ -1512,6 +1512,165 @@ describe('operator persona — runs two models back-to-back, both visible in his
 			expect(history.statusCode).toBe(200);
 			expect(history.body).toContain('gemma4:e4b');
 			expect(history.body).toContain('gemma4:31b');
+		} finally {
+			await app.close();
+		}
+	});
+});
+
+// ───────────────────────── live-run progress (server-computed counts)
+//
+// Denominator note: the runner filters by BUCKET only. `--rerun` forces a
+// cache miss (regression/src/runner/index.ts:170) but every bucket-filtered
+// case still reports a result, so the progress total must ignore rerun.
+describe('POST /gui/regression/runs — progress denominator', () => {
+	it('202 body reports totalCases for an all-bucket run', async () => {
+		const { app } = await buildApp({
+			listedCases: [
+				makeListedCase({ caseId: 'r1', bucket: 'routing' }),
+				makeListedCase({ caseId: 'r2', bucket: 'routing' }),
+				makeListedCase({ caseId: 'r3', bucket: 'routing' }),
+				makeListedCase({ caseId: 'p1', bucket: 'receipt', routingTarget: undefined }),
+				makeListedCase({ caseId: 'p2', bucket: 'receipt', routingTarget: undefined }),
+			],
+		});
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			expect(res.statusCode).toBe(202);
+			expect((JSON.parse(res.body) as { totalCases: number }).totalCases).toBe(5);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('rerun does NOT narrow the denominator — bucket count wins', async () => {
+		const { app } = await buildApp({
+			listedCases: [
+				makeListedCase({ caseId: 'r1', bucket: 'routing' }),
+				makeListedCase({ caseId: 'r2', bucket: 'routing' }),
+				makeListedCase({ caseId: 'r3', bucket: 'routing' }),
+				makeListedCase({ caseId: 'p1', bucket: 'receipt', routingTarget: undefined }),
+				makeListedCase({ caseId: 'p2', bucket: 'receipt', routingTarget: undefined }),
+			],
+		});
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, bucket: 'routing', rerun: ['r1'] },
+			});
+			expect(res.statusCode).toBe(202);
+			// 3 routing cases all report a result — not just the single rerun id.
+			expect((JSON.parse(res.body) as { totalCases: number }).totalCases).toBe(3);
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('forceFresh on a bucket keeps the bucket denominator', async () => {
+		const { app } = await buildApp({
+			listedCases: [
+				makeListedCase({ caseId: 'r1', bucket: 'routing' }),
+				makeListedCase({ caseId: 'r2', bucket: 'routing' }),
+				makeListedCase({ caseId: 'r3', bucket: 'routing' }),
+				makeListedCase({ caseId: 'p1', bucket: 'receipt', routingTarget: undefined }),
+				makeListedCase({ caseId: 'p2', bucket: 'receipt', routingTarget: undefined }),
+			],
+		});
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const res = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf, bucket: 'routing', forceFresh: 'true' },
+			});
+			expect(res.statusCode).toBe(202);
+			expect((JSON.parse(res.body) as { totalCases: number }).totalCases).toBe(3);
+		} finally {
+			await app.close();
+		}
+	});
+});
+
+describe('GET /gui/regression/runs/:runId/events — progress frames', () => {
+	it('case-completed frames carry completed/total', async () => {
+		const { app, pendingRuns } = await buildApp({
+			listedCases: [
+				makeListedCase({ caseId: 'a', bucket: 'routing' }),
+				makeListedCase({ caseId: 'b', bucket: 'routing' }),
+			],
+		});
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const create = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			const runId = (JSON.parse(create.body) as { runId: string }).runId;
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'a' } });
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'b' } });
+			pendingRuns[0]?.emit({ type: 'complete', summary: {} });
+			pendingRuns[0]?.finish();
+			await new Promise((r) => setImmediate(r));
+			const res = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/runs/${runId}/events`,
+				cookies,
+			});
+			expect(res.body).toContain('"completed":1');
+			expect(res.body).toContain('"completed":2');
+			expect(res.body).toContain('"total":2');
+		} finally {
+			await app.close();
+		}
+	});
+
+	it('replayed frames carry their historical counts, not the final one', async () => {
+		const { app, pendingRuns } = await buildApp({
+			listedCases: [
+				makeListedCase({ caseId: 'a', bucket: 'routing' }),
+				makeListedCase({ caseId: 'b', bucket: 'routing' }),
+				makeListedCase({ caseId: 'c', bucket: 'routing' }),
+			],
+		});
+		try {
+			const { cookies, csrf } = await loginAndGetCsrf(app);
+			const create = await app.inject({
+				method: 'POST',
+				url: '/gui/regression/runs',
+				cookies,
+				payload: { _csrf: csrf },
+			});
+			const runId = (JSON.parse(create.body) as { runId: string }).runId;
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'a' } });
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'b' } });
+			pendingRuns[0]?.emit({ type: 'case-result', result: { caseId: 'c' } });
+			pendingRuns[0]?.emit({ type: 'complete', summary: {} });
+			pendingRuns[0]?.finish();
+			await new Promise((r) => setImmediate(r));
+			// Reconnect having already seen id 0 → replay ids 1 (b) and 2 (c).
+			const res = await app.inject({
+				method: 'GET',
+				url: `/gui/regression/runs/${runId}/events`,
+				cookies,
+				headers: { 'Last-Event-ID': '0' },
+			});
+			const completed = Array.from(res.body.matchAll(/"completed":(\d+)/g)).map((m) =>
+				Number(m[1]),
+			);
+			expect(completed).toEqual([2, 3]);
+			expect(res.body).not.toContain('"completed":1');
 		} finally {
 			await app.close();
 		}

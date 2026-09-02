@@ -967,6 +967,19 @@ describe('GET /gui/regression — client wiring (Codex P1)', () => {
 		}
 	});
 
+	it('page carries the progress-bar wiring (server-computed counts)', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression');
+			expect(res.statusCode).toBe(200);
+			expect(res.body).toContain('run-progress');
+			expect(res.body).toContain('setProgress');
+			expect(res.body).toContain('payload.completed');
+		} finally {
+			await app.close();
+		}
+	});
+
 	it('client wrapper includes reconnect + gap + 3-strike banner wiring (REQ-REG-GUI-V2-021/024)', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {
@@ -1289,5 +1302,104 @@ describe('pas.css — terminal banner state styling', () => {
 		expect(failed).toMatch(/\.terminal-failed\s*{[^}]*--pas-danger/);
 		// gate-failed must NOT borrow the danger token — it is not a crash.
 		expect(/\.terminal-gate-failed\s*{[^}]*--pas-danger/.test(css)).toBe(false);
+	});
+
+	it('the live-run progress bar is styled from PAS tokens', async () => {
+		const css = await readFile(join(moduleDir, 'public', 'pas.css'), 'utf8');
+		expect(css).toMatch(/\.run-progress\s*{[^}]*--pas-primary/);
+		expect(css).toMatch(/\.run-progress-text\s*{[^}]*--pas-text-muted/);
+	});
+});
+
+// ─────────────────── activeRunId threading (previously dead on every path)
+//
+// `regression.eta` renders `data-runid` from `it.activeRunId`; the client
+// bootstrap re-attaches to that run on page load. Every render path used to
+// pass `null`, so a page reload during a run silently lost the live banner.
+
+/**
+ * Register a run that stays active until the returned `end()` is called.
+ * Returns the runId so tests can assert it round-trips into the markup.
+ */
+async function startHeldRun(registry: RunRegistry): Promise<{
+	runId: string;
+	end: () => Promise<void>;
+}> {
+	let emit!: (e: RegressionEvent) => void;
+	let resolveComplete!: () => void;
+	const whenComplete = new Promise<void>((res) => {
+		resolveComplete = res;
+	});
+	const { runId } = await registry.createRun({
+		args: ['--json'],
+		totalCases: 1,
+		runFactory: (onEvent) => {
+			emit = onEvent;
+			return { whenComplete };
+		},
+	});
+	return {
+		runId,
+		end: async () => {
+			emit({ type: 'cancelled' });
+			resolveComplete();
+			await registry.waitForCompletion(runId);
+		},
+	};
+}
+
+describe('GET /gui/regression — activeRunId reaches every view', () => {
+	for (const view of ['overview', 'run', 'compare'] as const) {
+		it(`?view=${view} renders data-runid for the active run`, async () => {
+			const registry = createRunRegistry();
+			const { app } = await buildApp({ listedCases: [makeListedCase()], registry });
+			const held = await startHeldRun(registry);
+			try {
+				const res = await getAuthed(app, `/gui/regression?view=${view}`);
+				expect(res.statusCode).toBe(200);
+				expect(res.body).toContain(`data-runid="${held.runId}"`);
+			} finally {
+				await held.end();
+				await app.close();
+			}
+		});
+
+		it(`?view=${view} renders an empty data-runid when no run is active`, async () => {
+			const { app } = await buildApp({ listedCases: [makeListedCase()] });
+			try {
+				const res = await getAuthed(app, `/gui/regression?view=${view}`);
+				expect(res.statusCode).toBe(200);
+				expect(res.body).toContain('data-runid=""');
+			} finally {
+				await app.close();
+			}
+		});
+	}
+
+	// The Compare tab is the view that renders the summary bar, so it is
+	// where the "a run is already going" submit guard becomes observable.
+	it('compare summary-bar submit is disabled during an active run', async () => {
+		const registry = createRunRegistry();
+		const { app } = await buildApp({ listedCases: [makeListedCase()], registry });
+		const held = await startHeldRun(registry);
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=compare');
+			expect(res.body).toMatch(/<button type="submit" class="primary"\s+disabled>/);
+			expect(res.body).toContain('active-run-notice');
+		} finally {
+			await held.end();
+			await app.close();
+		}
+	});
+
+	it('compare summary-bar submit is enabled when no run is active', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const res = await getAuthed(app, '/gui/regression?view=compare');
+			expect(res.body).not.toMatch(/<button type="submit" class="primary"\s+disabled>/);
+			expect(res.body).not.toContain('active-run-notice');
+		} finally {
+			await app.close();
+		}
 	});
 });

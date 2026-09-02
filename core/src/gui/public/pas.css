@@ -598,6 +598,23 @@ input[aria-busy="true"] {
 	color: var(--pas-text-muted);
 }
 
+/* Live-run progress bar. Native <progress> (Pico styles the track/value for
+   us) — a hand-rolled div bar would lose the built-in a11y semantics. */
+.run-progress {
+	display: inline-block;
+	width: 12rem;
+	max-width: 100%;
+	margin: 0 0 0 0.75rem;
+	vertical-align: middle;
+	accent-color: var(--pas-primary);
+}
+
+.run-progress-text {
+	margin-left: 0.5rem;
+	font-size: 0.85em;
+	color: var(--pas-text-muted);
+}
+
 /* ----- 10. Empty states ----- */
 .empty-state {
 	text-align: center;

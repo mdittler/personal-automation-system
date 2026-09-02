@@ -36,7 +36,7 @@
       <span class="estimate">— est. ≈ $<%= it.estimate.totalUsd %> (cap $<%= it.estimate.ceilingUsd %>)</span>
     </button>
     <% if (it.activeRunId) { %>
-      <span class="active-run-notice">Run <%= it.activeRunId %> in progress — <a href="/gui/regression?runId=<%= it.activeRunId %>">view live</a></span>
+      <span class="active-run-notice">Run <%= it.activeRunId %> in progress — <a href="/gui/regression">view live</a></span>
     <% } %>
   </form>
 </header>

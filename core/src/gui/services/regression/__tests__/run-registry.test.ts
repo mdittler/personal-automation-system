@@ -444,3 +444,133 @@ describe('run-registry — GC + shutdown', () => {
 		expect(registry.get(runId)?.status).toBe('cancelled');
 	});
 });
+
+// ─────────────────────────── progress counters (server-computed run progress)
+//
+// The progress bar's numerator/denominator are computed server-side and ride
+// every dispatched event. Two properties matter and are easy to regress:
+// (1) the counter is monotonic state, NOT a scan of the ring-buffered
+//     `eventLog` (which evicts old entries past MAX_EVENT_LOG_ENTRIES);
+// (2) each log entry carries its OWN snapshot, so replay reports the
+//     historical count rather than stamping every frame with the final one.
+
+describe('run-registry — progress counters', () => {
+	it('createRun stores totalCases', async () => {
+		const { factory } = makeFakeRunFactory();
+		const registry = createRunRegistry();
+		const { runId } = await registry.createRun({
+			args: ['--json'],
+			totalCases: 5,
+			runFactory: factory,
+		});
+		expect(registry.get(runId)?.totalCases).toBe(5);
+	});
+
+	it('omitting totalCases defaults to 0 (unknown denominator)', async () => {
+		const { factory } = makeFakeRunFactory();
+		const registry = createRunRegistry();
+		const { runId } = await registry.createRun({ args: ['--json'], runFactory: factory });
+		expect(registry.get(runId)?.totalCases).toBe(0);
+		expect(registry.get(runId)?.completedCases).toBe(0);
+	});
+
+	it('completedCases increments on case-result only', async () => {
+		const { factory, runs } = makeFakeRunFactory();
+		const registry = createRunRegistry();
+		const { runId } = await registry.createRun({
+			args: ['--json'],
+			totalCases: 2,
+			runFactory: factory,
+		});
+		runs[0]!.emit({ type: 'case-result', result: { caseId: 'a' } });
+		runs[0]!.emit({ type: 'summary', summary: {} });
+		runs[0]!.emit({ type: 'case-result', result: { caseId: 'b' } });
+		runs[0]!.emit({ type: 'complete', summary: {} });
+		runs[0]!.finish();
+		await registry.waitForCompletion(runId);
+		expect(registry.get(runId)?.completedCases).toBe(2);
+	});
+
+	it('each event log entry carries its own progress snapshot (1 then 2, not 2 then 2)', async () => {
+		const { factory, runs } = makeFakeRunFactory();
+		const registry = createRunRegistry();
+		const { runId } = await registry.createRun({
+			args: ['--json'],
+			totalCases: 2,
+			runFactory: factory,
+		});
+		runs[0]!.emit({ type: 'case-result', result: { caseId: 'a' } });
+		runs[0]!.emit({ type: 'case-result', result: { caseId: 'b' } });
+		const replay = registry.getEventsAfter(runId, null);
+		expect(Array.isArray(replay)).toBe(true);
+		const entries = replay as Array<{ progress: { completed: number; total: number } }>;
+		expect(entries.map((e) => e.progress.completed)).toEqual([1, 2]);
+		expect(entries.every((e) => e.progress.total === 2)).toBe(true);
+	});
+
+	it('attach replays the per-entry snapshot to listeners', async () => {
+		const { factory, runs } = makeFakeRunFactory();
+		const registry = createRunRegistry();
+		const { runId } = await registry.createRun({
+			args: ['--json'],
+			totalCases: 3,
+			runFactory: factory,
+		});
+		runs[0]!.emit({ type: 'case-result', result: { caseId: 'a' } });
+		runs[0]!.emit({ type: 'case-result', result: { caseId: 'b' } });
+		const seen: number[] = [];
+		registry.attach(runId, (_e, _id, progress) => seen.push(progress.completed));
+		expect(seen).toEqual([1, 2]);
+	});
+
+	it('counter survives ring-buffer eviction (monotonic, not an eventLog scan)', async () => {
+		const { factory, runs } = makeFakeRunFactory();
+		const registry = createRunRegistry();
+		const total = MAX_EVENT_LOG_ENTRIES + 50;
+		const { runId } = await registry.createRun({
+			args: ['--json'],
+			totalCases: total,
+			runFactory: factory,
+		});
+		for (let i = 0; i < total; i++) {
+			runs[0]!.emit({ type: 'case-result', result: { caseId: `c${i}` } });
+		}
+		const state = registry.get(runId)!;
+		expect(state.eventLog.length).toBe(MAX_EVENT_LOG_ENTRIES);
+		expect(state.completedCases).toBe(total);
+		expect(state.eventLog[state.eventLog.length - 1]!.progress.completed).toBe(total);
+	});
+});
+
+describe('run-registry — getActiveRunId', () => {
+	it('returns the active runId while a run is in flight', async () => {
+		const { factory } = makeFakeRunFactory();
+		const registry = createRunRegistry();
+		expect(registry.getActiveRunId()).toBeNull();
+		const { runId } = await registry.createRun({ args: ['--json'], runFactory: factory });
+		expect(registry.getActiveRunId()).toBe(runId);
+	});
+
+	it('returns null after a terminal event', async () => {
+		const { factory, runs } = makeFakeRunFactory();
+		const registry = createRunRegistry();
+		const { runId } = await registry.createRun({ args: ['--json'], runFactory: factory });
+		runs[0]!.emit({ type: 'complete', summary: {} });
+		runs[0]!.finish();
+		await registry.waitForCompletion(runId);
+		expect(registry.getActiveRunId()).toBeNull();
+	});
+
+	it('returns null after a rejecting runFactory (no phantom active run)', async () => {
+		const registry = createRunRegistry();
+		await expect(
+			registry.createRun({
+				args: ['--json'],
+				runFactory: () => {
+					throw new Error('spawn failed');
+				},
+			}),
+		).rejects.toThrow('spawn failed');
+		expect(registry.getActiveRunId()).toBeNull();
+	});
+});

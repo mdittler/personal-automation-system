@@ -34,6 +34,7 @@ import type { RunHistoryStore } from '../services/regression/run-history-store.j
 import {
 	RegistrationConflictError,
 	type RegressionEvent,
+	type RunProgress,
 	type RunRegistry,
 	isTerminalEventType,
 } from '../services/regression/run-registry.js';
@@ -246,12 +247,14 @@ export function registerRegressionRoutes(
 				runHistoryStore,
 				weaknessSummarizer,
 				pinOverrides,
+				activeRunId: runRegistry.getActiveRunId(),
 				logger,
 			});
 		}
 		if (view === 'trends') {
 			return renderTrendsTab(reply, {
 				runHistoryStore,
+				activeRunId: runRegistry.getActiveRunId(),
 				selectedBucket,
 				rawWindow: typeof q.window === 'string' ? q.window : undefined,
 				rawTier: typeof q.tier === 'string' ? q.tier : undefined,
@@ -264,6 +267,7 @@ export function registerRegressionRoutes(
 				modelSelector,
 				caseDiscovery,
 				maxRunBudgetUsd,
+				activeRunId: runRegistry.getActiveRunId(),
 				selectedBucket,
 				logger,
 			});
@@ -274,6 +278,7 @@ export function registerRegressionRoutes(
 			caseDiscovery,
 			cacheDir,
 			maxRunBudgetUsd,
+			activeRunId: runRegistry.getActiveRunId(),
 			selectedBucket,
 			compareFilters: parseCompareFilters(qAny),
 			logger,
@@ -579,16 +584,25 @@ export function registerRegressionRoutes(
 				}
 			}
 
+			// The bucket filter is the ONLY thing that narrows the case set the
+			// runner reports on, so it is computed unconditionally — both as
+			// the progress denominator and as the forceFresh expansion source.
+			const bucketFiltered = body.bucket
+				? discovery.cases.filter((c) => c.bucket === body.bucket)
+				: discovery.cases;
+			// `--rerun` is deliberately excluded from the denominator: in
+			// `regression/src/runner/index.ts:170` rerunIds only force a cache
+			// MISS — every bucket-filtered case still reaches `onResult`,
+			// cached or dispatched. Narrowing by rerun would under-count.
+			const totalCases = bucketFiltered.length;
+
 			// forceFresh expands the current filter into explicit rerun ids so
 			// cached cases get re-dispatched. Reuses the existing --rerun
 			// mechanism rather than introducing a new CLI flag.
 			const rerunSet = new Set<string>(rerunRaw);
 			const forceFresh = body.forceFresh === true || body.forceFresh === 'true';
 			if (forceFresh) {
-				const filtered = body.bucket
-					? discovery.cases.filter((c) => c.bucket === body.bucket)
-					: discovery.cases;
-				for (const c of filtered) rerunSet.add(c.caseId);
+				for (const c of bucketFiltered) rerunSet.add(c.caseId);
 			}
 
 			const args: string[] = ['--json'];
@@ -600,6 +614,7 @@ export function registerRegressionRoutes(
 			try {
 				const { runId } = await runRegistry.createRun({
 					args,
+					totalCases,
 					runFactory: async (onEvent, signal, registryRunId) => {
 						// REQ-REG-GUI-V2-003: receive the canonical runId from the
 						// registry as a factory argument (avoids a TDZ capture of the
@@ -616,7 +631,9 @@ export function registerRegressionRoutes(
 						return { whenComplete: handle.whenComplete };
 					},
 				});
-				return reply.status(202).send({ runId, eventsUrl: `/gui/regression/runs/${runId}/events` });
+				return reply
+					.status(202)
+					.send({ runId, totalCases, eventsUrl: `/gui/regression/runs/${runId}/events` });
 			} catch (err) {
 				if (err instanceof RegistrationConflictError) {
 					return reply.status(409).send({ activeRunId: err.activeRunId });
@@ -664,8 +681,8 @@ export function registerRegressionRoutes(
 			const replay = runRegistry.getEventsAfter(runId, lastEventId);
 			if (Array.isArray(replay)) {
 				let replayedTerminal = false;
-				for (const { id, event } of replay) {
-					const sseEvent = toSseEvent(event, runId);
+				for (const { id, event, progress } of replay) {
+					const sseEvent = toSseEvent(event, runId, progress);
 					if (sseEvent) writeSseEvent(channel, { ...sseEvent, id });
 					if (isTerminalEventType(event.type)) {
 						replayedTerminal = true;
@@ -686,8 +703,8 @@ export function registerRegressionRoutes(
 				return;
 			}
 
-			const dispatch = (event: RegressionEvent, id: number): void => {
-				const sseEvent = toSseEvent(event, runId);
+			const dispatch = (event: RegressionEvent, id: number, progress: RunProgress): void => {
+				const sseEvent = toSseEvent(event, runId, progress);
 				if (sseEvent) writeSseEvent(channel, { ...sseEvent, id });
 				if (isTerminalEventType(event.type)) {
 					channel.close();
@@ -714,12 +731,21 @@ export function registerRegressionRoutes(
 // result payload. Clients fetch the row partial via htmx to get
 // server-rendered, escaped HTML. Other event types pass through their
 // (already trusted, number/enum-only) payloads.
-function toSseEvent(event: RegressionEvent, runId: string): { type: string; data: unknown } | null {
+function toSseEvent(
+	event: RegressionEvent,
+	runId: string,
+	progress: RunProgress,
+): { type: string; data: unknown } | null {
 	switch (event.type) {
 		case 'case-result': {
 			const r = event.result as RunResult | undefined;
 			if (!r) return null;
-			return { type: 'case-completed', data: { caseId: r.caseId, runId } };
+			// `completed`/`total` are server-computed numbers — no new XSS
+			// surface, consistent with the {caseId, runId}-only rule above.
+			return {
+				type: 'case-completed',
+				data: { caseId: r.caseId, runId, completed: progress.completed, total: progress.total },
+			};
 		}
 		case 'summary':
 			return { type: 'summary', data: event.summary };
@@ -846,6 +872,7 @@ async function renderOverviewTab(
 		runHistoryStore?: RunHistoryStore;
 		weaknessSummarizer?: WeaknessSummarizer;
 		pinOverrides: PinOverrideKey[];
+		activeRunId: string | null;
 		logger: Logger;
 	},
 ): Promise<unknown> {
@@ -916,7 +943,7 @@ async function renderOverviewTab(
 		activePage: 'regression',
 		activeView: 'overview',
 		tierTables,
-		activeRunId: null,
+		activeRunId: deps.activeRunId,
 	});
 }
 
@@ -927,6 +954,7 @@ async function renderRunTab(
 		modelSelector?: ModelSelector;
 		caseDiscovery: CaseDiscoveryService;
 		maxRunBudgetUsd: number;
+		activeRunId: string | null;
 		selectedBucket: DisplayedCase['bucket'] | null;
 		logger: Logger;
 	},
@@ -998,7 +1026,7 @@ async function renderRunTab(
 		title: 'Regression — Run — PAS',
 		activePage: 'regression',
 		activeView: 'run',
-		activeRunId: null,
+		activeRunId: deps.activeRunId,
 		selectedBucket: deps.selectedBucket,
 		modelGroups,
 		tierConfigs,
@@ -1020,6 +1048,7 @@ async function renderTrendsTab(
 	reply: FastifyReply,
 	deps: {
 		runHistoryStore?: RunHistoryStore;
+		activeRunId: string | null;
 		selectedBucket: DisplayedCase['bucket'] | null;
 		rawWindow?: string;
 		rawTier?: string;
@@ -1071,7 +1100,7 @@ async function renderTrendsTab(
 		title: 'Regression — Trends — PAS',
 		activePage: 'regression',
 		activeView: 'trends',
-		activeRunId: null,
+		activeRunId: deps.activeRunId,
 		selectedBucket: deps.selectedBucket,
 		trendsWindow: window,
 		trendsTier: tier,
@@ -1212,6 +1241,7 @@ async function renderCompareTab(
 		caseDiscovery: CaseDiscoveryService;
 		cacheDir: string;
 		maxRunBudgetUsd: number;
+		activeRunId: string | null;
 		selectedBucket: DisplayedCase['bucket'] | null;
 		compareFilters?: CompareFilters;
 		logger: Logger;
@@ -1237,8 +1267,13 @@ async function renderCompareTab(
 				discoveryError: discovery.error ?? null,
 				selectedBucket: deps.selectedBucket,
 				compareFilters: filters,
-				estimate: { totalUsd: '0.00', ceilingUsd: deps.maxRunBudgetUsd.toFixed(2) },
-				activeRunId: null,
+				estimate: {
+					totalUsd: '0.00',
+					ceilingUsd: deps.maxRunBudgetUsd.toFixed(2),
+					totalCases: 0,
+					totalInputs: 0,
+				},
+				activeRunId: deps.activeRunId,
 			});
 		}
 		let historicalRows: HistoricalRow[] = [];
@@ -1286,8 +1321,13 @@ async function renderCompareTab(
 			discoveryError: discovery.error ?? null,
 			selectedBucket: deps.selectedBucket,
 			compareFilters: filters,
-			estimate: { totalUsd: '0.00', ceilingUsd: deps.maxRunBudgetUsd.toFixed(2) },
-			activeRunId: null,
+			estimate: {
+				totalUsd: '0.00',
+				ceilingUsd: deps.maxRunBudgetUsd.toFixed(2),
+				totalCases: 0,
+				totalInputs: 0,
+			},
+			activeRunId: deps.activeRunId,
 		});
 	}
 
@@ -1319,6 +1359,7 @@ async function renderCompareTab(
 		filtered.map((c) => ({ caseId: c.caseId, bucket: c.bucket as EstimatedCase['bucket'] })),
 		{ ceilingUsd: deps.maxRunBudgetUsd },
 	);
+	const totalInputs = filtered.reduce((acc, c) => acc + c.inputCount, 0);
 	return reply.viewAsync('regression', {
 		title: 'Regression — Compare — PAS',
 		activePage: 'regression',
@@ -1332,8 +1373,10 @@ async function renderCompareTab(
 		estimate: {
 			totalUsd: estimate.estimateUsd.toFixed(2),
 			ceilingUsd: estimate.ceilingUsd.toFixed(2),
+			totalCases: filtered.length,
+			totalInputs,
 		},
-		activeRunId: null,
+		activeRunId: deps.activeRunId,
 	});
 }
 

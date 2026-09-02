@@ -29,6 +29,24 @@
 		if (el) el.textContent = label;
 	}
 
+	// Progress counts are server-computed (registry snapshot per SSE frame).
+	// Written via element properties + textContent only — never innerHTML —
+	// matching the convention showTerminal/showLostConnection establish below.
+	// `Math.min` clamps the bar if the runner ever skips a case (an unwired
+	// bucket `continue`s without calling onResult) while the text still
+	// reports the true completed count.
+	function setProgress(completed, total) {
+		const bar = live.querySelector('.run-progress');
+		const txt = live.querySelector('.run-progress-text');
+		if (!Number.isFinite(completed)) return;
+		const hasTotal = Number.isFinite(total) && total > 0;
+		if (bar) {
+			bar.hidden = !hasTotal;
+			if (hasTotal) { bar.max = total; bar.value = Math.min(completed, total); }
+		}
+		if (txt) txt.textContent = hasTotal ? completed + ' / ' + total + ' cases' : completed + ' cases';
+	}
+
 	function showRunBanner(runId) {
 		activeRunId = runId;
 		live.dataset.runid = runId;
@@ -37,6 +55,8 @@
 			'<article class="run-banner">' +
 			'<strong>Run ' + runId.slice(0, 8) + '</strong> — <span class="run-state">starting</span> ' +
 			'<button type="button" class="cancel-btn outline secondary">Cancel</button>' +
+			'<progress class="run-progress" value="0" max="1" hidden></progress>' +
+			'<span class="run-progress-text"></span>' +
 			'<div class="terminal-msg" hidden></div>' +
 			'<div class="connection-msg" hidden></div>' +
 			'</article>';
@@ -138,6 +158,11 @@
 			try { payload = JSON.parse(e.data); } catch (_) { return; }
 			const caseId = payload && payload.caseId;
 			if (!caseId) return;
+			// Advance the bar BEFORE the row fetch so progress keeps moving
+			// even if the row partial 404s. Also moves the banner off
+			// "starting" as soon as the first case lands.
+			setProgress(payload.completed, payload.total);
+			setState('running');
 			const url = '/gui/regression/cases/' + encodeURIComponent(caseId) +
 				'/row?runId=' + encodeURIComponent(runId);
 			const res = await fetch(url, { headers: { Accept: 'text/html' } });

@@ -20,7 +20,7 @@ import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import type { CoreServices } from '@core/types/app-module.js';
 import type { LLMService } from '@core/types/llm.js';
-import { parseReceiptFromPhoto } from '@food/services/receipt-parser.js';
+import { isValidReceiptDate, parseReceiptFromPhoto } from '@food/services/receipt-parser.js';
 import { loadTranscription } from '../../cases/receipt/transcription-loader.js';
 import { type StructuralExpectation, runStructuralOracle } from '../../oracles/structural.js';
 import { runTranscriptionOracle } from '../../oracles/transcription.js';
@@ -165,8 +165,30 @@ function buildExpectation(sidecar: ReceiptSidecar, today: string): StructuralExp
 		if (strings.length > 0) exp.strings = strings;
 		return exp;
 	}
-	if (sidecar.store) exp.strings = [{ path: 'store', expectedCaseInsensitive: sidecar.store }];
-	if (sidecar.date) exp.dates = [{ path: 'date', minIso: sidecar.date, maxIso: sidecar.date }];
+	const strings: NonNullable<StructuralExpectation['strings']> = [];
+	if (sidecar.store) strings.push({ path: 'store', expectedCaseInsensitive: sidecar.store });
+	if (sidecar.date) {
+		if (isValidReceiptDate(sidecar.date, today)) {
+			exp.dates = [{ path: 'date', minIso: sidecar.date, maxIso: sidecar.date }];
+		} else {
+			// The fixture's receipt date has aged out of the parser's acceptance
+			// window (`MAX_RECEIPT_AGE_DAYS`), so `parseReceiptFromPhoto` will
+			// reject it and fall back to today no matter how well the model
+			// reads the photo. Photo fixtures carry an immutable real-world
+			// date, so without this branch every date-bearing receipt case
+			// would start failing exactly `MAX_RECEIPT_AGE_DAYS` after the
+			// receipt was issued — a wall-clock time bomb, not a regression.
+			//
+			// Assertion strength is preserved rather than relaxed: instead of
+			// checking the ground-truth date on `date`, check it on
+			// `rawExtractedDate` (where the parser preserves the original
+			// extraction) and pin `date` to the today-fallback. The model must
+			// still read the exact date off the photo to pass.
+			exp.dates = [{ path: 'date', minIso: today, maxIso: today }];
+			strings.push({ path: 'rawExtractedDate', expectedCaseInsensitive: sidecar.date });
+		}
+	}
+	if (strings.length > 0) exp.strings = strings;
 	// Assert subtotal/tax when the sidecar provides them, not just total.
 	// The receipt-parser's integrity-check warnings catch some drift via
 	// `verification_warnings`, but the regression suite is where ground-truth
