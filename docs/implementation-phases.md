@@ -4230,6 +4230,42 @@ Round 2 left only R2-1 (non-critical, dispositioned) → loop stopped. Simplify 
 
 ---
 
+## Q2 Fix — Food data fixes: store-name quoting, receipt recency, interaction paths (2026-10-05)
+
+**Defects** (`docs/open-items.md` "Food data bugs (found 2026-10-05)"):
+- (a) `parsePriceFile` regex-read `store:` without YAML-unquoting, so every save added a quoting layer.
+- (b) "Most recent receipt" sorted by scan time (`capturedAt`).
+- (c) Food recorded recent-interaction paths in the old `users/shared/...` layout, while FileIndex uses `households/<hh>/...`, so DataQuery's exact-match hints never fired.
+
+**Fixes:**
+- (a) `8bfb595` — `parseFrontmatter` read plus `repairStoreName`, which unwraps accumulated layers; the shared `generateFrontmatter` now quotes edge-whitespace values. REQ-FOOD-PRICE-004.
+- (b) `b5fb51c` — `compareReceiptsNewestFirst`: purchase date descending, invalid or missing dates last, then `capturedAt`, then `id`. REQ-FOOD-RECEIPT-005.
+- (c) `50fe1f4` — one core-owned `toCanonicalInteractionPath` in `InteractionContextService.record()`, using the request-context householdId. It drops paths belonging to another household, and traversal paths. REQ-FOOD-INTERACTION-PATH-001.
+- Round-1 revisions: `1f12297`.
+
+**Proof:**
+- Each sub-fix has a closure proof: its new tests fail at the parent commit and pass at HEAD.
+- Mechanical proofs were run by the implementers and the conductor. Luna round 3 independently reverted six guards, and each failed its named test.
+- Suite at 1f12297: core 12739 passed, regression 678 passed, lint 0 errors, regression typecheck clean.
+
+**Code review ledger** (Codex `gpt-6-luna` medium, adversarial ⇄ Grok `grok-4.7-high`):
+
+| id | sev | finding | disposition |
+|---|---|---|---|
+| R1-1 | major | `repairStoreName` capped at 10 passes, so deeper corruption persists | fixed-in-code 1f12297 — loops until unwrapped (cap = input length); tests "repairs 12/15 accumulated layers…", "repair is bounded by input length…" (mechanical proof observed by conductor) |
+| R1-2 | major | store-less "most recent receipt" still prefers the receipt from the 10-minute interaction context over purchase-date order | operator — see gate decision below |
+| R1-3 | major | far-future typo date pins "most recent"; non-padded dates sort as invalid | declined — unreachable through app writers: `isValidReceiptDate` (`receipt-parser.ts:26`) rejects future, non-padded and >90-day dates at capture. Accepted failure mode: a hand-edited receipt file with a future date stays on top |
+| R1-4 | minor | no separator collapse or trailing-slash strip in canonical paths | fixed-in-code 1f12297 — table rows in `canonical-paths.test.ts` (mechanical proof observed) |
+| R1-5 | minor | `record()` with no household context keeps legacy paths | declined — claim not established: all 7 `record()` sites are router-dispatched handlers that run inside a household request context |
+| R1-6 | minor | reviewer could not mutation-test | declined — reviewer tooling, not a code defect |
+| R2-1 | major | reviewer could not run tests (pnpm fetch failure; EPERM on `.vite-temp`) | declined — tooling; fixed for round 3 with `--add-dir` for node_modules and a direct vitest binary |
+| R2-2 | minor | restates R1-2 | operator (as R1-2) |
+| R3-1 | minor | the `.`-segment guard lacks a regression test | declined — claim false: removing the guard fails `toCanonicalInteractionPath > users/shared/./food/a.yaml -> null` (1 failed / 16 passed); the reviewer's `-t` filter excluded that row |
+
+Round 3 (confirming, full scope) raised no new code defect, so the loop stopped. The Sonnet simplify pass found nothing to change.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
