@@ -29,9 +29,17 @@ const RECEIPTS_DIR = 'receipts';
 const EXPLICIT_RECEIPT_RE = /\b(receipt|last\s+trip|trip\s+to|shopping\s+trip)\b/i;
 const RECEIPT_FOLLOW_UP_RE =
 	/\b(line\s*items?|items?|total|break\s*out|price\s+of\s+each|each\s+item|what\s+(?:did|was)\s+(?:i|we))\b/i;
-// Recency wording tied to a receipt/trip noun, so "what did I pay last time for milk" does not match.
+// Recency wording tied to a receipt/trip noun, so "what did I pay last time for milk",
+// "the latest one", and "the last thing on that receipt" do not match.
 const LATEST_RECEIPT_RE =
-	/\b(?:most\s+recent|latest|newest|last)\s+(?:(?:grocery|shopping|food|store)\s+)?(?:receipt|trip|shopping|purchase)\b/i;
+	/\b(?:most\s+recent|latest|newest|last|previous)\s+(?:(?:grocery|shopping|food|store)\s+)?(?:receipt|trip|shopping|purchase)\b/i;
+const LAST_TIME_SHOPPING_RE =
+	/\blast\s+time\s+I\s+(?:went|was|did)\s+(?:(?:grocery|food)\s+)?shopping\b/i;
+// Routing-only subset: trip wording that EXPLICIT_RECEIPT_RE misses. Deliberately excludes
+// the `shopping`/`purchase` nouns so "my last shopping list" / "last purchase of milk" keep
+// routing to their own handlers.
+const RECENT_TRIP_RE =
+	/\b(?:most\s+recent|latest|newest|last|previous)\s+(?:(?:grocery|shopping|food|store)\s+)?trip\b/i;
 const NEW_STATUS_RE = /\b(new|added|updated|price(?:s)?\s+updated)\b/i;
 const PRICE_LOOKUP_RE =
 	/\b(cheapest|how\s+much\s+(?:are|is|was|were)|price\s+(?:of|for)|cost\s+(?:of|for))\b/i;
@@ -205,17 +213,21 @@ export async function loadRecentReceiptFromPaths(
 
 export function isReceiptQueryIntent(text: string, hasRecentReceiptContext = false): boolean {
 	return (
-		EXPLICIT_RECEIPT_RE.test(text) || (hasRecentReceiptContext && RECEIPT_FOLLOW_UP_RE.test(text))
+		EXPLICIT_RECEIPT_RE.test(text) ||
+		RECENT_TRIP_RE.test(text) ||
+		LAST_TIME_SHOPPING_RE.test(text) ||
+		(hasRecentReceiptContext && RECEIPT_FOLLOW_UP_RE.test(text))
 	);
 }
 
 /**
- * True when the user asks for the most recent / latest / last receipt or trip.
+ * True when the user asks for the most recent / latest / last / previous receipt or trip,
+ * including "last time I went shopping".
  * Such questions always answer by purchase date; deictic follow-ups ("that receipt")
  * keep using the receipt in the interaction context. (Q2 R1-2, operator decision.)
  */
 export function asksForLatestReceipt(text: string): boolean {
-	return LATEST_RECEIPT_RE.test(text);
+	return LATEST_RECEIPT_RE.test(text) || LAST_TIME_SHOPPING_RE.test(text);
 }
 
 export function isPriceLookupIntent(text: string): boolean {

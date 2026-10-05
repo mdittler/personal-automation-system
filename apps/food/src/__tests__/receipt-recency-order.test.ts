@@ -13,6 +13,7 @@ import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
 import {
 	asksForLatestReceipt,
 	findLatestReceipt,
+	isReceiptQueryIntent,
 	loadReceipts,
 } from '../services/receipt-query.js';
 import type { Household, Receipt } from '../types.js';
@@ -209,19 +210,54 @@ describe('asksForLatestReceipt classifier (REQ-FOOD-RECEIPT-005, Q2 R1-2)', () =
 		'newest receipt please',
 		'what did I buy on my most recent shopping trip',
 		'show my last purchase',
+		'last time I went shopping',
+		'the last time I went grocery shopping',
+		'previous receipt',
+		'my previous grocery trip',
+		'last time I was shopping',
+		'last time I did food shopping',
 	])('matches recency wording: %s', (text) => {
 		expect(asksForLatestReceipt(text)).toBe(true);
 	});
 
 	it.each([
 		'what was on that receipt?',
+		'that receipt',
 		'how much was it?',
 		'show me the receipt again',
 		'what did I pay last time for milk',
+		'what was the last thing on that receipt?',
+		'the latest one',
 		'break out the price of each item',
 		'what is the latest news',
+		'latest news',
 	])('does not match deictic or unrelated wording: %s', (text) => {
 		expect(asksForLatestReceipt(text)).toBe(false);
+	});
+});
+
+describe('isReceiptQueryIntent recency entry without recent context (Q2 R4-1)', () => {
+	it.each([
+		'last time I went shopping',
+		'the last time I went grocery shopping',
+		'previous receipt',
+		'my previous grocery trip',
+		'last time I was shopping',
+		'last time I did food shopping',
+	])('recognizes a receipt query: %s', (text) => {
+		expect(isReceiptQueryIntent(text, false)).toBe(true);
+	});
+
+	it('does not treat an item price question as a receipt query', () => {
+		expect(isReceiptQueryIntent('what did I pay last time for milk', false)).toBe(false);
+	});
+
+	it.each([
+		'show my last shopping list',
+		'what was on my latest shopping list',
+		'when was my last purchase of milk',
+	])('does not steal a non-receipt question: %s', (text) => {
+		expect(isReceiptQueryIntent(text, false)).toBe(false);
 	});
 });
 
