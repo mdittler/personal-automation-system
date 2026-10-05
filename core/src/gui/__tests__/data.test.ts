@@ -66,6 +66,18 @@ beforeEach(async () => {
 	await server.register(
 		async (gui) => {
 			await registerAuth(gui, { authToken: AUTH_TOKEN });
+			// Legacy token mode sets no request.user; journal routes are platform-admin-only
+			// (Q1) and fail closed without an actor, so inject an admin actor.
+			gui.addHook('preHandler', async (request) => {
+				request.user = {
+					userId: '123',
+					householdId: 'hh-1',
+					isPlatformAdmin: true,
+					isHouseholdAdmin: true,
+					authMethod: 'legacy-gui-token',
+					sessionVersion: 0,
+				};
+			});
 			registerDataRoutes(gui, { config, dataDir, logger });
 		},
 		{ prefix: '/gui' },

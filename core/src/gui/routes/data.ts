@@ -15,6 +15,7 @@ import {
 } from '../../services/model-journal/index.js';
 import type { SystemConfig } from '../../types/config.js';
 import type { SpaceDefinition } from '../../types/spaces.js';
+import { requirePlatformAdmin } from '../guards/require-platform-admin.js';
 import { sendErrorFragment } from '../utils/error-fragment.js';
 
 export interface DataOptions {
@@ -248,6 +249,9 @@ function resolveBrowsePath(
 
 export function registerDataRoutes(server: FastifyInstance, options: DataOptions): void {
 	const { config, dataDir, householdService, spaceService } = options;
+
+	// Model journals are global (cross-household) — platform admins only (Q1).
+	const platformAdminOnly = { preHandler: [requirePlatformAdmin] };
 
 	// Full page — overview of all data directories
 	server.get('/data', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -699,114 +703,126 @@ export function registerDataRoutes(server: FastifyInstance, options: DataOptions
 
 	// htmx partial — model journal discovery (lists all model journals)
 
-	server.get('/data/journal', async (_request: FastifyRequest, reply: FastifyReply) => {
-		const journalDir = join(dataDir, 'model-journal');
+	server.get(
+		'/data/journal',
+		platformAdminOnly,
+		async (_request: FastifyRequest, reply: FastifyReply) => {
+			const journalDir = join(dataDir, 'model-journal');
 
-		let slugs: string[] = [];
-		try {
-			const entries = await readdir(journalDir);
-			slugs = entries
-				.filter((name) => name.endsWith('.md'))
-				.map((name) => name.slice(0, -3))
-				.filter((slug) => MODEL_SLUG_PATTERN.test(slug))
-				.sort();
-		} catch {
-			// Directory doesn't exist yet
-		}
-
-		if (slugs.length === 0) {
-			return reply.type('text/html').send('<p><em>No journal entries yet.</em></p>');
-		}
-
-		let html = '';
-		for (const slug of slugs) {
-			html += `<details style="margin-bottom:0.5rem;"><summary><strong>${escapeHtml(slug)}</strong></summary><div hx-get="/gui/data/journal/model?slug=${encodeURIComponent(slug)}" hx-trigger="toggle from:closest details" hx-swap="innerHTML"><p><em>Loading...</em></p></div></details>`;
-		}
-
-		return reply.type('text/html').send(html);
-	});
-
-	// htmx partial — view a specific model's journal content + archives
-	server.get('/data/journal/model', async (request: FastifyRequest, reply: FastifyReply) => {
-		const query = request.query as { slug?: string };
-		const slug = query.slug;
-
-		if (!slug || !MODEL_SLUG_PATTERN.test(slug)) {
-			return sendErrorFragment(reply, 400, "That model isn't valid.");
-		}
-
-		const journalPath = join(dataDir, 'model-journal', `${slug}.md`);
-		const archiveDir = join(dataDir, 'model-journal-archive', slug);
-
-		let journalContent = '';
-		try {
-			journalContent = await readFile(journalPath, 'utf-8');
-		} catch {
-			// File doesn't exist yet
-		}
-
-		// List archives for this model
-		let archiveFiles: string[] = [];
-		try {
-			const entries = await readdir(archiveDir);
-			archiveFiles = entries
-				.filter((name) => ARCHIVE_FILENAME_PATTERN.test(name))
-				.sort()
-				.reverse();
-		} catch {
-			// No archive directory yet
-		}
-
-		let html = '';
-		if (journalContent) {
-			html += `<pre style="max-height:50vh;overflow:auto;padding:1rem;background:var(--pico-code-background-color,#1a1a2e);border-radius:4px;white-space:pre-wrap;word-wrap:break-word;"><code>${escapeHtml(journalContent)}</code></pre>`;
-		} else {
-			html += '<p><em>No entries yet.</em></p>';
-		}
-
-		if (archiveFiles.length > 0) {
-			html +=
-				'<details style="margin-top:0.5rem;"><summary><small>Archived journals</small></summary><ul style="list-style:none;padding-left:0.5rem;">';
-			for (const file of archiveFiles) {
-				const label = escapeHtml(file.replace('.md', ''));
-				html += `<li><a href="#" hx-get="/gui/data/journal/archive?slug=${encodeURIComponent(slug)}&file=${encodeURIComponent(file)}" hx-target="#journal-content" hx-swap="innerHTML" style="font-size:0.9rem">${label}</a></li>`;
-			}
-			html += '</ul></details>';
-		}
-
-		return reply.type('text/html').send(html);
-	});
-
-	// htmx partial — view archived journal for a specific model
-	server.get('/data/journal/archive', async (request: FastifyRequest, reply: FastifyReply) => {
-		const query = request.query as { slug?: string; file?: string };
-		const { slug, file } = query;
-
-		if (!slug || !MODEL_SLUG_PATTERN.test(slug)) {
-			return sendErrorFragment(reply, 400, "That model isn't valid.");
-		}
-
-		if (!file || !ARCHIVE_FILENAME_PATTERN.test(file)) {
-			return sendErrorFragment(reply, 400, "That archive file isn't valid.");
-		}
-
-		try {
-			const archivePath = join(dataDir, 'model-journal-archive', slug, file);
-			// Safety: verify resolved path is within dataDir
-			const resolvedArchive = resolve(archivePath);
-			const resolvedData = resolve(dataDir);
-			if (!resolvedArchive.startsWith(resolvedData)) {
-				return sendErrorFragment(reply, 400, "That file path isn't valid.");
+			let slugs: string[] = [];
+			try {
+				const entries = await readdir(journalDir);
+				slugs = entries
+					.filter((name) => name.endsWith('.md'))
+					.map((name) => name.slice(0, -3))
+					.filter((slug) => MODEL_SLUG_PATTERN.test(slug))
+					.sort();
+			} catch {
+				// Directory doesn't exist yet
 			}
 
-			const content = await readFile(archivePath, 'utf-8');
-			const html =
-				`<div style="margin-bottom:0.5rem;"><small><a href="#" hx-get="/gui/data/journal/model?slug=${encodeURIComponent(slug)}" hx-target="#journal-content" hx-swap="innerHTML">\u2190 Back to ${escapeHtml(slug)}</a> | Archive: <strong>${escapeHtml(slug)} / ${escapeHtml(file.replace('.md', ''))}</strong></small></div>` +
-				`<pre style="max-height:50vh;overflow:auto;padding:1rem;background:var(--pico-code-background-color,#1a1a2e);border-radius:4px;white-space:pre-wrap;word-wrap:break-word;"><code>${escapeHtml(content)}</code></pre>`;
+			if (slugs.length === 0) {
+				return reply.type('text/html').send('<p><em>No journal entries yet.</em></p>');
+			}
+
+			let html = '';
+			for (const slug of slugs) {
+				html += `<details style="margin-bottom:0.5rem;"><summary><strong>${escapeHtml(slug)}</strong></summary><div hx-get="/gui/data/journal/model?slug=${encodeURIComponent(slug)}" hx-trigger="toggle from:closest details" hx-swap="innerHTML"><p><em>Loading...</em></p></div></details>`;
+			}
 
 			return reply.type('text/html').send(html);
-		} catch {
-			return reply.type('text/html').send('<p><em>Archive not found.</em></p>');
-		}
-	});
+		},
+	);
+
+	// htmx partial — view a specific model's journal content + archives
+	server.get(
+		'/data/journal/model',
+		platformAdminOnly,
+		async (request: FastifyRequest, reply: FastifyReply) => {
+			const query = request.query as { slug?: string };
+			const slug = query.slug;
+
+			if (!slug || !MODEL_SLUG_PATTERN.test(slug)) {
+				return sendErrorFragment(reply, 400, "That model isn't valid.");
+			}
+
+			const journalPath = join(dataDir, 'model-journal', `${slug}.md`);
+			const archiveDir = join(dataDir, 'model-journal-archive', slug);
+
+			let journalContent = '';
+			try {
+				journalContent = await readFile(journalPath, 'utf-8');
+			} catch {
+				// File doesn't exist yet
+			}
+
+			// List archives for this model
+			let archiveFiles: string[] = [];
+			try {
+				const entries = await readdir(archiveDir);
+				archiveFiles = entries
+					.filter((name) => ARCHIVE_FILENAME_PATTERN.test(name))
+					.sort()
+					.reverse();
+			} catch {
+				// No archive directory yet
+			}
+
+			let html = '';
+			if (journalContent) {
+				html += `<pre style="max-height:50vh;overflow:auto;padding:1rem;background:var(--pico-code-background-color,#1a1a2e);border-radius:4px;white-space:pre-wrap;word-wrap:break-word;"><code>${escapeHtml(journalContent)}</code></pre>`;
+			} else {
+				html += '<p><em>No entries yet.</em></p>';
+			}
+
+			if (archiveFiles.length > 0) {
+				html +=
+					'<details style="margin-top:0.5rem;"><summary><small>Archived journals</small></summary><ul style="list-style:none;padding-left:0.5rem;">';
+				for (const file of archiveFiles) {
+					const label = escapeHtml(file.replace('.md', ''));
+					html += `<li><a href="#" hx-get="/gui/data/journal/archive?slug=${encodeURIComponent(slug)}&file=${encodeURIComponent(file)}" hx-target="#journal-content" hx-swap="innerHTML" style="font-size:0.9rem">${label}</a></li>`;
+				}
+				html += '</ul></details>';
+			}
+
+			return reply.type('text/html').send(html);
+		},
+	);
+
+	// htmx partial — view archived journal for a specific model
+	server.get(
+		'/data/journal/archive',
+		platformAdminOnly,
+		async (request: FastifyRequest, reply: FastifyReply) => {
+			const query = request.query as { slug?: string; file?: string };
+			const { slug, file } = query;
+
+			if (!slug || !MODEL_SLUG_PATTERN.test(slug)) {
+				return sendErrorFragment(reply, 400, "That model isn't valid.");
+			}
+
+			if (!file || !ARCHIVE_FILENAME_PATTERN.test(file)) {
+				return sendErrorFragment(reply, 400, "That archive file isn't valid.");
+			}
+
+			try {
+				const archivePath = join(dataDir, 'model-journal-archive', slug, file);
+				// Safety: verify resolved path is within dataDir
+				const resolvedArchive = resolve(archivePath);
+				const resolvedData = resolve(dataDir);
+				if (!resolvedArchive.startsWith(resolvedData)) {
+					return sendErrorFragment(reply, 400, "That file path isn't valid.");
+				}
+
+				const content = await readFile(archivePath, 'utf-8');
+				const html =
+					`<div style="margin-bottom:0.5rem;"><small><a href="#" hx-get="/gui/data/journal/model?slug=${encodeURIComponent(slug)}" hx-target="#journal-content" hx-swap="innerHTML">\u2190 Back to ${escapeHtml(slug)}</a> | Archive: <strong>${escapeHtml(slug)} / ${escapeHtml(file.replace('.md', ''))}</strong></small></div>` +
+					`<pre style="max-height:50vh;overflow:auto;padding:1rem;background:var(--pico-code-background-color,#1a1a2e);border-radius:4px;white-space:pre-wrap;word-wrap:break-word;"><code>${escapeHtml(content)}</code></pre>`;
+
+				return reply.type('text/html').send(html);
+			} catch {
+				return reply.type('text/html').send('<p><em>Archive not found.</em></p>');
+			}
+		},
+	);
 }

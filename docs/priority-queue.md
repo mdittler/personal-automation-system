@@ -75,7 +75,7 @@ Rows are in execution order. **Depends on** names rows that must be `Done` first
 
 | # | Item | Type | Status | Plan / source | Depends on |
 |---|---|---|---|---|---|
-| Q1 | Admin-gate the three model-journal GUI routes | Fix (security) | Not started | `docs/open-items.md` → Unfinished Corrections, "Model journal crosses household boundaries" (item 2) | — |
+| Q1 | Admin-gate the three model-journal GUI routes | Fix (security) | Done (2026-10-05, merge of `claude/q1-model-journal-admin-gate`; fix 0007f13) | `docs/open-items.md` → Unfinished Corrections, "Model journal crosses household boundaries" (item 2) | — |
 | Q2 | Food data fixes: Trader Joe's store-name re-quoting; "most recent receipt" sorts by scan time; recent-interaction paths in the old layout | Fix | Not started | `docs/open-items.md` → Unfinished Corrections, "Food data bugs (found 2026-10-05)" | — |
 | Q3 | **Agent Runtime P0** — benchmark hygiene, agent bucket, baseline | Phase | **Plan ready** (5 plan-review rounds done; one confirming round still needed — see Workflow step 2) | `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md` | Q2 (so the baseline doesn't penalise known data bugs) |
 | Q4 | **Agent Runtime P1** — `LLMService.chat()` with native tools; Ollama `/api/chat`, OpenAI-compatible/llama.cpp, Anthropic; capability detection; `num_ctx`, thinking (default off), keep-alive, vision; AbortSignal | Phase | Plan: needs writing | Design §5, §16 | Q3 |
