@@ -4261,8 +4261,10 @@ Round 2 left only R2-1 (non-critical, dispositioned) → loop stopped. Simplify 
 | R2-1 | major | reviewer could not run tests (pnpm fetch failure; EPERM on `.vite-temp`) | declined — tooling; fixed for round 3 with `--add-dir` for node_modules and a direct vitest binary |
 | R2-2 | minor | restates R1-2 | operator → fixed-in-code cf8d53e — "most recent/latest/last" questions use purchase date; deictic follow-ups keep the recent receipt; tests: `receipt-recency-order.test.ts` > `asksForLatestReceipt classifier`, `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` |
 | R3-1 | minor | the `.`-segment guard lacks a regression test | declined — claim false: removing the guard fails `toCanonicalInteractionPath > users/shared/./food/a.yaml -> null` (1 failed / 16 passed); the reviewer's `-t` filter excluded that row |
+| R4-1 | major | "last time I went shopping" / "previous grocery trip" missed the recency classifier and the receipt routing | fixed-in-code aaba26e — `asksForLatestReceipt` adds `previous` and `last time I went shopping`; routing adds only trip wording (`RECENT_TRIP_RE`) and the last-time-shopping pattern. Grok's first revision routed every classifier match, which made "show my last shopping list" a receipt question; the conductor caught this, narrowed it, and added the tests "does not steal a non-receipt question: …" (they fail against the broad version: 3 failed / 45 passed) |
+| R4-2 | minor | URS traceability counts `it.each` once per declaration, not once per expanded case | declined — consistent declaration-count convention; the totals are arithmetically correct. Accepted: the totals undercount the cases actually executed |
 
-Round 3 (confirming, full scope) raised no new code defect, so the loop stopped. The Sonnet simplify pass found nothing to change.
+Round 3 (confirming, full scope) raised no new code defect. Round 4 reviewed the operator-directed R1-2 change; round 5 confirmed it, so the loop stopped. The Sonnet simplify pass found nothing to change.
 
 ---
 
