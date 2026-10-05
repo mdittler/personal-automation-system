@@ -6827,6 +6827,32 @@ Each priced line item processed by `updatePricesFromReceipt` SHALL produce a `Re
 
 ---
 
+### REQ-FOOD-INTERACTION-PATH-001 — Recorded interaction `filePaths` MUST be canonicalized to the household layout FileIndex uses
+
+**Phase:** Priority Queue Q2(c) (2026-10-05) | **Status:** Implemented
+
+`InteractionContextService.record()` SHALL be the single core-owned resolution point for interaction file paths. Given the request-context household (`getCurrentHouseholdId()`), it SHALL rewrite scope-relative paths emitted by apps into the canonical form FileIndex stores, so DataQuery's exact-match `recentFilePaths` hints (and `/edit`'s, via the same plumbing) match index entries: `users/shared/<app>/…` becomes `households/<hh>/shared/<app>/…`; `users/<userId>/<app>/…` and `spaces/<spaceId>/<app>/…` become `households/<hh>/users/…` / `households/<hh>/spaces/…`. A path already in `households/<id>/…` form SHALL be kept only when `<id>` is the current household and dropped otherwise (household boundary); absolute, null-byte and `..` paths SHALL be dropped; `collaborations/…` passes through. With no household in context (system callers) paths are stored unchanged. Apps (Food) SHALL NOT hand-build `households/<hh>/` strings. Entries persisted to disk before this fix keep their legacy `users/shared/…` form on load; they never equal a FileIndex path (harmless — no hint, no leak) and age out via the 10-minute TTL, so no on-read migration is performed.
+
+**Standard tests:**
+- `canonical-paths.test.ts` > toCanonicalInteractionPath > users/shared/food/recipes/a.yaml -> households/hh1/shared/food/recipes/a.yaml (plus the five other table rows: user scope, space scope, backslash input, already-canonical, collaborations)
+- `canonical-paths.test.ts` > InteractionContextServiceImpl.record — canonicalization > rewrites scoped paths using the request-context household
+- `interaction-path-canonical.integration.test.ts` > Q2(c) recent-interaction paths match FileIndex (real Food path -> real DataQuery) > one test per Food recording site: `index.ts recipe_saved (text)`, `index.ts grocery_updated (text)`, `index.ts meal_plan_finalized (text)`, `index.ts price_updated (text)`, `photo.ts receipt_captured (shared)`, `photo.ts receipt_captured (space)`, `photo.ts recipe_saved (shared)`, `photo.ts grocery_updated (shared)`
+
+**Edge case tests:**
+- `canonical-paths.test.ts` > toCanonicalInteractionPath > drops a path that names a different household (boundary)
+- `canonical-paths.test.ts` > toCanonicalInteractionPath > drops traversal, absolute and null-byte paths
+- `canonical-paths.test.ts` > toCanonicalInteractionPath > passes everything through unchanged when there is no household context
+- `canonical-paths.test.ts` > InteractionContextServiceImpl.record — canonicalization > discards foreign-household paths but keeps the rest of the entry
+- `canonical-paths.test.ts` > InteractionContextServiceImpl.record — canonicalization > leaves paths untouched outside a household request context
+- `canonical-paths.test.ts` > InteractionContextServiceImpl.record — canonicalization > keeps an entry with no filePaths unchanged
+- `canonical-paths.test.ts` > persisted legacy-form entries (written before Q2c) > load unchanged (harmless: never match a FileIndex path) and age out via the 10-minute TTL
+- `interaction-path-canonical.integration.test.ts` > Q2(c) recent-interaction paths match FileIndex (real Food path -> real DataQuery) > household boundary: household B never gets a hint for a household A file
+
+**Fixes:**
+- **Q2c (2026-10-05):** Food recorded `users/shared/food/…` (and `spaces/<id>/food/…`) while FileIndex indexes `households/<hh>/shared/food/…`, so `DataQueryServiceImpl.query`'s `priorityPaths.has(e.path)` never matched and no file was ever flagged `[recent interaction]`. Fixed once in core (`toCanonicalInteractionPath`, applied in `record()`); the eight Food sites are unchanged and every other consumer of `getRecent()` benefits. Receipt follow-up (`loadRecentReceiptFromPaths`) is unaffected: it matches on the `receipts/<file>.yaml` suffix.
+
+---
+
 ### REQ-FOOD-HOST-DEGENERATE — Hosting planner declines degenerate event parses
 
 The Food hosting planner treats `parseEventDescription` LLM output as untrusted. A degenerate parse (no guest signal or a meta-phrase description) short-circuits before any downstream LLM call; the `/hosting plan` handler sends a fixed, actionable decline copy that never echoes the parsed description. Closes Error 4 of the 2026-05-22 Chatbot Context & Routing fix.
@@ -13414,6 +13440,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-SPEND-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-RECEIPT-004 | price-store.test.ts, photo-handler.test.ts | 2 | 0 | Implemented |
 | REQ-FOOD-RECEIPT-005 | receipt-recency-order.test.ts | 3 | 4 | Implemented |
+| REQ-FOOD-INTERACTION-PATH-001 | canonical-paths.test.ts, interaction-path-canonical.integration.test.ts | 15 | 8 | Implemented |
 | REQ-CONV-KIND-001 | kinds-sidecar.test.ts | 3 | 4 | Implemented |
 | REQ-CONV-KIND-002 | context-entry-decoration.test.ts | 3 | 1 | Implemented |
 | REQ-CONV-KIND-003 | context-store-save.integration.test.ts | 3 | 3 | Implemented |
@@ -13647,4 +13674,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **447 test files** | **3079** | **3011** | **6090 tests** |
+| **Totals** | **449 test files** | **3094** | **3019** | **6113 tests** |

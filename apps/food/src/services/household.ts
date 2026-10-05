@@ -1,7 +1,7 @@
 /**
  * Household service — create, join, and manage household membership.
  *
- * Household data is stored in shared scope: data/users/shared/food/household.yaml
+ * Household data is stored in shared scope: data/households/<hh>/shared/food/household.yaml
  */
 
 import type { CoreServices } from '@pas/core/types';
