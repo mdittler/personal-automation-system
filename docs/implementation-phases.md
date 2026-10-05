@@ -4214,6 +4214,22 @@ OpenClaw-style resident agent in core; three-condition revisit gate).
 
 ---
 
+## Q1 Fix — Admin-gate the model-journal GUI routes (2026-10-05)
+
+**Defect:** `GET /gui/data/journal`, `/gui/data/journal/model`, `/gui/data/journal/archive` had no role check, so any authenticated member could read the global (cross-household) model journals. **Fix:** the existing `requirePlatformAdmin` preHandler on all three (`core/src/gui/routes/data.ts`). Tests: "GUI model-journal routes are platform-admin-only (Q1)" in `core/src/gui/__tests__/admin-route-guards.test.ts` (8 tests). Closure proof: the 3 member tests fail at 2d0edb9 (`expected 200 to be 403`) and pass at HEAD; mechanical proof: removing each guard fails exactly its own member test. URS: Fixes amendment on REQ-JOURNAL-003. Suite at 649fa4f: core 12689 passed / regression 678 passed, lint 0 errors.
+
+**Code review ledger** (Codex `gpt-6-luna` medium ⇄ Grok `grok-4.7-high`):
+
+| id | sev | finding | disposition |
+|---|---|---|---|
+| R1-1 | minor | `data.test.ts` injects an admin actor; production legacy-token → sole-admin path untested | fixed-in-code 649fa4f — test "legacy GUI_AUTH_TOKEN login (sole admin) can read the journal listing and model content" |
+| R1-2 | minor | open-items entry still stated the bug in present tense | fixed-in-code 649fa4f |
+| R2-1 | major | legacy-only auth mode (no per-user deps) leaves `request.user` unset, so an admin would see a dead 403 journal fragment | declined — unreachable: `composeRuntime` always constructs `credentialService` (`compose-runtime.ts:551`) and passes it with `userManager` to `registerGuiRoutes` (`:1651-1670`); legacy-only is a test-compat path. Accepted failure mode: if that mode were ever used, admins lose journal access (fail-closed), same as every existing `requirePlatformAdmin` route |
+
+Round 2 left only R2-1 (non-critical, dispositioned) → loop stopped. Simplify pass skipped: the fix is a 3-route preHandler addition with nothing to simplify.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
