@@ -1,6 +1,6 @@
 # Agent Runtime P0 — Benchmark Hygiene + Agent Bucket + Baseline Implementation Plan
 
-> **For agentic workers:** implement this plan task-by-task, test-first (the `test-driven-development` skill). Steps use checkbox (`- [ ]`) syntax for tracking. Execute per `docs/review-protocol.md`: fresh Sonnet subagent per task, roll through all tasks without pausing, tick the Review findings acceptance checklist with observed evidence, handle the Implementation notes, then cross-vendor code review (Codex `gpt-6.1-sol` + Grok 4.7) until no finding is left undispositioned.
+> **For agentic workers:** implement this plan task-by-task, test-first (the `test-driven-development` skill). Steps use checkbox (`- [ ]`) syntax for tracking. Execute per `docs/review-protocol.md`: fresh Sonnet subagent per task, roll through all tasks without pausing, tick the Review findings acceptance checklist with observed evidence, handle the Implementation notes, then the code-review loop (Codex `gpt-6-luna` medium reviews ⇄ Grok `grok-4.7-high` revises, ≤5) and a Sonnet simplify pass until no finding is left undispositioned.
 
 **Goal:** Make the persona-regression benchmark trustworthy (no cached errors, correct cache invalidation, isolated chatbot cases, judge sees ground truth) and add an outcome-graded `agent` bucket of ≥40 tasks that runs against today's router to record the baseline the Agent Runtime cut-over must beat.
 
@@ -4175,7 +4175,7 @@ git add docs/urs.md docs/implementation-phases.md docs/open-items.md regression/
 git commit -m "docs(agent-runtime-p0): URS, phase record, open items, regression README"
 ```
 
-- [ ] **Step 7: Phase review** — cross-vendor code review rounds per `docs/review-protocol.md` §3–§5 (Codex `gpt-6.1-sol` + Grok `grok-4.7-high`, detached worktree at the phase SHA; the brief includes the Deliverables, the acceptance checklist, and the implementation notes). Every finding gets a disposition in the ledger; apply fixes with a change table in the implementation-phases section; save `suite-<sha>.txt` for the final SHA and re-check HEAD before merging.
+- [ ] **Step 7: Phase review** — code-review loop per `docs/review-protocol.md` §2, §4–§6 (Codex `gpt-6-luna` medium reviews in a detached worktree at the phase SHA; Grok `grok-4.7-high` revises in the phase worktree; ≤5 iterations; then Sonnet simplify + confirming Luna review; the brief includes the Deliverables, the acceptance checklist, and the implementation notes). Every finding gets a disposition in the ledger; apply fixes with a change table in the implementation-phases section; save `suite-<sha>.txt` for the final SHA and re-check HEAD before merging.
 
 ---
 
@@ -4253,7 +4253,7 @@ These are non-critical items to handle **during execution**: fix each one, or re
   - Unit test: an error is recorded and rethrown, and success passes through untouched. This is evidence for C12.
 - **N5 — CLI `--dry-run` estimator is a stub for every bucket.** This is pre-existing. Task 12 no longer depends on it. **Deferred:** `docs/open-items.md` Proposals, "Regression `--dry-run` cost estimate uses a stub estimator".
 - **N6 — integrity-ledger writer restriction.** From design review round 6. **Deferred:** P2 carried item in `docs/priority-queue.md`.
-- **Pre-execution step: one confirming cross-vendor round.** This plan was reviewed by Codex only, before the cross-vendor protocol existed. Run one round with Codex **and Grok 4.7** first (`docs/priority-queue.md`, Workflow step 2), and log it below.
+- **Pre-execution step: one confirming plan-review round.** Round 5's fixes, and the Deliverables / acceptance-checklist / implementation-notes sections added afterwards, were never re-reviewed. Run one more round under the protocol's roles: Codex `gpt-6.1-sol` medium reviews and Fable revises (`docs/priority-queue.md` Workflow step 2). Log it below.
 
 ---
 

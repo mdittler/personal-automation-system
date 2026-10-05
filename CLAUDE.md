@@ -2,7 +2,7 @@
 
 ## Start Here — "do the next phase"
 
-**`docs/priority-queue.md` is the top of all pending work** and outranks the Master Execution Order in `docs/open-items.md`. When the operator says "do the next phase" (or runs `/next-phase`), follow that file's protocol: take the first row not marked `Done`, run its workflow per **`docs/review-protocol.md`** (plan with a Deliverables contract → cross-vendor review rounds by Codex `gpt-6.1-sol` + Grok 4.7 with every finding dispositioned → operator checkpoint → subagent-driven TDD execution with mechanical proof and the review-findings acceptance checklist → cross-vendor code review → docs footprint), then update the row. Current track: the Agent Runtime (design `docs/superpowers/specs/2026-10-05-agent-runtime-design.md`, approved 2026-10-05).
+**`docs/priority-queue.md` is the top of all pending work** and outranks the Master Execution Order in `docs/open-items.md`. When the operator says "do the next phase" (or runs `/next-phase`), follow that file's protocol: take the first row not marked `Done`, run its workflow per **`docs/review-protocol.md`** (Code Orchestrator roles: Fable plans ⇄ Codex `gpt-6.1-sol` medium reviews the plan → operator gate → Sonnet executes test-first with mechanical proof and the review-findings acceptance checklist → Codex `gpt-6-luna` medium reviews code ⇄ Grok `grok-4.7-high` revises → Sonnet simplify → operator gate → merge), then update the row. Current track: the Agent Runtime (design `docs/superpowers/specs/2026-10-05-agent-runtime-design.md`, approved 2026-10-05).
 
 ## Project Overview
 

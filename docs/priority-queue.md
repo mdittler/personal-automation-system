@@ -8,7 +8,15 @@ Set 2026-10-05 by operator decision: Agent Runtime design approved, plus fixes f
 
 ## When the operator says "do the next phase"
 
-**How to work: follow `docs/review-protocol.md`**, adopted 2026-10-05 from the Code Orchestrator project. It covers roles and models, cross-vendor review with Codex `gpt-6.1-sol` and Grok 4.7, the finding ledger, stop rules, votes, and execution rules.
+**How to work: follow `docs/review-protocol.md`** — Code Orchestrator's roles, adopted 2026-10-05:
+- Fable plans and revises.
+- Codex `gpt-6.1-sol` (medium) reviews plans.
+- Sonnet executes and simplifies.
+- Codex `gpt-6-luna` (medium) reviews code.
+- Grok `grok-4.7-high` revises code.
+- Opus, `gpt-6.1-sol` and Grok vote.
+
+The protocol also covers the finding ledger, loop caps, operator gates, and execution rules.
 
 1. **Sync and orient.**
    - Start from an up-to-date `main` (in an app-made worktree, use the host's sync tool).
@@ -23,34 +31,43 @@ Set 2026-10-05 by operator decision: Agent Runtime design approved, plus fixes f
 
 ## Workflow — phases (P0–P5)
 
+Each step follows `docs/review-protocol.md` §2, Code Orchestrator's flow.
+
 1. **Plan.**
-   - If the row says *Plan: needs writing*, invoke the `writing-plans` skill and write `docs/superpowers/plans/YYYY-MM-DD-agent-runtime-pN-<slug>.md`.
-   - Base it on the design sections the row names, plus every *Carried items* bullet for the row.
-   - Include the required sections from protocol §2: Deliverables, test-first tasks, a live smoke, the Plan review log, the Review findings acceptance checklist, and Implementation notes from review.
-   - Include the documentation footprint: URS entries and traceability rows, a `docs/implementation-phases.md` section, `docs/open-items.md` updates, and this file's row.
-2. **Plan review.**
-   - Run cross-vendor rounds (protocol §3) until the stop rules are met (§5).
-   - Every finding, critical or not, gets a home (§4).
-   - If the plan was reviewed before this protocol existed (Q3's P0 plan), run **one confirming cross-vendor round with Grok included** before execution, and backfill the acceptance checklist and implementation notes.
-3. **Operator checkpoint.**
+   - If the row says *Plan: needs writing*, a **Fable subagent** writes `docs/superpowers/plans/YYYY-MM-DD-agent-runtime-pN-<slug>.md`. It invokes the `writing-plans` skill and works from the design sections the row names plus every *Carried items* bullet for the row.
+   - If the phase needs new design, an **Opus** designer subagent goes first.
+   - The plan has the protocol's §3 sections: Deliverables, test-first tasks, a live smoke, the Plan review log, the acceptance checklist, and Implementation notes from review.
+   - It also covers the documentation footprint: URS entries and traceability rows, a `docs/implementation-phases.md` section, `docs/open-items.md` updates, and this file's row.
+2. **Plan review loop** (≤3 iterations).
+   - Codex `gpt-6.1-sol` at medium reviews the plan, and Fable revises.
+   - Every finding, critical or not, gets a home (§5).
+   - If the loop hits the cap, go to the operator: proceed, replan, or abort.
+   - For Q3: the P0 plan already went through 5 review rounds, but round 5's fixes and the backfilled sections (Deliverables, acceptance checklist, implementation notes) were never re-reviewed. Run **one confirming plan-review round** before the gate.
+3. **Operator gate (after plan revision).**
    - Give a ≤10-line summary: what ships, the review outcome, and any operator-disposition findings.
    - Wait for "go" unless the operator already said to execute without asking.
-4. **Execute.** Follow protocol §7: fresh Sonnet subagents, test-first, mechanical and closure proof, the acceptance checklist ticked with observed evidence, and implementation notes handled.
-5. **Code review.** Run cross-vendor rounds on the phase SHA in a detached worktree. The brief includes the Deliverables, the acceptance checklist, and the implementation notes. Continue until no finding is left undispositioned.
-6. **Verify and close.**
+4. **Execute.**
+   - Use fresh **Sonnet** subagents, one per task, test-first.
+   - Apply mechanical and closure proof.
+   - Tick the acceptance checklist with the evidence you observed, and handle every implementation note (§7).
+5. **Code review loop** (≤5 iterations).
+   - Codex `gpt-6-luna` at medium reviews the phase SHA in a disposable detached worktree. The brief includes the Deliverables, the acceptance checklist, and the implementation notes.
+   - Grok `grok-4.7-high` revises in the phase worktree. The conductor verifies each revision and commits it.
+   - Then a **Sonnet simplify** pass, and one confirming full-scope Luna review.
+6. **Verify, then operator gate (before merge/push).**
    - Run `pnpm lint && pnpm test && pnpm --filter @pas/regression test && pnpm --filter @pas/regression typecheck` and save `suite-<sha>.txt`.
    - Re-check that HEAD equals the tested SHA.
    - Complete the documentation footprint.
-   - Ask before merging, unless pre-authorised. Then merge `--no-ff`, delete the branch, and reconcile this file.
+   - On "go", merge `--no-ff`, delete the branch, and reconcile this file.
 
 ## Workflow — fixes (rows marked Fix)
 
 Follow protocol §8:
-- write a failing test first, using `systematic-debugging` for root cause;
+- the Sonnet implementer writes a failing test first, using `systematic-debugging` for root cause;
 - make the minimal fix and get closure proof;
-- run cross-vendor code review rounds;
+- run the Luna review ⇄ Grok revise loop;
 - add a URS fix entry and close the `docs/open-items.md` item;
-- verify and close as for phases.
+- verify, pass the operator gate, then merge.
 
 ## Queue
 
@@ -60,7 +77,7 @@ Rows are in execution order. **Depends on** names rows that must be `Done` first
 |---|---|---|---|---|---|
 | Q1 | Admin-gate the three model-journal GUI routes | Fix (security) | Not started | `docs/open-items.md` → Unfinished Corrections, "Model journal crosses household boundaries" (item 2) | — |
 | Q2 | Food data fixes: Trader Joe's store-name re-quoting; "most recent receipt" sorts by scan time; recent-interaction paths in the old layout | Fix | Not started | `docs/open-items.md` → Unfinished Corrections, "Food data bugs (found 2026-10-05)" | — |
-| Q3 | **Agent Runtime P0** — benchmark hygiene, agent bucket, baseline | Phase | **Plan ready** (Codex reviewed it over 5 rounds; it still needs one confirming cross-vendor round with Grok — see Workflow step 2) | `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md` | Q2 (so the baseline doesn't penalise known data bugs) |
+| Q3 | **Agent Runtime P0** — benchmark hygiene, agent bucket, baseline | Phase | **Plan ready** (5 plan-review rounds done; one confirming round still needed — see Workflow step 2) | `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md` | Q2 (so the baseline doesn't penalise known data bugs) |
 | Q4 | **Agent Runtime P1** — `LLMService.chat()` with native tools; Ollama `/api/chat`, OpenAI-compatible/llama.cpp, Anthropic; capability detection; `num_ctx`, thinking (default off), keep-alive, vision; AbortSignal | Phase | Plan: needs writing | Design §5, §16 | Q3 |
 | Q5 | **Agent Runtime P2** — tool registry (validation, read-only facade, pinning, permission filter), `find_tools`, AgentLoop, confirmations + taint, integrity ledger, trace, ContextAssembler, core tools; `/agent` (admin, dark launch) | Phase | Plan: needs writing | Design §6–§9, §11.1, §14, §16 | Q4 |
 | Q6 | **Agent Runtime P3** — Food + Notes tools, cards, photo import via `agent.vision_model`, `PendingInputRegistry`, migration inventory | Phase | Plan: needs writing | Design §10.3, §11.2–§11.3, §16 | Q5 |
@@ -132,5 +149,6 @@ Commands, the brief template with the inlined severity rubric, ledger dispositio
 
 | Date | Change |
 |---|---|
-| 2026-10-05 | Review & execution protocol adopted from Code Orchestrator: cross-vendor review with Codex `gpt-6.1-sol` + Grok 4.7, finding ledger, deliverables contract, mechanical proof, votes (`docs/review-protocol.md`). Q3 needs one confirming round with Grok. |
+| 2026-10-05 | Roles switched to Code Orchestrator's engine roles. Code review now runs on `gpt-6-luna` at medium (operator choice). Grok revises code instead of reviewing it. Plan review is `gpt-6.1-sol` at medium, and Fable plans. |
+| 2026-10-05 | Review & execution protocol adopted from Code Orchestrator (`docs/review-protocol.md`): finding ledger, deliverables contract, mechanical proof, votes. |
 | 2026-10-05 | Queue created. Design approved after 6 Codex rounds. P0 plan written and reviewed over 5 Codex rounds. Thinking comparison run; thinking defaults to off. Q1–Q2 were spun out as separate sessions; check whether they landed (step 2). |
