@@ -4,6 +4,13 @@
 work. Full analysis behind every statement here:
 `docs/superpowers/plans/2026-07-07-agentic-harness-deep-dive.md`.
 
+> **Amended 2026-10-05 (operator-approved)** by `docs/superpowers/specs/2026-10-05-agent-runtime-design.md` §15:
+> item 1 → each user message is a bounded session with a code-owned envelope (still no always-on agent);
+> item 3 → the tier ladder is replaced by capability gating — a model may run the loop if it supports
+> native tool calling and meets the agent-bucket threshold (fast tier still never loops);
+> item 4 → confirmation follows the design's §9.2 rules (`external` always; `write` unless `autoApprove`
+> and untainted or `taintExempt`). Items 2, 5, 6, 7 and AG-8 are unchanged. Full text rewrite in Agent Runtime P5.
+
 PAS's differentiator against light-harness agent systems (OpenClaw-class resident agents,
 research harnesses like hermes-agent) is **predictability — defined as the absence of
 variance the user didn't ask for**, not the absence of capability. Agentic behavior is

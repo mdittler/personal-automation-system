@@ -1,5 +1,9 @@
 # Personal Automation System (PAS)
 
+## Start Here — "do the next phase"
+
+**`docs/priority-queue.md` is the top of all pending work** and outranks the Master Execution Order in `docs/open-items.md`. When the operator says "do the next phase" (or runs `/next-phase`), follow that file's protocol: take the first row not marked `Done`, run its workflow (plan → Codex critical-only review loop → operator checkpoint → subagent-driven TDD execution → end-of-phase Codex review → docs footprint), then update the row. Current track: the Agent Runtime (design `docs/superpowers/specs/2026-10-05-agent-runtime-design.md`, approved 2026-10-05).
+
 ## Project Overview
 
 A local-first home automation platform where users interact through a single Telegram bot. The infrastructure handles message routing, scheduling, data storage, LLM access, multi-user management, audio output, condition evaluation, and a management interface. Apps are modular plugins that implement specific functionality. Apps can be developed independently and shared between PAS instances as git repos.

@@ -4182,6 +4182,38 @@ OpenClaw-style resident agent in core; three-condition revisit gate).
 
 ---
 
+# Planned Phases — Agent Runtime (approved 2026-10-05) — HIGHEST PRIORITY
+
+> **Status: PLANNED, highest priority.** These phases outrank every other planned phase in this file. Execution order, live status, carried items, and the per-phase workflow are in **`docs/priority-queue.md`** (rows Q3–Q8; Q1–Q2 are fixes that come first). Design, with the review log and operator decisions: `docs/superpowers/specs/2026-10-05-agent-runtime-design.md`. They supersede the T1a → T6b chatbot-primary track and AG-2/AG-4/AG-6/AG-7 (see the doctrine's 2026-10-05 amendment note).
+
+**Why:** the 2026-09-02 regression runs showed the classifier and routing stack was now the bottleneck, not the models:
+- Frontier models answered "I can't reach your Food data" because the chatbot only sees data after a 10-token classifier and a fast-model file picker both succeed.
+- qwen3.8 hit 98% routing accuracy.
+- Given native tools, qwen3.8 answered a question the classifier pipeline failed (design §1).
+
+**Goal:** replace every free-text routing layer with one code-owned agent loop over a permission-filtered tool registry.
+- Apps contribute tools (name, description, schema, risk).
+- Any question answerable from the user's data is answerable without a purpose-built pipeline.
+
+| Phase | Delivers | Plan |
+|---|---|---|
+| P0 — Benchmark | No cached errors; cache key binds case id + harness; per-case and per-trial isolation (a worker process per agent trial); judge sees ground truth; 46-task outcome-graded `agent` bucket (pass^3); baseline on the old pipeline | `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md` (ready) |
+| P1 — LLM chat + tools | `LLMService.chat()` with native tool calling per provider (Ollama `/api/chat`, OpenAI-compatible, Anthropic); capability detection; `num_ctx`, thinking (default off), keep-alive, vision | to write |
+| P2 — Registry + loop | `defineTool` registry with validation, read-only facade, pinning, permission filter; `find_tools`; AgentLoop with step/budget/timeout; confirmations + context-wide taint; integrity ledger; trace; core tools; `/agent` dark launch | to write |
+| P3 — App tools | Food/Notes tools (consolidating 26 intents); cards; photo import on `agent.vision_model`; `PendingInputRegistry`; migration inventory | to write |
+| P4 — Cut-over | Beat the P0 baseline (qwen3.8 and frontier, pass^3); origin rules; router simplification; deletions; prompt rebuild; end sessions at deploy | to write |
+| P5 — Docs | Doctrine rewrite, Master Execution Order rewrite, CLAUDE.md status bullet, skills, app-developer docs, URS retirements | to write |
+
+**Operator decisions (2026-10-05):**
+- default agent model `qwen3.8:27b-mlx`;
+- photo turns use a paid `agent.vision_model`;
+- thinking off by default, measured in `docs/superpowers/plans/findings/2026-10-05-qwen38-thinking-comparison.md` and re-checked in P3;
+- auto-approve list as in design §18.
+
+**Doc footprint (each phase):** URS entries plus traceability rows, a dated section in this file when the phase completes, `docs/open-items.md` updates, and the phase's row in `docs/priority-queue.md`. The single CLAUDE.md status bullet lands at P5.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
