@@ -371,6 +371,18 @@ async function loginAsAdmin(): Promise<Record<string, string>> {
 	return collectCookies(res);
 }
 
+/** Production sole-admin rule: GUI_AUTH_TOKEN logs in as the only isAdmin user. */
+async function loginViaLegacyToken(): Promise<Record<string, string>> {
+	const res = await app.inject({
+		method: 'POST',
+		url: '/gui/login',
+		payload: { legacyToken: AUTH_TOKEN },
+	});
+	expect(res.statusCode).toBe(302);
+	expect(res.headers.location).toBe('/gui/');
+	return collectCookies(res);
+}
+
 async function getCsrf(cookies: Record<string, string>) {
 	const res = await app.inject({
 		method: 'GET',
@@ -574,6 +586,18 @@ describe('GUI model-journal routes are platform-admin-only (Q1)', () => {
 		const res = await app.inject({ method: 'GET', url: JOURNAL_URLS[2]!, cookies });
 		expect(res.statusCode).toBe(200);
 		expect(res.body).toContain(SECRET_ARCHIVE);
+	});
+
+	it('legacy GUI_AUTH_TOKEN login (sole admin) can read the journal listing and model content', async () => {
+		const cookies = await loginViaLegacyToken();
+
+		const listRes = await app.inject({ method: 'GET', url: JOURNAL_URLS[0]!, cookies });
+		expect(listRes.statusCode).toBe(200);
+		expect(listRes.body).toContain('test-model');
+
+		const modelRes = await app.inject({ method: 'GET', url: JOURNAL_URLS[1]!, cookies });
+		expect(modelRes.statusCode).toBe(200);
+		expect(modelRes.body).toContain(SECRET);
 	});
 
 	it('data page renders the journal trigger for admin but never for member', async () => {
