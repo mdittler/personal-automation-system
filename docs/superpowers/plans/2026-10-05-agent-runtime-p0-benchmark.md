@@ -1,6 +1,6 @@
 # Agent Runtime P0 — Benchmark Hygiene + Agent Bucket + Baseline Implementation Plan
 
-> **For agentic workers:** implement this plan task-by-task, test-first (the `test-driven-development` skill). Steps use checkbox (`- [ ]`) syntax for tracking. Per project convention, execute with a fresh subagent per task and roll through all tasks without pausing; one Codex review at the end of the phase.
+> **For agentic workers:** implement this plan task-by-task, test-first (the `test-driven-development` skill). Steps use checkbox (`- [ ]`) syntax for tracking. Execute per `docs/review-protocol.md`: fresh Sonnet subagent per task, roll through all tasks without pausing, tick the Review findings acceptance checklist with observed evidence, handle the Implementation notes, then cross-vendor code review (Codex `gpt-6.1-sol` + Grok 4.7) until no finding is left undispositioned.
 
 **Goal:** Make the persona-regression benchmark trustworthy (no cached errors, correct cache invalidation, isolated chatbot cases, judge sees ground truth) and add an outcome-graded `agent` bucket of ≥40 tasks that runs against today's router to record the baseline the Agent Runtime cut-over must beat.
 
@@ -4080,7 +4080,10 @@ Expected: `cases that would dispatch | 46`.
 - [ ] **Step 8: Live smoke of one isolated trial** (needs Ollama running). Build first: the worker runs under tsx, where apps load from `dist/` and `@pas/core/*` resolves through the package export map, so a stale build fails exactly as Task 0 described.
 
 Run: `pnpm build && pnpm test:regression -- --bucket=agent --rerun agent-grocery-list --repeats=1 --model-matrix=ollama/qwen3.8:27b-mlx,ollama/qwen3.8:27b-mlx --no-manifest`
-Expected: a graded verdict (pass or fail) for `agent-grocery-list`, not `error: … worker exited …`.
+Expected: a graded verdict (pass or fail) for `agent-grocery-list`, not `error: … worker exited …`; with `--repeats=2` the two trials report different worker pids (Implementation note N2).
+
+Negative case: `pnpm test:regression -- --bucket=agent --rerun agent-grocery-list --repeats=1 --model-matrix=ollama/does-not-exist:1b,ollama/does-not-exist:1b --no-manifest`
+Expected: verdict `error` with a provider error in the details — **not** `fail` (the app's polite failure reply must not be graded).
 
 - [ ] **Step 9: Commit**
 
@@ -4172,7 +4175,85 @@ git add docs/urs.md docs/implementation-phases.md docs/open-items.md regression/
 git commit -m "docs(agent-runtime-p0): URS, phase record, open items, regression README"
 ```
 
-- [ ] **Step 7: Phase review** — request the single end-of-phase Codex review of the P0 diff; apply Critical/Important findings in place with a change table appended to the implementation-phases section.
+- [ ] **Step 7: Phase review** — cross-vendor code review rounds per `docs/review-protocol.md` §3–§5 (Codex `gpt-6.1-sol` + Grok `grok-4.7-high`, detached worktree at the phase SHA; the brief includes the Deliverables, the acceptance checklist, and the implementation notes). Every finding gets a disposition in the ledger; apply fixes with a change table in the implementation-phases section; save `suite-<sha>.txt` for the final SHA and re-check HEAD before merging.
+
+---
+
+## Deliverables
+
+The plan→execution contract (`docs/review-protocol.md` §2). Code review adjudicates each item as delivered, missing, or downgraded, with evidence. A silent narrowing is critical.
+
+- [ ] **D1** — `pnpm --filter @pas/regression test` and `typecheck` pass from a checkout whose `core/dist` is stale. (Task 0)
+- [ ] **D2** — `error` and `budget-exceeded` results are never written to the cache, and legacy ones on disk read as misses. (Task 1)
+- [ ] **D3** — Two cases defined in one file get different cache keys. Editing any harness path changes the affected keys. Harness paths are the runner, oracle, seed manifest, `seed-facts.ts`, receipt fixtures, trial worker/spawn, and the LLM layer. (Task 2)
+- [ ] **D4** — `--archive-cache` moves the cache to `<cacheDir>-archive/<stamp>/` and leaves an empty cache. (Task 3)
+- [ ] **D5** — The rubric judge prompt carries the seed reference data and names the reply block. (Task 4)
+- [ ] **D6** — Every chatbot case runs in its own seeded runtime. Every seeded runtime has webhooks and n8n disabled, generous safeguards, and the parent's **reconciled** tiers. (Tasks 5, 10)
+- [ ] **D7** — `agent` is accepted by the CLI, the case validator, the GUI estimator, and the three GUI bucket selectors. (Task 6)
+- [ ] **D8** — The outcome oracle grades:
+  - facts: number, text, any-text, and date, including rejecting an explicit wrong year;
+  - forbidden phrases;
+  - data state: items, contains, lineRegex, exists, and wildcards;
+  - unchanged paths;
+  - messages to other users.
+  (Tasks 7, 9)
+- [ ] **D9** — The 20-file synthetic seed passes its integrity check. Overlays and `{date:±N}` expansion work. (Task 8)
+- [ ] **D10** — Agent trial behaviour (Tasks 9, 10):
+  - each agent trial runs in its own worker process;
+  - verdict precedence is error > budget-exceeded > fail > pass;
+  - provider errors, including from drained background calls, force `error`;
+  - spend from crashed or hung workers is charged;
+  - an actual overrun stops the case;
+  - the case allowance is at most the run's remaining budget.
+- [ ] **D11** — 46 agent tasks across 8 categories, with seed-derived ground truth pinned by a test. (Task 11)
+- [ ] **D12** — The report shows pass^k and the per-trial pass rate by set and by category. Dry-run prices agent cases as turns × repeats. (Task 10)
+- [ ] **D13** — Complete baselines for qwen3.8 and frontier on the pre-agent pipeline, meaning no `budget-exceeded` or `error` except local photo tasks. (Task 12)
+- [ ] **D14** — Live smoke: an isolated trial ends with a graded verdict, and the two trials show distinct worker pids. Negative case: an unreachable model ends `error`, not `fail`. (Task 11 Step 8)
+- [ ] **D15** — Documentation footprint complete. (Task 13)
+
+## Review findings — acceptance checklist
+
+Every finding from the plan review that was fixed in this plan's text must be **proven in code** during execution (`docs/review-protocol.md` §4). Tick each row with the evidence you actually observed: a test name with its result, command output, or a commit. Rejected findings are not listed; see the review log.
+
+| Finding | Fix lives in | Evidence required (tick when observed) |
+|---|---|---|
+| C1 case id + harness in key; parity tests | Task 2 | [ ] `cache-key.test.ts` caseId / harness / expandHarnessPaths / existence tests green; `list-mode-cache-key-parity.test.ts` green with updated expectations |
+| C2 required `CliOptions` fields | Tasks 3, 10 | [ ] `pnpm --filter @pas/regression typecheck` exits 0 after each of those tasks |
+| C3 per-trial process isolation | Tasks 9–10 | [ ] `agent-trial-spawn.test.ts` green; [ ] live smoke shows distinct worker pids (N2) |
+| C4 stale `dist/` benchmarked | Task 12 Step 0 | [ ] findings doc records `pnpm build` + `git rev-parse HEAD` before each baseline |
+| C5 injection: notes, other-user messages, real integrations | Tasks 5, 9, 11 | [ ] `agent-trial.test.ts` noExternalMessages test green; [ ] `buildSeededConfig` test asserts `webhooks: []`, `n8n.dispatchUrl: ''` (N1); [ ] `agent-cases.test.ts` shows injection tasks watch `notes/` |
+| C6 fail + error cached as fail | Task 9 | [ ] `agent-runner.test.ts` "infrastructure error outranks a graded failure" green; mutation-check: swap the precedence → test fails |
+| C7 wrong-year dates | Task 7 | [ ] `outcome-oracle.test.ts` wrong-year cases incl. `September 9,2025` green; mutation-check: drop the year check → test fails |
+| C8 seed-facts + photos in key | Task 2 | [ ] `BUCKET_HARNESS_PATHS.agent` contains both; existence test green |
+| C9/C16 dry-run vs dispatch pricing; baseline sizing | Tasks 10, 12 | [ ] `markdown-report.test.ts` per-case override test green; [ ] findings doc shows the completeness gate applied |
+| C10 exact `args.test.ts` expectations | Tasks 3, 10 | [ ] `args.test.ts` green |
+| C11 harness test + smoke ordering | Task 11 | [ ] harness existence test enabled and green in Task 11; smoke run recorded there |
+| C12 swallowed provider errors | Tasks 9–10 | [ ] `agent-trial.test.ts` provider-error test green; [ ] tracker helper test (N4) green; [ ] negative smoke ends `error` |
+| C13/C20 child runs the reported, reconciled models | Task 10 | [ ] `build-deps.test.ts` reconcile test green; [ ] code review confirms `resolvedTiers` reaches both env factories |
+| C14 spend lost on crash/hang | Task 10 | [ ] `agent-trial-spawn.test.ts` "charges the last reported meter" green; [ ] worker emits periodic meters (code review) |
+| C15 overrun ends pass; run remaining ignored | Tasks 9–10 | [ ] `agent-runner.test.ts` overrun tests green; [ ] orchestrator passes `Math.min(case, runBudget.remainingUsd)` (code review) |
+| C17 guard rejections graded | Task 5 | [ ] `buildSeededConfig` test asserts the generous safeguards (N1) |
+| C19 background calls escape | Task 10 | [ ] in-flight tracker test (N3): follow-up call scheduled after the first completes is awaited; timeout records an error |
+| C21 typecheck via stale declarations | Task 0 | [ ] typecheck green with stale `core/dist` |
+
+## Implementation notes from review
+
+These are non-critical items to handle **during execution**: fix each one, or re-home it per `docs/review-protocol.md` §4.
+
+- **N1 — `buildSeededConfig`.**
+  - Extract the config overrides in `createSeededRuntime` into an exported pure `buildSeededConfig(realConfig, { dataDir, users, tierOverride })`.
+  - Unit-test four things: webhooks are empty; n8n dispatch is empty; safeguards are the generous values; tier overrides apply, including the reasoning fallthrough.
+  - Why: these guarantees otherwise live only on an integration path that no unit test reaches. This is evidence for C5, C13 and C17.
+- **N2 — worker pid in trial details.** Include `process.pid` in every trial's `details` so per-trial isolation is observable. This is evidence for C3.
+- **N3 — testable in-flight tracker.**
+  - Move the worker's in-flight tracking and `drain` into an exported helper, e.g. `regression/src/runner/provider-call-tracker.ts`.
+  - Unit tests: a follow-up call scheduled after the first one completes is still awaited; a drain timeout records an error. This is evidence for C19.
+- **N4 — testable provider-error wrapper.**
+  - Move the provider `completeWithUsage` wrapper into the same helper.
+  - Unit test: an error is recorded and rethrown, and success passes through untouched. This is evidence for C12.
+- **N5 — CLI `--dry-run` estimator is a stub for every bucket.** This is pre-existing. Task 12 no longer depends on it. **Deferred:** `docs/open-items.md` Proposals, "Regression `--dry-run` cost estimate uses a stub estimator".
+- **N6 — integrity-ledger writer restriction.** From design review round 6. **Deferred:** P2 carried item in `docs/priority-queue.md`.
+- **Pre-execution step: one confirming cross-vendor round.** This plan was reviewed by Codex only, before the cross-vendor protocol existed. Run one round with Codex **and Grok 4.7** first (`docs/priority-queue.md`, Workflow step 2), and log it below.
 
 ---
 

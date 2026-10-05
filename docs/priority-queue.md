@@ -8,60 +8,49 @@ Set 2026-10-05 by operator decision: Agent Runtime design approved, plus fixes f
 
 ## When the operator says "do the next phase"
 
+**How to work: follow `docs/review-protocol.md`**, adopted 2026-10-05 from the Code Orchestrator project. It covers roles and models, cross-vendor review with Codex `gpt-6.1-sol` and Grok 4.7, the finding ledger, stop rules, votes, and execution rules.
+
 1. **Sync and orient.**
    - Start from an up-to-date `main` (in an app-made worktree, use the host's sync tool).
-   - Read this file.
-   - Pick the **first row whose Status is not `Done`**. If the operator names an item, do that one instead.
-2. **Check it isn't already done.**
-   - Some fixes were spun out as separate sessions on 2026-10-05.
-   - Search `git log --oneline main` and `docs/open-items.md` for the item.
-   - If it already landed, mark it `Done` here with the commit, and go back to step 1.
-3. **Announce the item in one line** (e.g. "Next: Q3 — Agent Runtime P0, plan ready"). Then run the workflow for its type below.
-4. **Finish.**
-   - Update this file: set Status to `Done (YYYY-MM-DD, <commit or PR>)` and add any new work you discovered as rows (see "Adding work").
-   - Commit.
-   - Report what the next item is.
+   - List the model roster (protocol §1).
+   - Read this file and pick the **first row whose Status is not `Done`**. If the operator names an item, do that one. **Do not re-rank the queue.**
+2. **Check it isn't already done.** Search `git log --oneline main` and `docs/open-items.md` for the item. If it already landed, mark it `Done` with the commit and go back to step 1.
+3. **Announce the item in one line**, then run its workflow below.
+4. **Close.**
+   - Update the row to `Done (YYYY-MM-DD, <merge commit>)`.
+   - Record new work (see "Adding work").
+   - Report the next item, the cost, and the wall-clock time.
 
 ## Workflow — phases (P0–P5)
 
-This is the workflow every Agent Runtime phase follows. It combines the project's standing practice with the operator's 2026-10-05 instructions.
-
 1. **Plan.**
-   - If the row says *Plan: needs writing*, invoke the `writing-plans` skill.
-   - Write `docs/superpowers/plans/YYYY-MM-DD-agent-runtime-pN-<slug>.md` from the design section the row names.
-   - The plan includes the full documentation footprint: URS entries and traceability rows, a `docs/implementation-phases.md` section, `docs/open-items.md` updates, and this file's row update.
-   - It also includes every *Carried items* entry on the row.
-2. **Plan review loop.**
-   - Run the Codex plan review (template A below) with `gpt-6.1-sol` at high reasoning, read-only.
-   - Fix **critical issues only.** Don't iterate on nits or on things naturally decided during implementation.
-   - Verify each finding against the code before accepting it. Rejections need a written rationale.
-   - Record every round in a "Plan review log" table at the end of the plan.
-   - Stop when a round reports none, or when findings have narrowed to implementation-level detail. Say which in the log.
+   - If the row says *Plan: needs writing*, invoke the `writing-plans` skill and write `docs/superpowers/plans/YYYY-MM-DD-agent-runtime-pN-<slug>.md`.
+   - Base it on the design sections the row names, plus every *Carried items* bullet for the row.
+   - Include the required sections from protocol §2: Deliverables, test-first tasks, a live smoke, the Plan review log, the Review findings acceptance checklist, and Implementation notes from review.
+   - Include the documentation footprint: URS entries and traceability rows, a `docs/implementation-phases.md` section, `docs/open-items.md` updates, and this file's row.
+2. **Plan review.**
+   - Run cross-vendor rounds (protocol §3) until the stop rules are met (§5).
+   - Every finding, critical or not, gets a home (§4).
+   - If the plan was reviewed before this protocol existed (Q3's P0 plan), run **one confirming cross-vendor round with Grok included** before execution, and backfill the acceptance checklist and implementation notes.
 3. **Operator checkpoint.**
-   - Give a ≤10-line summary: what the phase delivers, the review outcome, and any open decision.
+   - Give a ≤10-line summary: what ships, the review outcome, and any operator-disposition findings.
    - Wait for "go" unless the operator already said to execute without asking.
-4. **Execute.**
-   - Work on a fresh branch from `main`.
-   - Run subagent-driven: a fresh subagent per task, test-first (the `test-driven-development` skill).
-   - Roll through all tasks without pausing.
-   - At every commit: zero failing tests, and `pnpm lint` reports zero errors.
-   - On a bug, use the `systematic-debugging` skill.
-5. **End-of-phase code review.**
-   - Run one Codex review of the phase diff (template B), critical-only, with the same loop and rules as step 2.
-   - Use the `receiving-code-review` and `defect-severity` skills to triage.
-   - Apply fixes, with a change table in the phase's `docs/implementation-phases.md` section.
-6. **Docs and close.**
+4. **Execute.** Follow protocol §7: fresh Sonnet subagents, test-first, mechanical and closure proof, the acceptance checklist ticked with observed evidence, and implementation notes handled.
+5. **Code review.** Run cross-vendor rounds on the phase SHA in a detached worktree. The brief includes the Deliverables, the acceptance checklist, and the implementation notes. Continue until no finding is left undispositioned.
+6. **Verify and close.**
+   - Run `pnpm lint && pnpm test && pnpm --filter @pas/regression test && pnpm --filter @pas/regression typecheck` and save `suite-<sha>.txt`.
+   - Re-check that HEAD equals the tested SHA.
    - Complete the documentation footprint.
-   - Run the full verification: `pnpm lint && pnpm test && pnpm --filter @pas/regression test && pnpm --filter @pas/regression typecheck`.
-   - Update this file. Ask the operator before merging to `main` unless they pre-authorised it.
+   - Ask before merging, unless pre-authorised. Then merge `--no-ff`, delete the branch, and reconcile this file.
 
 ## Workflow — fixes (rows marked Fix)
 
-- No separate plan doc.
-- Write a failing test first (`test-driven-development`); use `systematic-debugging` for root cause.
-- Keep the fix minimal, then run one Codex review of the diff (template B, critical-only).
-- Add a URS fix entry (`pas-urs-workflow` skill) and close the item in `docs/open-items.md`.
-- Use the same verification and close steps as phases.
+Follow protocol §8:
+- write a failing test first, using `systematic-debugging` for root cause;
+- make the minimal fix and get closure proof;
+- run cross-vendor code review rounds;
+- add a URS fix entry and close the `docs/open-items.md` item;
+- verify and close as for phases.
 
 ## Queue
 
@@ -71,7 +60,7 @@ Rows are in execution order. **Depends on** names rows that must be `Done` first
 |---|---|---|---|---|---|
 | Q1 | Admin-gate the three model-journal GUI routes | Fix (security) | Not started | `docs/open-items.md` → Unfinished Corrections, "Model journal crosses household boundaries" (item 2) | — |
 | Q2 | Food data fixes: Trader Joe's store-name re-quoting; "most recent receipt" sorts by scan time; recent-interaction paths in the old layout | Fix | Not started | `docs/open-items.md` → Unfinished Corrections, "Food data bugs (found 2026-10-05)" | — |
-| Q3 | **Agent Runtime P0** — benchmark hygiene, agent bucket, baseline | Phase | **Plan ready** (Codex-reviewed 5 rounds) | `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md` | Q2 (so the baseline doesn't penalise known data bugs) |
+| Q3 | **Agent Runtime P0** — benchmark hygiene, agent bucket, baseline | Phase | **Plan ready** (Codex reviewed it over 5 rounds; it still needs one confirming cross-vendor round with Grok — see Workflow step 2) | `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md` | Q2 (so the baseline doesn't penalise known data bugs) |
 | Q4 | **Agent Runtime P1** — `LLMService.chat()` with native tools; Ollama `/api/chat`, OpenAI-compatible/llama.cpp, Anthropic; capability detection; `num_ctx`, thinking (default off), keep-alive, vision; AbortSignal | Phase | Plan: needs writing | Design §5, §16 | Q3 |
 | Q5 | **Agent Runtime P2** — tool registry (validation, read-only facade, pinning, permission filter), `find_tools`, AgentLoop, confirmations + taint, integrity ledger, trace, ContextAssembler, core tools; `/agent` (admin, dark launch) | Phase | Plan: needs writing | Design §6–§9, §11.1, §14, §16 | Q4 |
 | Q6 | **Agent Runtime P3** — Food + Notes tools, cards, photo import via `agent.vision_model`, `PendingInputRegistry`, migration inventory | Phase | Plan: needs writing | Design §10.3, §11.2–§11.3, §16 | Q5 |
@@ -88,6 +77,7 @@ Each item must appear in that phase's plan. Most came out of the 2026-10-05 desi
 - Agent model and vision model settings: `agent.model` (default `qwen3.8:27b-mlx`), `agent.vision_model` (paid), `agent.thinking: off`. Design §18.
 
 **Q5 · P2**
+- The integrity-ledger directory must be writable only by the ledger module. Add a contract test that no other module writes under `data/system/memory-trust/`; the directory name alone doesn't make it core-only (design review round 6, non-critical note).
 - Canonical (realpath) containment for raw data writes. Tracked in open-items: Deferred Infrastructure Work, "Agent Runtime deferrals", item 7.
 - Add the tool-registry hash and the system-prompt hash to the agent bucket's cache-key harness paths. P0 plan, scope section.
 - Agent-bucket confirmation tasks: assert nothing is written before ✅. They need P2's confirmation store and callback entry point.
@@ -134,29 +124,13 @@ Never reorder Q3–Q8 relative to each other. The design's phase gates depend on
 - P3's migration inventory gates P4;
 - P4's cut-over gate needs the P0 baseline.
 
-## Review prompt templates
+## Review mechanics
 
-Run from the repo root:
-
-```bash
-codex exec -m gpt-6.1-sol -c model_reasoning_effort='"high"' -s read-only -o <review-out.md> - < <prompt.md>
-```
-
-Run it in the background. A round takes about 5–10 minutes.
-
-**A — plan review (round 1):**
-
-> Review the IMPLEMENTATION PLAN `<plan path>` in the current working directory (read-only sandbox; do not modify files). It implements phase `<PN>` of the approved design `docs/superpowers/specs/2026-10-05-agent-runtime-design.md` (`<sections>`). The design and phase scope are decided — do not argue them. Verify the plan against the actual code it modifies. Report ONLY critical issues. CRITICAL means at least one of: (a) a step cannot work against the real code (wrong API/signature/path, a test that cannot pass or cannot fail as claimed, an intermediate commit that breaks build/tests, a command that does not do what it says); (b) the plan leaves failing tests or lint errors unaccounted for; (c) a requirement of the phase's design sections neither implemented nor explicitly assigned to a later phase; (d) the change would produce misleading results or a security hole (cross-household data, unconfirmed exfiltration/destructive action, injection path the stated controls miss). Do NOT report details an engineer resolves while coding, naming/wording, style, minor test-strength opinions, or things the plan already flags. For each finding: ID, task/step, problem with file:line evidence, concrete failure, smallest fix. Up to 3 one-line non-critical notes. Final line: "No critical issues" or "N critical issues".
-
-For later rounds, add: *"Rounds 1–N found critical issues; the plan's review log lists them and their fixes. (1) Verify each round-N row is resolved — one line each. (2) Find NEW critical issues, especially any introduced by the round-N fixes."*
-
-**B — code review (end of phase, or a fix):** template A with three changes:
-- the object is the diff `git diff main...HEAD`;
-- (a) becomes *"the code does not do what the plan/design requires, or a test does not exercise what it claims"*;
-- (b) becomes *"failing tests, lint errors, or typecheck errors"*.
+Commands, the brief template with the inlined severity rubric, ledger dispositions, and stop/vote rules all live in `docs/review-protocol.md`.
 
 ## Status history
 
 | Date | Change |
 |---|---|
+| 2026-10-05 | Review & execution protocol adopted from Code Orchestrator: cross-vendor review with Codex `gpt-6.1-sol` + Grok 4.7, finding ledger, deliverables contract, mechanical proof, votes (`docs/review-protocol.md`). Q3 needs one confirming round with Grok. |
 | 2026-10-05 | Queue created. Design approved after 6 Codex rounds. P0 plan written and reviewed over 5 Codex rounds. Thinking comparison run; thinking defaults to off. Q1–Q2 were spun out as separate sessions; check whether they landed (step 2). |
