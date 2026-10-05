@@ -29,6 +29,9 @@ const RECEIPTS_DIR = 'receipts';
 const EXPLICIT_RECEIPT_RE = /\b(receipt|last\s+trip|trip\s+to|shopping\s+trip)\b/i;
 const RECEIPT_FOLLOW_UP_RE =
 	/\b(line\s*items?|items?|total|break\s*out|price\s+of\s+each|each\s+item|what\s+(?:did|was)\s+(?:i|we))\b/i;
+// Recency wording tied to a receipt/trip noun, so "what did I pay last time for milk" does not match.
+const LATEST_RECEIPT_RE =
+	/\b(?:most\s+recent|latest|newest|last)\s+(?:(?:grocery|shopping|food|store)\s+)?(?:receipt|trip|shopping|purchase)\b/i;
 const NEW_STATUS_RE = /\b(new|added|updated|price(?:s)?\s+updated)\b/i;
 const PRICE_LOOKUP_RE =
 	/\b(cheapest|how\s+much\s+(?:are|is|was|were)|price\s+(?:of|for)|cost\s+(?:of|for))\b/i;
@@ -204,6 +207,15 @@ export function isReceiptQueryIntent(text: string, hasRecentReceiptContext = fal
 	return (
 		EXPLICIT_RECEIPT_RE.test(text) || (hasRecentReceiptContext && RECEIPT_FOLLOW_UP_RE.test(text))
 	);
+}
+
+/**
+ * True when the user asks for the most recent / latest / last receipt or trip.
+ * Such questions always answer by purchase date; deictic follow-ups ("that receipt")
+ * keep using the receipt in the interaction context. (Q2 R1-2, operator decision.)
+ */
+export function asksForLatestReceipt(text: string): boolean {
+	return LATEST_RECEIPT_RE.test(text);
 }
 
 export function isPriceLookupIntent(text: string): boolean {

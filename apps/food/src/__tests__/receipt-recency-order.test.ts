@@ -10,7 +10,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
 import { handleMessage, init } from '../index.js';
 import { __clearShadowDepsForTests } from '../routing/shadow-integration.js';
-import { findLatestReceipt, loadReceipts } from '../services/receipt-query.js';
+import {
+	asksForLatestReceipt,
+	findLatestReceipt,
+	loadReceipts,
+} from '../services/receipt-query.js';
 import type { Household, Receipt } from '../types.js';
 
 const DAY = 86_400_000;
@@ -193,5 +197,149 @@ describe('food handler "most recent receipt" entry point (REQ-FOOD-RECEIPT-005)'
 			.join('\n');
 		expect(sent).toContain(`Costco receipt (${daysAgoDate(4)})`);
 		expect(sent).not.toContain(daysAgoDate(50));
+	});
+});
+
+describe('asksForLatestReceipt classifier (REQ-FOOD-RECEIPT-005, Q2 R1-2)', () => {
+	it.each([
+		'what was on my most recent receipt?',
+		'show me the latest receipt',
+		'my last grocery trip',
+		'what was on my last receipt',
+		'newest receipt please',
+		'what did I buy on my most recent shopping trip',
+		'show my last purchase',
+	])('matches recency wording: %s', (text) => {
+		expect(asksForLatestReceipt(text)).toBe(true);
+	});
+
+	it.each([
+		'what was on that receipt?',
+		'how much was it?',
+		'show me the receipt again',
+		'what did I pay last time for milk',
+		'break out the price of each item',
+		'what is the latest news',
+	])('does not match deictic or unrelated wording: %s', (text) => {
+		expect(asksForLatestReceipt(text)).toBe(false);
+	});
+});
+
+describe('latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)', () => {
+	const route: RouteInfo = {
+		appId: 'food',
+		intent: 'user wants to see receipt details or look up items from a receipt',
+		confidence: 0.95,
+		source: 'intent',
+		verifierStatus: 'agreed',
+	};
+	let services: CoreServices;
+
+	async function setup(receipts: Receipt[], recentIds: string[]): Promise<void> {
+		const sharedStore = storeWith(receipts);
+		services = createMockCoreServices({
+			data: {
+				forShared: vi.fn().mockReturnValue(sharedStore),
+				forUser: vi.fn().mockReturnValue(sharedStore),
+				forSpace: vi.fn().mockReturnValue(sharedStore),
+			},
+			interactionContext: {
+				getRecent: vi.fn().mockReturnValue(
+					recentIds.length === 0
+						? []
+						: [
+								{
+									appId: 'food',
+									action: 'receipt_captured',
+									entityType: 'receipt',
+									scope: 'shared',
+									timestamp: Date.now(),
+									filePaths: recentIds.map((id) => `receipts/${id}.yaml`),
+								},
+							],
+				),
+			},
+			config: {
+				get: vi.fn(async (key: string) => {
+					if (key === 'shadow_sample_rate') return 0;
+					if (key === 'routing_primary') return 'regex';
+					return undefined;
+				}),
+			},
+		});
+		await init(services);
+		__clearShadowDepsForTests();
+	}
+
+	function sentText(): string {
+		return vi
+			.mocked(services.telegram.send)
+			.mock.calls.map((c) => String(c[1]))
+			.join('\n');
+	}
+
+	// Newest purchase is Costco (yesterday); the receipt just scanned is an older Trader Joes purchase.
+	const fixtures = (): Receipt[] => [
+		makeReceipt('newest', 'Costco', daysAgoDate(1), daysAgoIso(1)),
+		makeReceipt('older-just-scanned', 'Trader Joes', daysAgoDate(30), daysAgoIso(0)),
+	];
+
+	beforeEach(() => {
+		__clearShadowDepsForTests();
+	});
+
+	it.each([
+		'what was on my most recent receipt?',
+		'show me the latest receipt',
+		'what was on my last grocery trip',
+	])(
+		'"%s" answers with the newest purchase even when an older receipt was just scanned',
+		async (text) => {
+			await setup(fixtures(), ['older-just-scanned']);
+			await handleMessage(createTestMessageContext({ userId: 'matt', text, route }));
+			expect(sentText()).toContain('Costco receipt');
+			expect(sentText()).not.toContain('Trader Joes receipt');
+		},
+	);
+
+	it.each(['what was on that receipt?', 'show me the receipt again'])(
+		'deictic follow-up "%s" still answers with the recent receipt',
+		async (text) => {
+			await setup(fixtures(), ['older-just-scanned']);
+			await handleMessage(createTestMessageContext({ userId: 'matt', text, route }));
+			expect(sentText()).toContain('Trader Joes receipt');
+			expect(sentText()).not.toContain('Costco receipt');
+		},
+	);
+
+	it('"how much was it?" with a recent receipt in context answers with the recent receipt', async () => {
+		await setup(fixtures(), ['older-just-scanned']);
+		await handleMessage(
+			createTestMessageContext({ userId: 'matt', text: 'how much was it?', route }),
+		);
+		expect(sentText()).toContain('Trader Joes receipt');
+	});
+
+	it('with no recent receipt, a deictic question falls back to the newest purchase (unchanged)', async () => {
+		await setup(fixtures(), []);
+		await handleMessage(
+			createTestMessageContext({ userId: 'matt', text: 'what was on that receipt?', route }),
+		);
+		expect(sentText()).toContain('Costco receipt');
+	});
+
+	it('a store-named query is unchanged: newest receipt for that store, ignoring the recent receipt', async () => {
+		await setup(
+			[...fixtures(), makeReceipt('tj-newer', 'Trader Joes', daysAgoDate(3), daysAgoIso(3))],
+			['older-just-scanned'],
+		);
+		await handleMessage(
+			createTestMessageContext({
+				userId: 'matt',
+				text: 'what was on my receipt from Trader Joes',
+				route,
+			}),
+		);
+		expect(sentText()).toContain(`Trader Joes receipt (${daysAgoDate(3)})`);
 	});
 });
