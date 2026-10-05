@@ -74,8 +74,36 @@ function isReceipt(value: unknown): value is Receipt {
 	);
 }
 
-function receiptSortKey(receipt: Receipt): string {
-	return receipt.capturedAt || `${receipt.date}T00:00:00.000Z`;
+/**
+ * True for a real calendar date in strict YYYY-MM-DD form (the format
+ * receipt-parser stores). Pure string/UTC arithmetic: no timezone shift.
+ */
+function isCalendarDate(value: unknown): value is string {
+	if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+	const d = new Date(`${value}T00:00:00.000Z`);
+	return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * "Most recent receipt" ordering (newest first), REQ-FOOD-RECEIPT-005:
+ *   1. Purchase `date` descending. YYYY-MM-DD strings are compared
+ *      lexicographically, which is chronological and never parsed as an
+ *      instant, so there is no UTC/local day shift.
+ *   2. Receipts whose date is missing or not a real calendar date sort after
+ *      every validly dated receipt (we cannot place them in time).
+ *   3. Ties (same date, or both undated) break on `capturedAt` descending
+ *      (scan time); a missing capturedAt sorts last.
+ *   4. Final tiebreak on `id` descending, for a deterministic order.
+ * Scan time alone must never outrank a later purchase.
+ */
+function compareReceiptsNewestFirst(a: Receipt, b: Receipt): number {
+	const aDate = isCalendarDate(a.date) ? a.date : '';
+	const bDate = isCalendarDate(b.date) ? b.date : '';
+	if (aDate !== bDate) return aDate < bDate ? 1 : -1;
+	const aScan = typeof a.capturedAt === 'string' ? a.capturedAt : '';
+	const bScan = typeof b.capturedAt === 'string' ? b.capturedAt : '';
+	if (aScan !== bScan) return aScan < bScan ? 1 : -1;
+	return b.id.localeCompare(a.id);
 }
 
 function normalizeStoreName(value: string): string {
@@ -152,7 +180,7 @@ export async function loadReceipts(store: ScopedDataStore): Promise<Receipt[]> {
 		}
 	}
 
-	return receipts.sort((a, b) => receiptSortKey(b).localeCompare(receiptSortKey(a)));
+	return receipts.sort(compareReceiptsNewestFirst);
 }
 
 export async function loadRecentReceiptFromPaths(

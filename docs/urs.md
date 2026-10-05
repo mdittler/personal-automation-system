@@ -6597,6 +6597,9 @@ The receipt filename prefix and `PriceEntry.updatedAt` MUST use `capturedAt` (wa
 - `price-store.test.ts` > `updatePricesFromReceipt` > sets updatedAt from capturedAt (date-only) when capturedAt is present
 - `price-store.test.ts` > `updatePricesFromReceipt` > falls back to receipt.date for updatedAt when capturedAt is absent
 
+**Fixes:**
+- **Q2b (2026-10-05):** `capturedAt` remains the filename/`updatedAt` authority but is NOT the query-time recency order; "most recent receipt" orders by purchase `date` with `capturedAt` as same-day tiebreak (REQ-FOOD-RECEIPT-005).
+
 ---
 
 ### REQ-FOOD-RECEIPT-003 — Receipt detail Q&A MUST be answerable via the food handler; response MUST NOT exceed 4096 chars
@@ -6799,6 +6802,28 @@ Each priced line item processed by `updatePricesFromReceipt` SHALL produce a `Re
 **Standard tests:**
 - `price-store.test.ts` > `updatePricesFromReceipt` > logs a warning and excludes items rejected by isValidPriceEntry (batch 6, RC-P0)
 - `photo-handler.test.ts` > `priceUpdates` persistence
+
+---
+
+### REQ-FOOD-RECEIPT-005 — "Most recent receipt" MUST order by purchase date, with scan time only as the same-day tiebreak
+
+**Phase:** Priority Queue Q2(b) (2026-10-05) | **Status:** Implemented
+
+`loadReceipts` (the single ordering authority behind `findLatestReceipt`, and therefore behind every user-facing "last receipt" / "last trip to <store>" answer in `executeReceiptQuery`) SHALL sort newest-first by: (1) purchase `date` descending, compared as strict `YYYY-MM-DD` strings (chronological lexicographically; never parsed as an instant, so no UTC/local day shift); (2) receipts whose `date` is missing or not a real calendar date (empty, malformed, e.g. `2026-02-30`) sort after every validly dated receipt; (3) ties on date (or among undated receipts) break on `capturedAt` descending, a missing `capturedAt` sorting last; (4) final tiebreak on `id` descending for determinism. Scan time alone MUST NOT outrank a later purchase. The store-less "most recent" answer still prefers the receipt in the user's recent-interaction context (the one just scanned or discussed); that precedence is unchanged.
+
+**Standard tests:**
+- `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > older purchase scanned later sorts after newer purchase scanned earlier
+- `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > same-day receipts are ordered by capturedAt, newest scan first
+- `receipt-recency-order.test.ts` > `food handler "most recent receipt" entry point (REQ-FOOD-RECEIPT-005)` > answers with the newest purchase, not the most recently scanned one
+
+**Edge case tests:**
+- `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > receipts with an empty or unparseable date sort after every validly dated receipt
+- `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > a receipt missing capturedAt sorts after same-day receipts that have one
+- `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > findLatestReceipt with a store name returns that store's newest purchase
+- `receipt-recency-order.test.ts` > `food handler "most recent receipt" entry point (REQ-FOOD-RECEIPT-005)` > store-specific query ("last trip to Costco") also uses purchase date
+
+**Fixes:**
+- **Q2b (2026-10-05):** `receiptSortKey` returned `capturedAt || date`, so a month-old receipt scanned today outranked yesterday's purchase. Replaced by `compareReceiptsNewestFirst` (rule above). No regression fixture or oracle encoded scan-time order (`regression/fixtures/chatbot/seed.json` is ordered identically either way).
 
 ---
 
@@ -13388,6 +13413,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-HEALTH-NEG-001 | health-payload-shape.test.ts, events-subscribers.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-SPEND-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-RECEIPT-004 | price-store.test.ts, photo-handler.test.ts | 2 | 0 | Implemented |
+| REQ-FOOD-RECEIPT-005 | receipt-recency-order.test.ts | 3 | 4 | Implemented |
 | REQ-CONV-KIND-001 | kinds-sidecar.test.ts | 3 | 4 | Implemented |
 | REQ-CONV-KIND-002 | context-entry-decoration.test.ts | 3 | 1 | Implemented |
 | REQ-CONV-KIND-003 | context-store-save.integration.test.ts | 3 | 3 | Implemented |
@@ -13621,4 +13647,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **446 test files** | **3076** | **3007** | **6083 tests** |
+| **Totals** | **447 test files** | **3079** | **3011** | **6090 tests** |
