@@ -4253,13 +4253,13 @@ Round 2 left only R2-1 (non-critical, dispositioned) → loop stopped. Simplify 
 | id | sev | finding | disposition |
 |---|---|---|---|
 | R1-1 | major | `repairStoreName` capped at 10 passes, so deeper corruption persists | fixed-in-code 1f12297 — loops until unwrapped (cap = input length); tests "repairs 12/15 accumulated layers…", "repair is bounded by input length…" (mechanical proof observed by conductor) |
-| R1-2 | major | store-less "most recent receipt" still prefers the receipt from the 10-minute interaction context over purchase-date order | operator — see gate decision below |
+| R1-2 | major | store-less "most recent receipt" still prefers the receipt from the 10-minute interaction context over purchase-date order | operator → fixed-in-code cf8d53e — "most recent/latest/last" questions use purchase date; deictic follow-ups keep the recent receipt; tests: `receipt-recency-order.test.ts` > `asksForLatestReceipt classifier`, `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` |
 | R1-3 | major | far-future typo date pins "most recent"; non-padded dates sort as invalid | declined — unreachable through app writers: `isValidReceiptDate` (`receipt-parser.ts:26`) rejects future, non-padded and >90-day dates at capture. Accepted failure mode: a hand-edited receipt file with a future date stays on top |
 | R1-4 | minor | no separator collapse or trailing-slash strip in canonical paths | fixed-in-code 1f12297 — table rows in `canonical-paths.test.ts` (mechanical proof observed) |
 | R1-5 | minor | `record()` with no household context keeps legacy paths | declined — claim not established: all 7 `record()` sites are router-dispatched handlers that run inside a household request context |
 | R1-6 | minor | reviewer could not mutation-test | declined — reviewer tooling, not a code defect |
 | R2-1 | major | reviewer could not run tests (pnpm fetch failure; EPERM on `.vite-temp`) | declined — tooling; fixed for round 3 with `--add-dir` for node_modules and a direct vitest binary |
-| R2-2 | minor | restates R1-2 | operator (as R1-2) |
+| R2-2 | minor | restates R1-2 | operator → fixed-in-code cf8d53e — "most recent/latest/last" questions use purchase date; deictic follow-ups keep the recent receipt; tests: `receipt-recency-order.test.ts` > `asksForLatestReceipt classifier`, `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` |
 | R3-1 | minor | the `.`-segment guard lacks a regression test | declined — claim false: removing the guard fails `toCanonicalInteractionPath > users/shared/./food/a.yaml -> null` (1 failed / 16 passed); the reviewer's `-t` filter excluded that row |
 
 Round 3 (confirming, full scope) raised no new code defect, so the loop stopped. The Sonnet simplify pass found nothing to change.

@@ -6812,21 +6812,29 @@ Each priced line item processed by `updatePricesFromReceipt` SHALL produce a `Re
 
 **Phase:** Priority Queue Q2(b) (2026-10-05) | **Status:** Implemented
 
-`loadReceipts` (the single ordering authority behind `findLatestReceipt`, and therefore behind every user-facing "last receipt" / "last trip to <store>" answer in `executeReceiptQuery`) SHALL sort newest-first by: (1) purchase `date` descending, compared as strict `YYYY-MM-DD` strings (chronological lexicographically; never parsed as an instant, so no UTC/local day shift); (2) receipts whose `date` is missing or not a real calendar date (empty, malformed, e.g. `2026-02-30`) sort after every validly dated receipt; (3) ties on date (or among undated receipts) break on `capturedAt` descending, a missing `capturedAt` sorting last; (4) final tiebreak on `id` descending for determinism. Scan time alone MUST NOT outrank a later purchase. The store-less "most recent" answer still prefers the receipt in the user's recent-interaction context (the one just scanned or discussed); that precedence is unchanged.
+`loadReceipts` (the single ordering authority behind `findLatestReceipt`, and therefore behind every user-facing "last receipt" / "last trip to <store>" answer in `executeReceiptQuery`) SHALL sort newest-first by: (1) purchase `date` descending, compared as strict `YYYY-MM-DD` strings (chronological lexicographically; never parsed as an instant, so no UTC/local day shift); (2) receipts whose `date` is missing or not a real calendar date (empty, malformed, e.g. `2026-02-30`) sort after every validly dated receipt; (3) ties on date (or among undated receipts) break on `capturedAt` descending, a missing `capturedAt` sorting last; (4) final tiebreak on `id` descending for determinism. Scan time alone MUST NOT outrank a later purchase. **Operator decision (2026-10-05, Q2 R1-2):** a store-less question that asks for the most recent / latest / newest / last receipt, trip, shopping or purchase (`asksForLatestReceipt`: recency word followed by an optional `grocery|shopping|food|store` and then `receipt|trip|shopping|purchase`) ALWAYS answers by purchase date via `findLatestReceipt`, even when a different receipt was just scanned or discussed. Deictic follow-ups that refer to a receipt just discussed ("what was on that receipt?", "how much was it?", "show me the receipt again") still prefer the receipt in the user's recent-interaction context, and fall back to the newest purchase when there is none. Store-named questions are unchanged (newest receipt for that store).
 
 **Standard tests:**
 - `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > older purchase scanned later sorts after newer purchase scanned earlier
 - `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > same-day receipts are ordered by capturedAt, newest scan first
 - `receipt-recency-order.test.ts` > `food handler "most recent receipt" entry point (REQ-FOOD-RECEIPT-005)` > answers with the newest purchase, not the most recently scanned one
+- `receipt-recency-order.test.ts` > `asksForLatestReceipt classifier (REQ-FOOD-RECEIPT-005, Q2 R1-2)` > matches recency wording
+- `receipt-recency-order.test.ts` > `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` > "%s" answers with the newest purchase even when an older receipt was just scanned
+- `receipt-recency-order.test.ts` > `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` > deictic follow-up "%s" still answers with the recent receipt
+- `receipt-recency-order.test.ts` > `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` > "how much was it?" with a recent receipt in context answers with the recent receipt
 
 **Edge case tests:**
 - `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > receipts with an empty or unparseable date sort after every validly dated receipt
 - `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > a receipt missing capturedAt sorts after same-day receipts that have one
 - `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > findLatestReceipt with a store name returns that store's newest purchase
 - `receipt-recency-order.test.ts` > `food handler "most recent receipt" entry point (REQ-FOOD-RECEIPT-005)` > store-specific query ("last trip to Costco") also uses purchase date
+- `receipt-recency-order.test.ts` > `asksForLatestReceipt classifier (REQ-FOOD-RECEIPT-005, Q2 R1-2)` > does not match deictic or unrelated wording
+- `receipt-recency-order.test.ts` > `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` > with no recent receipt, a deictic question falls back to the newest purchase (unchanged)
+- `receipt-recency-order.test.ts` > `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` > a store-named query is unchanged: newest receipt for that store, ignoring the recent receipt
 
 **Fixes:**
 - **Q2b (2026-10-05):** `receiptSortKey` returned `capturedAt || date`, so a month-old receipt scanned today outranked yesterday's purchase. Replaced by `compareReceiptsNewestFirst` (rule above). No regression fixture or oracle encoded scan-time order (`regression/fixtures/chatbot/seed.json` is ordered identically either way).
+- **Q2 R1-2 (2026-10-05, operator):** `executeReceiptQuery` preferred the recent-interaction receipt for every store-less question, so "what was on my most recent receipt?" could return an older purchase just scanned. Added `asksForLatestReceipt`; recency questions now use `findLatestReceipt`, deictic follow-ups keep the recent receipt.
 
 ---
 
@@ -13443,7 +13451,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-HEALTH-NEG-001 | health-payload-shape.test.ts, events-subscribers.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-SPEND-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-RECEIPT-004 | price-store.test.ts, photo-handler.test.ts | 2 | 0 | Implemented |
-| REQ-FOOD-RECEIPT-005 | receipt-recency-order.test.ts | 3 | 4 | Implemented |
+| REQ-FOOD-RECEIPT-005 | receipt-recency-order.test.ts | 7 | 7 | Implemented |
 | REQ-FOOD-INTERACTION-PATH-001 | canonical-paths.test.ts, interaction-path-canonical.integration.test.ts | 18 | 8 | Implemented |
 | REQ-CONV-KIND-001 | kinds-sidecar.test.ts | 3 | 4 | Implemented |
 | REQ-CONV-KIND-002 | context-entry-decoration.test.ts | 3 | 1 | Implemented |
@@ -13678,4 +13686,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **449 test files** | **3097** | **3021** | **6118 tests** |
+| **Totals** | **449 test files** | **3101** | **3024** | **6125 tests** |
