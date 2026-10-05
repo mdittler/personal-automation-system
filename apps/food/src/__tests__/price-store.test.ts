@@ -222,6 +222,111 @@ describe('price-store', () => {
 		});
 	});
 
+	describe('parsePriceFile store-name YAML round-trip (Q2a)', () => {
+		const makeData = (store: string): StorePriceData => ({
+			store,
+			slug: 'trader-joes',
+			lastUpdated: '2026-05-07',
+			items: [
+				{
+					name: 'Milk (1 gal)',
+					price: 3.89,
+					unit: '1 gal',
+					department: 'Dairy',
+					updatedAt: '2026-05-07',
+				},
+			],
+		});
+
+		/** Emulates the pre-fix reader: regex read of `store:` with no YAML unquoting. */
+		const legacyParseStore = (raw: string, slug: string): string => {
+			const fm = raw.match(/^---\n([\s\S]*?)\n---/);
+			const m = fm?.[1]?.match(/^store:\s*(.+)$/m);
+			return m?.[1]?.trim() ?? slug;
+		};
+
+		it.each([
+			["Trader Joe's"],
+			['Joe "The Butcher" Meats'],
+			['Fresh: Market'],
+			['Store #5'],
+			[' Leading Space Foods'],
+			['Café Müller 市場'],
+			['Back\\slash Market'],
+		])('store name %j survives repeated save/parse cycles with stable bytes', (name) => {
+			const first = formatPriceFile(makeData(name));
+			let bytes = first;
+			for (let i = 0; i < 4; i++) {
+				const parsed = parsePriceFile(bytes, 'trader-joes');
+				expect(parsed.store).toBe(name);
+				bytes = formatPriceFile(parsed);
+				expect(bytes).toBe(first);
+			}
+		});
+
+		it("repairs the live corrupted Trader Joe's store value (exact frontmatter line)", () => {
+			const raw = [
+				'---',
+				'store: "\\"\\\\\\"Trader Joe\'s\\\\\\"\\""',
+				'slug: trader-joes',
+				'last_updated: "2026-05-07"',
+				'item_count: 1',
+				'---',
+				'',
+				'## Dairy',
+				'- Milk (1 gal): $3.89 <!-- updated: 2026-05-07 -->',
+				'',
+			].join('\n');
+			expect(raw).toContain('store: "\\"\\\\\\"Trader Joe\'s\\\\\\"\\""');
+			expect(parsePriceFile(raw, 'trader-joes').store).toBe("Trader Joe's");
+		});
+
+		it('repairs a fixture built by saving through the old regex path three times', () => {
+			let bytes = formatPriceFile(makeData("Trader Joe's"));
+			for (let i = 0; i < 3; i++) {
+				bytes = formatPriceFile(makeData(legacyParseStore(bytes, 'trader-joes')));
+			}
+			expect(legacyParseStore(bytes, 'trader-joes')).not.toBe("Trader Joe's");
+			const repaired = parsePriceFile(bytes, 'trader-joes');
+			expect(repaired.store).toBe("Trader Joe's");
+			// Re-saving writes the clean single-layer form.
+			expect(formatPriceFile(repaired)).toBe(formatPriceFile(makeData("Trader Joe's")));
+		});
+
+		it('repair rule: a name fully wrapped in double quotes is treated as quoting residue and stripped', () => {
+			// Real store names are never wrapped in literal double quotes; a wrapped name
+			// can only be accumulated quoting (indistinguishable from a legitimate one).
+			expect(parsePriceFile(formatPriceFile(makeData('"Costco"')), 'trader-joes').store).toBe(
+				'Costco',
+			);
+		});
+
+		it('repair rule: quotes only on one end or in the middle are preserved', () => {
+			for (const name of ['"Costco', 'Costco"', 'Joe "The Butcher" Meats']) {
+				expect(parsePriceFile(formatPriceFile(makeData(name)), 'trader-joes').store).toBe(name);
+			}
+		});
+
+		it('repair rule: a wrapped name that strips to empty falls back to the slug', () => {
+			expect(parsePriceFile(formatPriceFile(makeData('""')), 'trader-joes').store).toBe(
+				'trader-joes',
+			);
+		});
+
+		it('repair is bounded: pathological nesting does not loop forever', () => {
+			let name = "Joe's";
+			for (let i = 0; i < 50; i++) name = `"${name}"`;
+			const parsed = parsePriceFile(formatPriceFile(makeData(name)), 'trader-joes');
+			expect(typeof parsed.store).toBe('string');
+		});
+
+		it('still reads last_updated and items alongside a quoted store', () => {
+			const parsed = parsePriceFile(formatPriceFile(makeData("Trader Joe's")), 'trader-joes');
+			expect(parsed.lastUpdated).toBe('2026-05-07');
+			expect(parsed.items).toHaveLength(1);
+		});
+	});
+
 	describe('loadStorePrices', () => {
 		it('returns parsed data from file', async () => {
 			const fileContent = [

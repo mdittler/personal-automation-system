@@ -6730,6 +6730,38 @@ The receipt-parser prompt (`buildReceiptPrompt`) and the price-update prompts (`
 
 ---
 
+### REQ-FOOD-PRICE-004 — `parsePriceFile` MUST YAML-parse the `store` frontmatter field; accumulated quoting MUST be repaired
+
+**Phase:** Priority Queue Q2(a) (2026-10-05) | **Status:** Implemented
+
+`parsePriceFile` SHALL read `store` and `last_updated` through the shared frontmatter parser (`parseFrontmatter`), the inverse of the `generateFrontmatter` writer, instead of regex-reading the raw line. A store name containing `'`, `"`, `:`, `#`, `\`, leading whitespace or non-ASCII characters SHALL survive any number of parse/save cycles unchanged, and the file bytes SHALL be stable after the first save. `generateFrontmatter` SHALL quote values with leading or trailing whitespace so they are not trimmed on read.
+
+**Repair rule:** files already corrupted by the former regex reader (e.g. `store: "\"\\\"Trader Joe's\\\"\""`) are repaired on read: while the parsed name is a fully double-quoted string (starts and ends with `"`, length >= 2) the wrapping quotes are stripped and `\"`/`\\` unescaped, bounded at 10 passes. A real store name is never wrapped in literal double quotes, so a wrapped name is treated as quoting residue (accepted ambiguity). Quotes at only one end or in the middle are preserved; a name that strips to empty falls back to the slug. The next save writes the clean form.
+
+**Standard tests:**
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Trader Joe's" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Joe \"The Butcher\" Meats" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Fresh: Market" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Store #5" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name " Leading Space Foods" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Café Müller 市場" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Back\\slash Market" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > still reads last_updated and items alongside a quoted store
+
+**Edge case tests:**
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repairs the live corrupted Trader Joe's store value (exact frontmatter line)
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repairs a fixture built by saving through the old regex path three times
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repair rule: a name fully wrapped in double quotes is treated as quoting residue and stripped
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repair rule: quotes only on one end or in the middle are preserved
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repair rule: a wrapped name that strips to empty falls back to the slug
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repair is bounded: pathological nesting does not loop forever
+- `frontmatter.test.ts` > generateFrontmatter — edge cases > quotes values with leading or trailing whitespace so they survive a roundtrip (Q2a)
+
+**Fixes:**
+- **Q2a (2026-10-05):** `parsePriceFile` regex-read `store:` without YAML-unquoting, so each save added a quoting layer to names containing `'` (live `prices/trader-joes.md`). Switched to `parseFrontmatter`, added the bounded repair above, and made `generateFrontmatter` quote whitespace-edged values. CL: Q2a-fix.
+
+---
+
 ### REQ-FOOD-HEALTH-NEG-001 — `HealthDailyMetricsPayload.metrics` MUST NOT contain `energyLevel` or `mood` fields
 
 **Phase:** Open-Items Cleanup Batch 4 (2026-05-07) | **Status:** Implemented
@@ -13352,6 +13384,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-PRICE-003.2 | unit-normalizer.test.ts | 12 | 26 | Implemented |
 | REQ-FOOD-PRICE-003.3 | receipt-query.test.ts | 0 | 2 | Implemented |
 | REQ-FOOD-PRICE-003.4 | prompt-content.test.ts, unit-normalizer.test.ts | 5 | 0 | Implemented |
+| REQ-FOOD-PRICE-004 | price-store.test.ts, frontmatter.test.ts | 8 | 7 | Implemented |
 | REQ-FOOD-HEALTH-NEG-001 | health-payload-shape.test.ts, events-subscribers.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-SPEND-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-RECEIPT-004 | price-store.test.ts, photo-handler.test.ts | 2 | 0 | Implemented |
@@ -13588,4 +13621,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **446 test files** | **3068** | **3000** | **6068 tests** |
+| **Totals** | **446 test files** | **3076** | **3007** | **6083 tests** |

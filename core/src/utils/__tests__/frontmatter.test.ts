@@ -196,6 +196,14 @@ describe('generateFrontmatter — edge cases', () => {
 		expect(meta.title).toBe('path\\to\\file');
 	});
 
+	it('quotes values with leading or trailing whitespace so they survive a roundtrip (Q2a)', () => {
+		for (const title of [' leading', 'trailing ', ' both ']) {
+			const result = generateFrontmatter({ title });
+			expect(result).toContain(`title: "${title}"`);
+			expect(parseFrontmatter(`${result}body`).meta.title).toBe(title);
+		}
+	});
+
 	it('handles values containing double quotes', () => {
 		const result = generateFrontmatter({ title: 'say "hello"' });
 		expect(result).toContain('"say \\"hello\\""');
