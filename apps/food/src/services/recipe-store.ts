@@ -2,7 +2,7 @@
  * Recipe store — CRUD operations and search for the recipe library.
  *
  * Recipes are stored as individual YAML files in shared scope:
- * data/users/shared/food/recipes/<id>.yaml
+ * data/households/<hh>/shared/food/recipes/<id>.yaml
  */
 
 import type { ScopedDataStore } from '@pas/core/types';

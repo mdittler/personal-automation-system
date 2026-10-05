@@ -6597,6 +6597,9 @@ The receipt filename prefix and `PriceEntry.updatedAt` MUST use `capturedAt` (wa
 - `price-store.test.ts` > `updatePricesFromReceipt` > sets updatedAt from capturedAt (date-only) when capturedAt is present
 - `price-store.test.ts` > `updatePricesFromReceipt` > falls back to receipt.date for updatedAt when capturedAt is absent
 
+**Fixes:**
+- **Q2b (2026-10-05):** `capturedAt` remains the filename/`updatedAt` authority but is NOT the query-time recency order; "most recent receipt" orders by purchase `date` with `capturedAt` as same-day tiebreak (REQ-FOOD-RECEIPT-005).
+
 ---
 
 ### REQ-FOOD-RECEIPT-003 — Receipt detail Q&A MUST be answerable via the food handler; response MUST NOT exceed 4096 chars
@@ -6730,6 +6733,41 @@ The receipt-parser prompt (`buildReceiptPrompt`) and the price-update prompts (`
 
 ---
 
+### REQ-FOOD-PRICE-004 — `parsePriceFile` MUST YAML-parse the `store` frontmatter field; accumulated quoting MUST be repaired
+
+**Phase:** Priority Queue Q2(a) (2026-10-05) | **Status:** Implemented
+
+`parsePriceFile` SHALL read `store` and `last_updated` through the shared frontmatter parser (`parseFrontmatter`), the inverse of the `generateFrontmatter` writer, instead of regex-reading the raw line. A store name containing `'`, `"`, `:`, `#`, `\`, leading whitespace or non-ASCII characters SHALL survive any number of parse/save cycles unchanged, and the file bytes SHALL be stable after the first save. `generateFrontmatter` SHALL quote values with leading or trailing whitespace so they are not trimmed on read.
+
+**Repair rule:** files already corrupted by the former regex reader (e.g. `store: "\"\\\"Trader Joe's\\\"\""`) are repaired on read: while the parsed name is a fully double-quoted string (starts and ends with `"`, length >= 2) the wrapping quotes are stripped and `\"`/`\\` unescaped. Each pass strictly shortens the string, so termination is guaranteed; the defensive pass cap is the input length, not a fixed constant. A real store name is never wrapped in literal double quotes, so a wrapped name is treated as quoting residue (accepted ambiguity). Quotes at only one end or in the middle are preserved; a name that strips to empty falls back to the slug. The next save writes the clean form.
+
+**Standard tests:**
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Trader Joe's" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Joe \"The Butcher\" Meats" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Fresh: Market" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Store #5" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name " Leading Space Foods" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Café Müller 市場" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > store name "Back\\slash Market" survives repeated save/parse cycles with stable bytes
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > still reads last_updated and items alongside a quoted store
+
+**Edge case tests:**
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repairs the live corrupted Trader Joe's store value (exact frontmatter line)
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repairs a fixture built by saving through the old regex path three times
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repair rule: a name fully wrapped in double quotes is treated as quoting residue and stripped
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repair rule: quotes only on one end or in the middle are preserved
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repair rule: a wrapped name that strips to empty falls back to the slug
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repair is bounded by input length: pathological nesting fully unwinds and terminates
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repairs 15 accumulated layers from the old buggy save back to Trader Joe's and re-saves clean
+- `price-store.test.ts` > price-store > parsePriceFile store-name YAML round-trip (Q2a) > repairs 25 accumulated layers from the old buggy save back to Trader Joe's and re-saves clean
+- `frontmatter.test.ts` > generateFrontmatter — edge cases > quotes values with leading or trailing whitespace so they survive a roundtrip (Q2a)
+
+**Fixes:**
+- **Q2a (2026-10-05):** `parsePriceFile` regex-read `store:` without YAML-unquoting, so each save added a quoting layer to names containing `'` (live `prices/trader-joes.md`). Switched to `parseFrontmatter`, added the bounded repair above, and made `generateFrontmatter` quote whitespace-edged values. CL: Q2a-fix.
+- **R1-1 (2026-10-05):** The repair loop stopped after 10 passes, so a file saved more than 10 times through the old reader kept residual quoting and kept accumulating. The loop now continues while the name is fully double-quoted, with a defensive cap of the input length. CL: R1-1-fix.
+
+---
+
 ### REQ-FOOD-HEALTH-NEG-001 — `HealthDailyMetricsPayload.metrics` MUST NOT contain `energyLevel` or `mood` fields
 
 **Phase:** Open-Items Cleanup Batch 4 (2026-05-07) | **Status:** Implemented
@@ -6767,6 +6805,63 @@ Each priced line item processed by `updatePricesFromReceipt` SHALL produce a `Re
 **Standard tests:**
 - `price-store.test.ts` > `updatePricesFromReceipt` > logs a warning and excludes items rejected by isValidPriceEntry (batch 6, RC-P0)
 - `photo-handler.test.ts` > `priceUpdates` persistence
+
+---
+
+### REQ-FOOD-RECEIPT-005 — "Most recent receipt" MUST order by purchase date, with scan time only as the same-day tiebreak
+
+**Phase:** Priority Queue Q2(b) (2026-10-05) | **Status:** Implemented
+
+`loadReceipts` (the single ordering authority behind `findLatestReceipt`, and therefore behind every user-facing "last receipt" / "last trip to <store>" answer in `executeReceiptQuery`) SHALL sort newest-first by: (1) purchase `date` descending, compared as strict `YYYY-MM-DD` strings (chronological lexicographically; never parsed as an instant, so no UTC/local day shift); (2) receipts whose `date` is missing or not a real calendar date (empty, malformed, e.g. `2026-02-30`) sort after every validly dated receipt; (3) ties on date (or among undated receipts) break on `capturedAt` descending, a missing `capturedAt` sorting last; (4) final tiebreak on `id` descending for determinism. Scan time alone MUST NOT outrank a later purchase. **Operator decision (2026-10-05, Q2 R1-2):** a store-less question that asks for the most recent / latest / newest / last receipt, trip, shopping or purchase (`asksForLatestReceipt`: recency word followed by an optional `grocery|shopping|food|store` and then `receipt|trip|shopping|purchase`) ALWAYS answers by purchase date via `findLatestReceipt`, even when a different receipt was just scanned or discussed. Deictic follow-ups that refer to a receipt just discussed ("what was on that receipt?", "how much was it?", "show me the receipt again") still prefer the receipt in the user's recent-interaction context, and fall back to the newest purchase when there is none. Store-named questions are unchanged (newest receipt for that store).
+
+**Standard tests:**
+- `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > older purchase scanned later sorts after newer purchase scanned earlier
+- `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > same-day receipts are ordered by capturedAt, newest scan first
+- `receipt-recency-order.test.ts` > `food handler "most recent receipt" entry point (REQ-FOOD-RECEIPT-005)` > answers with the newest purchase, not the most recently scanned one
+- `receipt-recency-order.test.ts` > `asksForLatestReceipt classifier (REQ-FOOD-RECEIPT-005, Q2 R1-2)` > matches recency wording
+- `receipt-recency-order.test.ts` > `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` > "%s" answers with the newest purchase even when an older receipt was just scanned
+- `receipt-recency-order.test.ts` > `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` > deictic follow-up "%s" still answers with the recent receipt
+- `receipt-recency-order.test.ts` > `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` > "how much was it?" with a recent receipt in context answers with the recent receipt
+
+**Edge case tests:**
+- `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > receipts with an empty or unparseable date sort after every validly dated receipt
+- `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > a receipt missing capturedAt sorts after same-day receipts that have one
+- `receipt-recency-order.test.ts` > `loadReceipts ordering (REQ-FOOD-RECEIPT-005)` > findLatestReceipt with a store name returns that store's newest purchase
+- `receipt-recency-order.test.ts` > `food handler "most recent receipt" entry point (REQ-FOOD-RECEIPT-005)` > store-specific query ("last trip to Costco") also uses purchase date
+- `receipt-recency-order.test.ts` > `asksForLatestReceipt classifier (REQ-FOOD-RECEIPT-005, Q2 R1-2)` > does not match deictic or unrelated wording
+- `receipt-recency-order.test.ts` > `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` > with no recent receipt, a deictic question falls back to the newest purchase (unchanged)
+- `receipt-recency-order.test.ts` > `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` > a store-named query is unchanged: newest receipt for that store, ignoring the recent receipt
+
+**Fixes:**
+- **Q2b (2026-10-05):** `receiptSortKey` returned `capturedAt || date`, so a month-old receipt scanned today outranked yesterday's purchase. Replaced by `compareReceiptsNewestFirst` (rule above). No regression fixture or oracle encoded scan-time order (`regression/fixtures/chatbot/seed.json` is ordered identically either way).
+- **Q2 R1-2 (2026-10-05, operator):** `executeReceiptQuery` preferred the recent-interaction receipt for every store-less question, so "what was on my most recent receipt?" could return an older purchase just scanned. Added `asksForLatestReceipt`; recency questions now use `findLatestReceipt`, deictic follow-ups keep the recent receipt.
+
+---
+
+### REQ-FOOD-INTERACTION-PATH-001 — Recorded interaction `filePaths` MUST be canonicalized to the household layout FileIndex uses
+
+**Phase:** Priority Queue Q2(c) (2026-10-05) | **Status:** Implemented
+
+`InteractionContextService.record()` SHALL be the single core-owned resolution point for interaction file paths. Given the request-context household (`getCurrentHouseholdId()`), it SHALL rewrite scope-relative paths emitted by apps into the canonical form FileIndex stores, so DataQuery's exact-match `recentFilePaths` hints (and `/edit`'s, via the same plumbing) match index entries: `users/shared/<app>/…` becomes `households/<hh>/shared/<app>/…`; `users/<userId>/<app>/…` and `spaces/<spaceId>/<app>/…` become `households/<hh>/users/…` / `households/<hh>/spaces/…`. A path already in `households/<id>/…` form SHALL be kept only when `<id>` is the current household and dropped otherwise (household boundary); absolute, null-byte, `..`, and `.` paths SHALL be dropped (a `.` segment is rejected, not collapsed; `..` is rejected, not resolved). After those rejections, runs of `/` SHALL be collapsed and a trailing `/` stripped so the result exact-matches FileIndex. `collaborations/…` passes through. With no household in context (system callers) the household prefix is omitted, but separator collapsing still applies. Apps (Food) SHALL NOT hand-build `households/<hh>/` strings. Entries persisted to disk before this fix keep their legacy `users/shared/…` form on load; they never equal a FileIndex path (harmless — no hint, no leak) and age out via the 10-minute TTL, so no on-read migration is performed.
+
+**Standard tests:**
+- `canonical-paths.test.ts` > toCanonicalInteractionPath > users/shared/food/recipes/a.yaml -> households/hh1/shared/food/recipes/a.yaml (plus the other table rows: user scope, space scope, backslash input, repeated separators `users//shared/food/a.yaml`, trailing slash `users/shared/food/a.yaml/`, rejected `.` segment `users/shared/./food/a.yaml`, already-canonical, collaborations)
+- `canonical-paths.test.ts` > InteractionContextServiceImpl.record — canonicalization > rewrites scoped paths using the request-context household
+- `interaction-path-canonical.integration.test.ts` > Q2(c) recent-interaction paths match FileIndex (real Food path -> real DataQuery) > one test per Food recording site: `index.ts recipe_saved (text)`, `index.ts grocery_updated (text)`, `index.ts meal_plan_finalized (text)`, `index.ts price_updated (text)`, `photo.ts receipt_captured (shared)`, `photo.ts receipt_captured (space)`, `photo.ts recipe_saved (shared)`, `photo.ts grocery_updated (shared)`
+
+**Edge case tests:**
+- `canonical-paths.test.ts` > toCanonicalInteractionPath > drops a path that names a different household (boundary)
+- `canonical-paths.test.ts` > toCanonicalInteractionPath > drops traversal, absolute and null-byte paths
+- `canonical-paths.test.ts` > toCanonicalInteractionPath > passes everything through unchanged when there is no household context
+- `canonical-paths.test.ts` > InteractionContextServiceImpl.record — canonicalization > discards foreign-household paths but keeps the rest of the entry
+- `canonical-paths.test.ts` > InteractionContextServiceImpl.record — canonicalization > leaves paths untouched outside a household request context
+- `canonical-paths.test.ts` > InteractionContextServiceImpl.record — canonicalization > keeps an entry with no filePaths unchanged
+- `canonical-paths.test.ts` > persisted legacy-form entries (written before Q2c) > load unchanged (harmless: never match a FileIndex path) and age out via the 10-minute TTL
+- `interaction-path-canonical.integration.test.ts` > Q2(c) recent-interaction paths match FileIndex (real Food path -> real DataQuery) > household boundary: household B never gets a hint for a household A file
+
+**Fixes:**
+- **Q2c (2026-10-05):** Food recorded `users/shared/food/…` (and `spaces/<id>/food/…`) while FileIndex indexes `households/<hh>/shared/food/…`, so `DataQueryServiceImpl.query`'s `priorityPaths.has(e.path)` never matched and no file was ever flagged `[recent interaction]`. Fixed once in core (`toCanonicalInteractionPath`, applied in `record()`); the eight Food sites are unchanged and every other consumer of `getRecent()` benefits. Receipt follow-up (`loadRecentReceiptFromPaths`) is unaffected: it matches on the `receipts/<file>.yaml` suffix.
+- **R1-4 (2026-10-05):** Repeated separators (`users//shared/food/x`) and a trailing slash never exact-matched FileIndex. After traversal, null-byte, and absolute rejection, runs of `/` are collapsed and a trailing `/` is stripped. A `.` segment is rejected rather than resolved. CL: R1-4-fix.
 
 ---
 
@@ -13352,9 +13447,12 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-FOOD-PRICE-003.2 | unit-normalizer.test.ts | 12 | 26 | Implemented |
 | REQ-FOOD-PRICE-003.3 | receipt-query.test.ts | 0 | 2 | Implemented |
 | REQ-FOOD-PRICE-003.4 | prompt-content.test.ts, unit-normalizer.test.ts | 5 | 0 | Implemented |
+| REQ-FOOD-PRICE-004 | price-store.test.ts, frontmatter.test.ts | 8 | 9 | Implemented |
 | REQ-FOOD-HEALTH-NEG-001 | health-payload-shape.test.ts, events-subscribers.test.ts | 3 | 0 | Implemented |
 | REQ-FOOD-SPEND-001 | receipt-prompt-loop.test.ts | 1 | 0 | Implemented |
 | REQ-FOOD-RECEIPT-004 | price-store.test.ts, photo-handler.test.ts | 2 | 0 | Implemented |
+| REQ-FOOD-RECEIPT-005 | receipt-recency-order.test.ts | 7 | 7 | Implemented |
+| REQ-FOOD-INTERACTION-PATH-001 | canonical-paths.test.ts, interaction-path-canonical.integration.test.ts | 18 | 8 | Implemented |
 | REQ-CONV-KIND-001 | kinds-sidecar.test.ts | 3 | 4 | Implemented |
 | REQ-CONV-KIND-002 | context-entry-decoration.test.ts | 3 | 1 | Implemented |
 | REQ-CONV-KIND-003 | context-store-save.integration.test.ts | 3 | 3 | Implemented |
@@ -13588,4 +13686,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **446 test files** | **3068** | **3000** | **6068 tests** |
+| **Totals** | **449 test files** | **3101** | **3024** | **6125 tests** |

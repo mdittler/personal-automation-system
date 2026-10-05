@@ -20,7 +20,7 @@ import { dirname, join } from 'node:path';
 import type pino from 'pino';
 import { withFileLock } from '../../utils/file-mutex.js';
 import { atomicWrite } from '../../utils/file.js';
-import { getCurrentUserId } from '../context/request-context.js';
+import { getCurrentHouseholdId, getCurrentUserId } from '../context/request-context.js';
 import { UserBoundaryError } from '../household/index.js';
 
 /** A single recorded interaction event. */
@@ -42,7 +42,16 @@ export interface InteractionEntry {
 	entityType?: string;
 	/** Stable identifier for the primary entity. */
 	entityId?: string;
-	/** Canonical data file paths written or referenced during this interaction. */
+	/**
+	 * Data file paths written or referenced during this interaction.
+	 *
+	 * Callers may pass the scope-relative layout (`users/shared/<app>/…`,
+	 * `users/<userId>/<app>/…`, `spaces/<spaceId>/<app>/…`). `record()` rewrites
+	 * them into the household layout FileIndex uses (`households/<hh>/…`) from the
+	 * request-context household, so DataQuery's exact-match `recentFilePaths`
+	 * hints line up. Apps must not hand-build `households/<hh>/` strings; a path
+	 * naming a different household than the current one is dropped.
+	 */
 	filePaths?: string[];
 	/** Data scope of the interaction. */
 	scope?: 'user' | 'shared' | 'space';
@@ -119,6 +128,45 @@ const MAX_FILE_PATH_LEN = 512;
 const MAX_FILE_PATHS_COUNT = 20;
 const MAX_METADATA_VALUE_LEN = 512;
 const MAX_METADATA_KEYS = 20;
+
+/**
+ * Resolve an app-supplied interaction path to the canonical form FileIndex
+ * stores (`households/<hh>/…`). Single core-owned resolution point (Q2c).
+ *
+ * - No household in context: separators are still collapsed, then the path is returned without a household prefix (system/pre-migration callers).
+ * - `users/shared/…` becomes `households/<hh>/shared/…`; other `users/…` and `spaces/…`: prefixed with `households/<householdId>/`.
+ * - `households/<id>/…`: kept only when `<id>` is the current household.
+ * - `collaborations/…` and anything else: unchanged (cross-household access is
+ *   membership-checked by DataQuery, not by path).
+ * - Absolute, null-byte, `..`, or `.` segments: dropped (`null`). A `.` segment is
+ *   rejected, not collapsed — `path.normalize` would resolve `.` and `..`.
+ * - After those rejections, runs of `/` are collapsed and a trailing `/` is
+ *   stripped so the result exact-matches FileIndex. `..` is never resolved.
+ */
+export function toCanonicalInteractionPath(
+	path: string,
+	householdId: string | undefined,
+): string | null {
+	const normalized = path.replace(/\\/g, '/');
+	if (normalized.includes('\0') || normalized.startsWith('/')) return null;
+	const segments = normalized.split('/');
+	// Reject before collapsing separators. Do not resolve `.` or `..`.
+	if (segments.includes('..') || segments.includes('.')) return null;
+	let collapsed = normalized.replace(/\/+/g, '/');
+	if (collapsed.endsWith('/')) collapsed = collapsed.replace(/\/+$/, '');
+	if (householdId === undefined) return collapsed;
+
+	// Legacy shared layout `users/shared/<app>/…` is `households/<hh>/shared/<app>/…`.
+	if (collapsed.startsWith('users/shared/')) {
+		return `households/${householdId}/${collapsed.slice('users/'.length)}`;
+	}
+	const top = collapsed.split('/', 1)[0];
+	if (top === 'users' || top === 'spaces') return `households/${householdId}/${collapsed}`;
+	if (top === 'households') {
+		return collapsed.startsWith(`households/${householdId}/`) ? collapsed : null;
+	}
+	return collapsed;
+}
 
 /**
  * Type guard that validates an InteractionEntry from untrusted data.
@@ -212,6 +260,12 @@ export class InteractionContextServiceImpl implements InteractionContextService 
 
 	record(userId: string, entry: Omit<InteractionEntry, 'timestamp'>): void {
 		const stamped: InteractionEntry = { ...entry, timestamp: this.clock() };
+		if (entry.filePaths) {
+			const householdId = getCurrentHouseholdId();
+			stamped.filePaths = entry.filePaths
+				.map((p) => toCanonicalInteractionPath(p, householdId))
+				.filter((p): p is string => p !== null);
+		}
 
 		let buffer = this.store.get(userId);
 		if (!buffer) {

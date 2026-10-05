@@ -8,7 +8,7 @@
 
 import type { CoreServices, ScopedDataStore } from '@pas/core/types';
 import { withFileLock } from '@pas/core/utils/file-mutex';
-import { buildAppTags, generateFrontmatter } from '@pas/core/utils/frontmatter';
+import { buildAppTags, generateFrontmatter, parseFrontmatter } from '@pas/core/utils/frontmatter';
 import type { PriceEntry, Receipt, ReceiptPriceUpdate, StorePriceData } from '../types.js';
 import { sanitizeInput } from '../utils/sanitize.js';
 import { parseSizeString } from './unit-normalizer.js';
@@ -81,6 +81,30 @@ function extractUnit(name: string): string {
 	return match?.[1] ?? '';
 }
 
+/**
+ * Repair store names corrupted by the pre-fix regex reader (Q2a).
+ *
+ * Rule: while the name is a fully double-quoted string (starts and ends with `"`,
+ * length >= 2), strip the wrapping quotes and unescape `\"` / `\\`. A real store
+ * name is never wrapped in literal double quotes, so a wrapped name can only be
+ * accumulated quoting. Quotes at one end only, or in the middle, are untouched.
+ *
+ * Each pass slices off the wrapping quote pair before unescaping, so the string
+ * strictly shortens and termination is guaranteed. The pass cap is the input
+ * length (a defensive bound), not a fixed constant.
+ */
+function repairStoreName(name: string): string {
+	let value = name;
+	const maxPasses = value.length;
+	for (let i = 0; i < maxPasses; i++) {
+		if (value.length < 2 || !value.startsWith('"') || !value.endsWith('"')) break;
+		const next = value.slice(1, -1).replace(/\\(["\\])/g, '$1');
+		if (next.length >= value.length) break;
+		value = next;
+	}
+	return value;
+}
+
 export function parsePriceFile(raw: string, slug: string): StorePriceData {
 	if (!raw.trim()) {
 		return { store: slug, slug, lastUpdated: '', items: [] };
@@ -88,14 +112,16 @@ export function parsePriceFile(raw: string, slug: string): StorePriceData {
 
 	let store = slug;
 	let lastUpdated = '';
-	const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
-	if (fmMatch) {
-		const fmBlock = fmMatch[1] ?? '';
-		const storeMatch = fmBlock.match(/^store:\s*(.+)$/m);
-		if (storeMatch) store = storeMatch[1]?.trim() ?? store;
-		const dateMatch = fmBlock.match(/^last_updated:\s*"?(\d{4}-\d{2}-\d{2})"?$/m);
-		if (dateMatch) lastUpdated = dateMatch[1] ?? '';
+	// Frontmatter is written by generateFrontmatter (YAML-quoted when needed), so it
+	// must be read by the matching parser — a regex read leaves the quoting layer in
+	// place and every save adds another one (Q2a).
+	const { meta } = parseFrontmatter(raw);
+	if (typeof meta.store === 'string' && meta.store.trim()) {
+		store = repairStoreName(meta.store) || slug;
 	}
+	const dateMatch =
+		typeof meta.last_updated === 'string' ? meta.last_updated.match(/^(\d{4}-\d{2}-\d{2})$/) : null;
+	if (dateMatch) lastUpdated = dateMatch[1] ?? '';
 
 	const items: PriceEntry[] = [];
 	let currentDept = 'Other';

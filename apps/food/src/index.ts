@@ -216,6 +216,7 @@ import {
 	withPriceLock,
 } from './services/price-store.js';
 import {
+	asksForLatestReceipt,
 	extractPriceItem,
 	findLatestReceipt,
 	findMentionedPriceStore,
@@ -3652,7 +3653,9 @@ async function executeReceiptQuery(text: string, ctx: MessageContext): Promise<E
 	const storeName = findMentionedReceiptStore(text, receipts);
 	const receipt = storeName
 		? findLatestReceipt(receipts, storeName)
-		: (recentReceipt ?? findLatestReceipt(receipts));
+		: asksForLatestReceipt(text)
+			? findLatestReceipt(receipts)
+			: (recentReceipt ?? findLatestReceipt(receipts));
 
 	if (!receipt) {
 		await services.telegram.send(ctx.userId, 'I do not have any grocery receipts saved yet.');

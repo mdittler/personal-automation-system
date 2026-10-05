@@ -1,4 +1,5 @@
 import type { CoreServices } from '@pas/core/types';
+import { generateFrontmatter } from '@pas/core/utils/frontmatter';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	addOrUpdatePrice,
@@ -219,6 +220,137 @@ describe('price-store', () => {
 			// The reloaded unit must be parseable by parseSizeString so that
 			// unit-price comparison works after the round-trip.
 			expect(reloadedEntry?.unit).toBe('12 oz');
+		});
+	});
+
+	describe('parsePriceFile store-name YAML round-trip (Q2a)', () => {
+		const makeData = (store: string): StorePriceData => ({
+			store,
+			slug: 'trader-joes',
+			lastUpdated: '2026-05-07',
+			items: [
+				{
+					name: 'Milk (1 gal)',
+					price: 3.89,
+					unit: '1 gal',
+					department: 'Dairy',
+					updatedAt: '2026-05-07',
+				},
+			],
+		});
+
+		/** Emulates the pre-fix reader: regex read of `store:` with no YAML unquoting. */
+		const legacyParseStore = (raw: string, slug: string): string => {
+			const fm = raw.match(/^---\n([\s\S]*?)\n---/);
+			const m = fm?.[1]?.match(/^store:\s*(.+)$/m);
+			return m?.[1]?.trim() ?? slug;
+		};
+
+		it.each([
+			["Trader Joe's"],
+			['Joe "The Butcher" Meats'],
+			['Fresh: Market'],
+			['Store #5'],
+			[' Leading Space Foods'],
+			['Café Müller 市場'],
+			['Back\\slash Market'],
+		])('store name %j survives repeated save/parse cycles with stable bytes', (name) => {
+			const first = formatPriceFile(makeData(name));
+			let bytes = first;
+			for (let i = 0; i < 4; i++) {
+				const parsed = parsePriceFile(bytes, 'trader-joes');
+				expect(parsed.store).toBe(name);
+				bytes = formatPriceFile(parsed);
+				expect(bytes).toBe(first);
+			}
+		});
+
+		it("repairs the live corrupted Trader Joe's store value (exact frontmatter line)", () => {
+			const raw = [
+				'---',
+				'store: "\\"\\\\\\"Trader Joe\'s\\\\\\"\\""',
+				'slug: trader-joes',
+				'last_updated: "2026-05-07"',
+				'item_count: 1',
+				'---',
+				'',
+				'## Dairy',
+				'- Milk (1 gal): $3.89 <!-- updated: 2026-05-07 -->',
+				'',
+			].join('\n');
+			expect(raw).toContain('store: "\\"\\\\\\"Trader Joe\'s\\\\\\"\\""');
+			expect(parsePriceFile(raw, 'trader-joes').store).toBe("Trader Joe's");
+		});
+
+		it('repairs a fixture built by saving through the old regex path three times', () => {
+			let bytes = formatPriceFile(makeData("Trader Joe's"));
+			for (let i = 0; i < 3; i++) {
+				bytes = formatPriceFile(makeData(legacyParseStore(bytes, 'trader-joes')));
+			}
+			expect(legacyParseStore(bytes, 'trader-joes')).not.toBe("Trader Joe's");
+			const repaired = parsePriceFile(bytes, 'trader-joes');
+			expect(repaired.store).toBe("Trader Joe's");
+			// Re-saving writes the clean single-layer form.
+			expect(formatPriceFile(repaired)).toBe(formatPriceFile(makeData("Trader Joe's")));
+		});
+
+		it('repair rule: a name fully wrapped in double quotes is treated as quoting residue and stripped', () => {
+			// Real store names are never wrapped in literal double quotes; a wrapped name
+			// can only be accumulated quoting (indistinguishable from a legitimate one).
+			expect(parsePriceFile(formatPriceFile(makeData('"Costco"')), 'trader-joes').store).toBe(
+				'Costco',
+			);
+		});
+
+		it('repair rule: quotes only on one end or in the middle are preserved', () => {
+			for (const name of ['"Costco', 'Costco"', 'Joe "The Butcher" Meats']) {
+				expect(parsePriceFile(formatPriceFile(makeData(name)), 'trader-joes').store).toBe(name);
+			}
+		});
+
+		it('repair rule: a wrapped name that strips to empty falls back to the slug', () => {
+			expect(parsePriceFile(formatPriceFile(makeData('""')), 'trader-joes').store).toBe(
+				'trader-joes',
+			);
+		});
+
+		it('repair is bounded by input length: pathological nesting fully unwinds and terminates', () => {
+			// More layers than the old fixed cap of 10. The defensive bound is the
+			// input length; each pass shortens the string, so this terminates.
+			let name = "Joe's";
+			for (let i = 0; i < 50; i++) name = `"${name}"`;
+			const parsed = parsePriceFile(formatPriceFile(makeData(name)), 'trader-joes');
+			expect(parsed.store).toBe("Joe's");
+		});
+
+		it.each([12, 15])(
+			"repairs %i accumulated layers from the old buggy save back to Trader Joe's and re-saves clean",
+			(layers) => {
+				// Same cycle as the three-save fixture: regex-read `store:` (no YAML
+				// unquoting) and write that string back through the real frontmatter
+				// quoter. Only the store line is spliced back in — the old reader never
+				// re-read entity_keys, and rewriting the whole file each pass duplicates
+				// the name until deep layers exhaust the heap.
+				let bytes = formatPriceFile(makeData("Trader Joe's"));
+				for (let i = 0; i < layers; i++) {
+					const legacy = legacyParseStore(bytes, 'trader-joes');
+					const storeLine = generateFrontmatter({ store: legacy }).match(/^store: .+$/m)?.[0];
+					if (!storeLine) throw new Error('buggy save did not emit a store line');
+					bytes = bytes.replace(/^store: .+$/m, () => storeLine);
+				}
+				expect(legacyParseStore(bytes, 'trader-joes')).not.toBe("Trader Joe's");
+				const repaired = parsePriceFile(bytes, 'trader-joes');
+				expect(repaired.store).toBe("Trader Joe's");
+				expect(formatPriceFile(repaired)).toBe(formatPriceFile(makeData("Trader Joe's")));
+			},
+			// Quoting grows ~2x per layer; 15 layers stays well under the default timeout.
+			30_000,
+		);
+
+		it('still reads last_updated and items alongside a quoted store', () => {
+			const parsed = parsePriceFile(formatPriceFile(makeData("Trader Joe's")), 'trader-joes');
+			expect(parsed.lastUpdated).toBe('2026-05-07');
+			expect(parsed.items).toHaveLength(1);
 		});
 	});
 

@@ -29,6 +29,17 @@ const RECEIPTS_DIR = 'receipts';
 const EXPLICIT_RECEIPT_RE = /\b(receipt|last\s+trip|trip\s+to|shopping\s+trip)\b/i;
 const RECEIPT_FOLLOW_UP_RE =
 	/\b(line\s*items?|items?|total|break\s*out|price\s+of\s+each|each\s+item|what\s+(?:did|was)\s+(?:i|we))\b/i;
+// Recency wording tied to a receipt/trip noun, so "what did I pay last time for milk",
+// "the latest one", and "the last thing on that receipt" do not match.
+const LATEST_RECEIPT_RE =
+	/\b(?:most\s+recent|latest|newest|last|previous)\s+(?:(?:grocery|shopping|food|store)\s+)?(?:receipt|trip|shopping|purchase)\b/i;
+const LAST_TIME_SHOPPING_RE =
+	/\blast\s+time\s+I\s+(?:went|was|did)\s+(?:(?:grocery|food)\s+)?shopping\b/i;
+// Routing-only subset: trip wording that EXPLICIT_RECEIPT_RE misses. Deliberately excludes
+// the `shopping`/`purchase` nouns so "my last shopping list" / "last purchase of milk" keep
+// routing to their own handlers.
+const RECENT_TRIP_RE =
+	/\b(?:most\s+recent|latest|newest|last|previous)\s+(?:(?:grocery|shopping|food|store)\s+)?trip\b/i;
 const NEW_STATUS_RE = /\b(new|added|updated|price(?:s)?\s+updated)\b/i;
 const PRICE_LOOKUP_RE =
 	/\b(cheapest|how\s+much\s+(?:are|is|was|were)|price\s+(?:of|for)|cost\s+(?:of|for))\b/i;
@@ -74,8 +85,36 @@ function isReceipt(value: unknown): value is Receipt {
 	);
 }
 
-function receiptSortKey(receipt: Receipt): string {
-	return receipt.capturedAt || `${receipt.date}T00:00:00.000Z`;
+/**
+ * True for a real calendar date in strict YYYY-MM-DD form (the format
+ * receipt-parser stores). Pure string/UTC arithmetic: no timezone shift.
+ */
+function isCalendarDate(value: unknown): value is string {
+	if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+	const d = new Date(`${value}T00:00:00.000Z`);
+	return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * "Most recent receipt" ordering (newest first), REQ-FOOD-RECEIPT-005:
+ *   1. Purchase `date` descending. YYYY-MM-DD strings are compared
+ *      lexicographically, which is chronological and never parsed as an
+ *      instant, so there is no UTC/local day shift.
+ *   2. Receipts whose date is missing or not a real calendar date sort after
+ *      every validly dated receipt (we cannot place them in time).
+ *   3. Ties (same date, or both undated) break on `capturedAt` descending
+ *      (scan time); a missing capturedAt sorts last.
+ *   4. Final tiebreak on `id` descending, for a deterministic order.
+ * Scan time alone must never outrank a later purchase.
+ */
+function compareReceiptsNewestFirst(a: Receipt, b: Receipt): number {
+	const aDate = isCalendarDate(a.date) ? a.date : '';
+	const bDate = isCalendarDate(b.date) ? b.date : '';
+	if (aDate !== bDate) return aDate < bDate ? 1 : -1;
+	const aScan = typeof a.capturedAt === 'string' ? a.capturedAt : '';
+	const bScan = typeof b.capturedAt === 'string' ? b.capturedAt : '';
+	if (aScan !== bScan) return aScan < bScan ? 1 : -1;
+	return b.id.localeCompare(a.id);
 }
 
 function normalizeStoreName(value: string): string {
@@ -152,7 +191,7 @@ export async function loadReceipts(store: ScopedDataStore): Promise<Receipt[]> {
 		}
 	}
 
-	return receipts.sort((a, b) => receiptSortKey(b).localeCompare(receiptSortKey(a)));
+	return receipts.sort(compareReceiptsNewestFirst);
 }
 
 export async function loadRecentReceiptFromPaths(
@@ -174,8 +213,21 @@ export async function loadRecentReceiptFromPaths(
 
 export function isReceiptQueryIntent(text: string, hasRecentReceiptContext = false): boolean {
 	return (
-		EXPLICIT_RECEIPT_RE.test(text) || (hasRecentReceiptContext && RECEIPT_FOLLOW_UP_RE.test(text))
+		EXPLICIT_RECEIPT_RE.test(text) ||
+		RECENT_TRIP_RE.test(text) ||
+		LAST_TIME_SHOPPING_RE.test(text) ||
+		(hasRecentReceiptContext && RECEIPT_FOLLOW_UP_RE.test(text))
 	);
+}
+
+/**
+ * True when the user asks for the most recent / latest / last / previous receipt or trip,
+ * including "last time I went shopping".
+ * Such questions always answer by purchase date; deictic follow-ups ("that receipt")
+ * keep using the receipt in the interaction context. (Q2 R1-2, operator decision.)
+ */
+export function asksForLatestReceipt(text: string): boolean {
+	return LATEST_RECEIPT_RE.test(text) || LAST_TIME_SHOPPING_RE.test(text);
 }
 
 export function isPriceLookupIntent(text: string): boolean {

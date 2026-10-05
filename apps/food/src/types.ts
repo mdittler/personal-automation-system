@@ -288,7 +288,7 @@ export interface Receipt {
 	tax: number | null;
 	total: number;
 	photoPath: string; // path to original photo in data store
-	capturedAt: string; // ISO datetime — canonical sort authority
+	capturedAt: string; // ISO datetime — filename/updatedAt authority; recency tiebreak after `date` (REQ-FOOD-RECEIPT-005)
 	priceUpdates?: ReceiptPriceUpdate[];
 	/** Integrity-check warnings raised by validateReceiptIntegrity; omitted when clean. */
 	verification_warnings?: ReceiptVerificationWarning[];

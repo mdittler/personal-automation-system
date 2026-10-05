@@ -4230,6 +4230,48 @@ Round 2 left only R2-1 (non-critical, dispositioned) → loop stopped. Simplify 
 
 ---
 
+## Q2 Fix — Food data fixes: store-name quoting, receipt recency, interaction paths (2026-10-05)
+
+**Defects** (`docs/open-items.md` "Food data bugs (found 2026-10-05)"):
+- (a) `parsePriceFile` regex-read `store:` without YAML-unquoting, so every save added a quoting layer.
+- (b) "Most recent receipt" sorted by scan time (`capturedAt`).
+- (c) Food recorded recent-interaction paths in the old `users/shared/...` layout, while FileIndex uses `households/<hh>/...`, so DataQuery's exact-match hints never fired.
+
+**Fixes:**
+- (a) `8bfb595` — `parseFrontmatter` read plus `repairStoreName`, which unwraps accumulated layers; the shared `generateFrontmatter` now quotes edge-whitespace values. REQ-FOOD-PRICE-004.
+- (b) `b5fb51c` — `compareReceiptsNewestFirst`: purchase date descending, invalid or missing dates last, then `capturedAt`, then `id`. REQ-FOOD-RECEIPT-005.
+- (c) `50fe1f4` — one core-owned `toCanonicalInteractionPath` in `InteractionContextService.record()`, using the request-context householdId. It drops paths belonging to another household, and traversal paths. REQ-FOOD-INTERACTION-PATH-001.
+- Round-1 revisions: `1f12297`.
+
+**Proof:**
+- Each sub-fix has a closure proof: its new tests fail at the parent commit and pass at HEAD.
+- Mechanical proofs were run by the implementers and the conductor. Luna round 3 independently reverted six guards, and each failed its named test.
+- Final suite at 8991954: core 12780 passed, regression 678 passed, lint 0 errors, regression typecheck clean.
+
+**Code review ledger** (Codex `gpt-6-luna` medium, adversarial ⇄ Grok `grok-4.7-high`):
+
+| id | sev | finding | disposition |
+|---|---|---|---|
+| R1-1 | major | `repairStoreName` capped at 10 passes, so deeper corruption persists | fixed-in-code 1f12297 — loops until unwrapped (cap = input length); tests "repairs 12/15 accumulated layers…", "repair is bounded by input length…" (mechanical proof observed by conductor) |
+| R1-2 | major | store-less "most recent receipt" still prefers the receipt from the 10-minute interaction context over purchase-date order | operator → fixed-in-code cf8d53e — "most recent/latest/last" questions use purchase date; deictic follow-ups keep the recent receipt; tests: `receipt-recency-order.test.ts` > `asksForLatestReceipt classifier`, `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` |
+| R1-3 | major | far-future typo date pins "most recent"; non-padded dates sort as invalid | declined — unreachable through app writers: `isValidReceiptDate` (`receipt-parser.ts:26`) rejects future, non-padded and >90-day dates at capture. Accepted failure mode: a hand-edited receipt file with a future date stays on top |
+| R1-4 | minor | no separator collapse or trailing-slash strip in canonical paths | fixed-in-code 1f12297 — table rows in `canonical-paths.test.ts` (mechanical proof observed) |
+| R1-5 | minor | `record()` with no household context keeps legacy paths | declined — claim not established: all 7 `record()` sites are router-dispatched handlers that run inside a household request context |
+| R1-6 | minor | reviewer could not mutation-test | declined — reviewer tooling, not a code defect |
+| R2-1 | major | reviewer could not run tests (pnpm fetch failure; EPERM on `.vite-temp`) | declined — tooling; fixed for round 3 with `--add-dir` for node_modules and a direct vitest binary |
+| R2-2 | minor | restates R1-2 | operator → fixed-in-code cf8d53e — "most recent/latest/last" questions use purchase date; deictic follow-ups keep the recent receipt; tests: `receipt-recency-order.test.ts` > `asksForLatestReceipt classifier`, `latest-receipt vs deictic follow-up with a recent receipt in context (Q2 R1-2)` |
+| R3-1 | minor | the `.`-segment guard lacks a regression test | declined — claim false: removing the guard fails `toCanonicalInteractionPath > users/shared/./food/a.yaml -> null` (1 failed / 16 passed); the reviewer's `-t` filter excluded that row |
+| R4-1 | major | "last time I went shopping" / "previous grocery trip" missed the recency classifier and the receipt routing | fixed-in-code aaba26e — `asksForLatestReceipt` adds `previous` and `last time I went shopping`; routing adds only trip wording (`RECENT_TRIP_RE`) and the last-time-shopping pattern. Grok's first revision routed every classifier match, which made "show my last shopping list" a receipt question; the conductor caught this, narrowed it, and added the tests "does not steal a non-receipt question: …" (they fail against the broad version: 3 failed / 45 passed) |
+| R4-2 | minor | URS traceability counts `it.each` once per declaration, not once per expanded case | declined — consistent declaration-count convention; the totals are arithmetically correct. Accepted: the totals undercount the cases actually executed |
+| R5-1 | major | "the latest one" does not match the recency classifier, so with a receipt in context it returns that receipt | declined (terminal rule, loop cap) — the phrase has no receipt noun and is referential, so with context it refers to the receipt just discussed. Accepted failure mode: a user who means "newest purchase" by "the latest one" right after scanning an older receipt gets the scanned one |
+| R5-2 | major | "last receipt I scanned" does not match | declined — claim false: `asksForLatestReceipt('last receipt I scanned')` returns `true` (conductor probe) |
+| R5-3 | minor | "the receipt from my last trip" does not match | declined — claim false: it returns `true` (conductor probe); the remaining items were confirmations |
+| R5-4..6 | minor | routing has no bypass; URS arithmetic consistent; mutation checks behave (branch revert: 3 failed / 45 passed; regex weakening: 5 failed / 43 passed) | no defect — confirmations |
+
+Round 3 (confirming, full scope) raised no new code defect. Round 4 reviewed the operator-directed R1-2 change. Round 5 (the loop cap) raised no valid new defect, so the loop stopped, so the loop stopped. The Sonnet simplify pass found nothing to change.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.

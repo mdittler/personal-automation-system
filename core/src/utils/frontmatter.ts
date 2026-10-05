@@ -19,8 +19,11 @@ export interface FrontmatterMeta {
 	[key: string]: unknown;
 }
 
-/** Characters that require quoting in YAML scalar values. */
-const NEEDS_QUOTING = /[:#{}[\],&*?|>!%@`'"\\]|^(true|false|null|yes|no)$/i;
+/**
+ * Characters that require quoting in YAML scalar values. Leading/trailing
+ * whitespace also needs quoting, otherwise the reader trims it away.
+ */
+const NEEDS_QUOTING = /[:#{}[\],&*?|>!%@`'"\\]|^(true|false|null|yes|no)$|^\s|\s$/i;
 
 /**
  * Generate a YAML frontmatter block from metadata.
