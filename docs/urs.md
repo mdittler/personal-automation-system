@@ -8124,7 +8124,7 @@ The chatbot determines the model slug from `services.llm.getModelForTier('standa
 
 GUI "Model Notes" card on the Data page (read-only, htmx lazy-loaded). `GET /gui/data/journal` discovers all models with journals and renders collapsible `<details>` sections per model. `GET /gui/data/journal/model?slug={slug}` returns a specific model's journal content + archive list. `GET /gui/data/journal/archive?slug={slug}&file=YYYY-MM.md` returns a specific archived journal for a model. Slug validated against `MODEL_SLUG_PATTERN`. Archive filename validated against `ARCHIVE_FILENAME_PATTERN`. Path traversal protection via resolve + startsWith check. All content HTML-escaped.
 
-**Tests:** `core/src/gui/__tests__/data.test.ts`
+**Tests:** `core/src/gui/__tests__/data.test.ts`, `core/src/gui/__tests__/admin-route-guards.test.ts`
 
 **Standard tests:**
 - `GET /gui/data (Model Journal section)` > renders Model Notes section in data page
@@ -8134,7 +8134,16 @@ GUI "Model Notes" card on the Data page (read-only, htmx lazy-loaded). `GET /gui
 - `GET /gui/data/journal/model (per-model journal)` > lists per-model archived journals
 - `GET /gui/data/journal/archive (per-model archive)` > returns archived journal content for a model
 
+**Standard tests (Q1 admin gate):**
+- `GUI model-journal routes are platform-admin-only (Q1)` > admin GET /gui/data/journal → 200 listing the model
+- `GUI model-journal routes are platform-admin-only (Q1)` > admin GET /gui/data/journal/model → 200 with journal content
+- `GUI model-journal routes are platform-admin-only (Q1)` > admin GET /gui/data/journal/archive → 200 with archive content
+- `GUI model-journal routes are platform-admin-only (Q1)` > data page renders the journal trigger for admin but never for member
+
 **Edge case tests:**
+- `GUI model-journal routes are platform-admin-only (Q1)` > member GET /gui/data/journal → 403 with no journal content
+- `GUI model-journal routes are platform-admin-only (Q1)` > member GET /gui/data/journal/model?slug=test-model → 403 with no journal content
+- `GUI model-journal routes are platform-admin-only (Q1)` > member GET /gui/data/journal/archive?slug=test-model&file=2026-01.md → 403 with no journal content
 - `GET /gui/data/journal (multi-model discovery)` > filters out non-md files from journal directory
 - `GET /gui/data/journal (multi-model discovery)` > HTML-escapes model slugs
 - `GET /gui/data/journal/model (per-model journal)` > returns empty message when model has no journal
@@ -8148,6 +8157,9 @@ GUI "Model Notes" card on the Data page (read-only, htmx lazy-loaded). `GET /gui
 - `GET /gui/data/journal/archive (per-model archive)` > returns 400 for non-matching filename pattern
 - `GET /gui/data/journal/archive (per-model archive)` > returns not found for non-existent archive
 - `GET /gui/data/journal/model (per-model journal)` > handles empty journal file
+
+**Fixes:**
+- **(2026-10-05, Q1):** Model journals are stored globally per model slug (not per household), so the three routes `GET /gui/data/journal`, `/gui/data/journal/model` and `/gui/data/journal/archive` had no role check and any authenticated non-admin member could read cross-household journal content. All three now carry the existing `requirePlatformAdmin` preHandler (403 for members, no journal content in the body; fails closed when no actor is present). The Data page itself was already platform-admin-only (`denyDataAccess`), so the Model Notes card is never rendered for members and no template change was needed. Existing journal tests in `data.test.ts` now inject an admin actor because legacy-token mode sets none. The underlying global-journal prompt injection remains open until Agent Runtime P4 (see `docs/open-items.md`).
 
 ---
 
@@ -13103,7 +13115,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-007 | context-routes.test.ts | 9 | 10 | Implemented |
 | REQ-JOURNAL-001 | model-journal.test.ts | 18 | 26 | Implemented |
 | REQ-JOURNAL-002 | model-journal.test.ts | 9 | 16 | Implemented |
-| REQ-JOURNAL-003 | data.test.ts | 6 | 13 | Implemented |
+| REQ-JOURNAL-003 | data.test.ts, admin-route-guards.test.ts | 10 | 16 | Implemented |
 | REQ-SYSINFO-001 | system-info.test.ts | 12 | 11 | Implemented |
 | REQ-CHATBOT-008 | system-data.test.ts, handle-ask.test.ts | 10 | 12 | Implemented |
 | REQ-CHATBOT-009 | control-tags.test.ts | 2 | 4 | Implemented |
@@ -13576,4 +13588,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **446 test files** | **3064** | **2997** | **6061 tests** |
+| **Totals** | **446 test files** | **3068** | **3000** | **6068 tests** |

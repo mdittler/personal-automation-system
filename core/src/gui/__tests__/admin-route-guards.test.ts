@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,6 +34,7 @@ import { registerAppsRoutes } from '../routes/apps.js';
 import { registerBackupsRoutes } from '../routes/backups.js';
 import { registerConfigRoutes } from '../routes/config.js';
 import { registerContextRoutes } from '../routes/context.js';
+import { registerDataRoutes } from '../routes/data.js';
 import { registerLlmUsageRoutes } from '../routes/llm-usage.js';
 import { registerLogsRoutes } from '../routes/logs.js';
 import { registerReportRoutes } from '../routes/reports.js';
@@ -328,6 +329,7 @@ async function buildApp(tempDir: string) {
 				timezone: config.timezone,
 				logger,
 			});
+			registerDataRoutes(gui, { config, dataDir: tempDir, logger, householdService, spaceService });
 			registerBackupsRoutes(gui, {
 				backupConfig: {
 					enabled: false,
@@ -354,6 +356,16 @@ async function loginAsMember(): Promise<Record<string, string>> {
 		method: 'POST',
 		url: '/gui/login',
 		payload: { userId: MEMBER_USER.id, password: MEMBER_PASS },
+	});
+	expect(res.statusCode).toBe(302);
+	return collectCookies(res);
+}
+
+async function loginAsAdmin(): Promise<Record<string, string>> {
+	const res = await app.inject({
+		method: 'POST',
+		url: '/gui/login',
+		payload: { userId: ADMIN_USER.id, password: ADMIN_PASS },
 	});
 	expect(res.statusCode).toBe(302);
 	return collectCookies(res);
@@ -509,5 +521,76 @@ describe('GUI admin route guards', () => {
 
 		expect(res.statusCode).toBe(403);
 		expect(res.body).toContain('Forbidden');
+	});
+});
+
+// Q1 (2026-10-05) — model journals are global across households, so the three
+// journal routes are platform-admin-only.
+describe('GUI model-journal routes are platform-admin-only (Q1)', () => {
+	const SECRET = 'SECRET-JOURNAL-CONTENT-hh2';
+	const SECRET_ARCHIVE = 'SECRET-ARCHIVE-CONTENT-hh2';
+	const JOURNAL_URLS = [
+		'/gui/data/journal',
+		'/gui/data/journal/model?slug=test-model',
+		'/gui/data/journal/archive?slug=test-model&file=2026-01.md',
+	];
+
+	beforeEach(async () => {
+		await mkdir(join(tempDir, 'model-journal'), { recursive: true });
+		await writeFile(join(tempDir, 'model-journal', 'test-model.md'), SECRET);
+		await mkdir(join(tempDir, 'model-journal-archive', 'test-model'), { recursive: true });
+		await writeFile(
+			join(tempDir, 'model-journal-archive', 'test-model', '2026-01.md'),
+			SECRET_ARCHIVE,
+		);
+	});
+
+	it.each(JOURNAL_URLS)('member GET %s → 403 with no journal content', async (url) => {
+		const cookies = await loginAsMember();
+		const res = await app.inject({ method: 'GET', url, cookies });
+
+		expect(res.statusCode).toBe(403);
+		expect(res.body).not.toContain(SECRET);
+		expect(res.body).not.toContain(SECRET_ARCHIVE);
+		expect(res.body).not.toContain('test-model');
+	});
+
+	it('admin GET /gui/data/journal → 200 listing the model', async () => {
+		const cookies = await loginAsAdmin();
+		const res = await app.inject({ method: 'GET', url: JOURNAL_URLS[0]!, cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain('test-model');
+	});
+
+	it('admin GET /gui/data/journal/model → 200 with journal content', async () => {
+		const cookies = await loginAsAdmin();
+		const res = await app.inject({ method: 'GET', url: JOURNAL_URLS[1]!, cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain(SECRET);
+	});
+
+	it('admin GET /gui/data/journal/archive → 200 with archive content', async () => {
+		const cookies = await loginAsAdmin();
+		const res = await app.inject({ method: 'GET', url: JOURNAL_URLS[2]!, cookies });
+		expect(res.statusCode).toBe(200);
+		expect(res.body).toContain(SECRET_ARCHIVE);
+	});
+
+	it('data page renders the journal trigger for admin but never for member', async () => {
+		const memberRes = await app.inject({
+			method: 'GET',
+			url: '/gui/data',
+			cookies: await loginAsMember(),
+		});
+		expect(memberRes.statusCode).toBe(403);
+		expect(memberRes.body).not.toContain('hx-get="/gui/data/journal"');
+
+		const adminRes = await app.inject({
+			method: 'GET',
+			url: '/gui/data',
+			cookies: await loginAsAdmin(),
+		});
+		expect(adminRes.statusCode).toBe(200);
+		expect(adminRes.body).toContain('hx-get="/gui/data/journal"');
 	});
 });
