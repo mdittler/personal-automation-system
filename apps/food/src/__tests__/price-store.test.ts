@@ -1,4 +1,5 @@
 import type { CoreServices } from '@pas/core/types';
+import { generateFrontmatter } from '@pas/core/utils/frontmatter';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	addOrUpdatePrice,
@@ -313,12 +314,38 @@ describe('price-store', () => {
 			);
 		});
 
-		it('repair is bounded: pathological nesting does not loop forever', () => {
+		it('repair is bounded by input length: pathological nesting fully unwinds and terminates', () => {
+			// More layers than the old fixed cap of 10. The defensive bound is the
+			// input length; each pass shortens the string, so this terminates.
 			let name = "Joe's";
 			for (let i = 0; i < 50; i++) name = `"${name}"`;
 			const parsed = parsePriceFile(formatPriceFile(makeData(name)), 'trader-joes');
-			expect(typeof parsed.store).toBe('string');
+			expect(parsed.store).toBe("Joe's");
 		});
+
+		it.each([12, 15])(
+			"repairs %i accumulated layers from the old buggy save back to Trader Joe's and re-saves clean",
+			(layers) => {
+				// Same cycle as the three-save fixture: regex-read `store:` (no YAML
+				// unquoting) and write that string back through the real frontmatter
+				// quoter. Only the store line is spliced back in — the old reader never
+				// re-read entity_keys, and rewriting the whole file each pass duplicates
+				// the name until deep layers exhaust the heap.
+				let bytes = formatPriceFile(makeData("Trader Joe's"));
+				for (let i = 0; i < layers; i++) {
+					const legacy = legacyParseStore(bytes, 'trader-joes');
+					const storeLine = generateFrontmatter({ store: legacy }).match(/^store: .+$/m)?.[0];
+					if (!storeLine) throw new Error('buggy save did not emit a store line');
+					bytes = bytes.replace(/^store: .+$/m, () => storeLine);
+				}
+				expect(legacyParseStore(bytes, 'trader-joes')).not.toBe("Trader Joe's");
+				const repaired = parsePriceFile(bytes, 'trader-joes');
+				expect(repaired.store).toBe("Trader Joe's");
+				expect(formatPriceFile(repaired)).toBe(formatPriceFile(makeData("Trader Joe's")));
+			},
+			// Quoting grows ~2x per layer; 15 layers stays well under the default timeout.
+			30_000,
+		);
 
 		it('still reads last_updated and items alongside a quoted store', () => {
 			const parsed = parsePriceFile(formatPriceFile(makeData("Trader Joe's")), 'trader-joes');

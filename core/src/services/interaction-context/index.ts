@@ -133,12 +133,15 @@ const MAX_METADATA_KEYS = 20;
  * Resolve an app-supplied interaction path to the canonical form FileIndex
  * stores (`households/<hh>/…`). Single core-owned resolution point (Q2c).
  *
- * - No household in context: returned unchanged (system/pre-migration callers).
+ * - No household in context: separators are still collapsed, then the path is returned without a household prefix (system/pre-migration callers).
  * - `users/shared/…` becomes `households/<hh>/shared/…`; other `users/…` and `spaces/…`: prefixed with `households/<householdId>/`.
  * - `households/<id>/…`: kept only when `<id>` is the current household.
  * - `collaborations/…` and anything else: unchanged (cross-household access is
  *   membership-checked by DataQuery, not by path).
- * - Absolute, null-byte or `..`-traversal paths: dropped (`null`).
+ * - Absolute, null-byte, `..`, or `.` segments: dropped (`null`). A `.` segment is
+ *   rejected, not collapsed — `path.normalize` would resolve `.` and `..`.
+ * - After those rejections, runs of `/` are collapsed and a trailing `/` is
+ *   stripped so the result exact-matches FileIndex. `..` is never resolved.
  */
 export function toCanonicalInteractionPath(
 	path: string,
@@ -146,19 +149,23 @@ export function toCanonicalInteractionPath(
 ): string | null {
 	const normalized = path.replace(/\\/g, '/');
 	if (normalized.includes('\0') || normalized.startsWith('/')) return null;
-	if (normalized.split('/').includes('..')) return null;
-	if (householdId === undefined) return normalized;
+	const segments = normalized.split('/');
+	// Reject before collapsing separators. Do not resolve `.` or `..`.
+	if (segments.includes('..') || segments.includes('.')) return null;
+	let collapsed = normalized.replace(/\/+/g, '/');
+	if (collapsed.endsWith('/')) collapsed = collapsed.replace(/\/+$/, '');
+	if (householdId === undefined) return collapsed;
 
 	// Legacy shared layout `users/shared/<app>/…` is `households/<hh>/shared/<app>/…`.
-	if (normalized.startsWith('users/shared/')) {
-		return `households/${householdId}/${normalized.slice('users/'.length)}`;
+	if (collapsed.startsWith('users/shared/')) {
+		return `households/${householdId}/${collapsed.slice('users/'.length)}`;
 	}
-	const top = normalized.split('/', 1)[0];
-	if (top === 'users' || top === 'spaces') return `households/${householdId}/${normalized}`;
+	const top = collapsed.split('/', 1)[0];
+	if (top === 'users' || top === 'spaces') return `households/${householdId}/${collapsed}`;
 	if (top === 'households') {
-		return normalized.startsWith(`households/${householdId}/`) ? normalized : null;
+		return collapsed.startsWith(`households/${householdId}/`) ? collapsed : null;
 	}
-	return normalized;
+	return collapsed;
 }
 
 /**

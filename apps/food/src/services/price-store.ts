@@ -81,9 +81,6 @@ function extractUnit(name: string): string {
 	return match?.[1] ?? '';
 }
 
-/** Upper bound on repair passes; real corruption nests one level per save. */
-const MAX_STORE_UNQUOTE_PASSES = 10;
-
 /**
  * Repair store names corrupted by the pre-fix regex reader (Q2a).
  *
@@ -91,13 +88,19 @@ const MAX_STORE_UNQUOTE_PASSES = 10;
  * length >= 2), strip the wrapping quotes and unescape `\"` / `\\`. A real store
  * name is never wrapped in literal double quotes, so a wrapped name can only be
  * accumulated quoting. Quotes at one end only, or in the middle, are untouched.
- * Bounded by MAX_STORE_UNQUOTE_PASSES.
+ *
+ * Each pass slices off the wrapping quote pair before unescaping, so the string
+ * strictly shortens and termination is guaranteed. The pass cap is the input
+ * length (a defensive bound), not a fixed constant.
  */
 function repairStoreName(name: string): string {
 	let value = name;
-	for (let i = 0; i < MAX_STORE_UNQUOTE_PASSES; i++) {
+	const maxPasses = value.length;
+	for (let i = 0; i < maxPasses; i++) {
 		if (value.length < 2 || !value.startsWith('"') || !value.endsWith('"')) break;
-		value = value.slice(1, -1).replace(/\\(["\\])/g, '$1');
+		const next = value.slice(1, -1).replace(/\\(["\\])/g, '$1');
+		if (next.length >= value.length) break;
+		value = next;
 	}
 	return value;
 }

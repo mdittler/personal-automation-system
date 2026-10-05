@@ -16,6 +16,12 @@ describe('toCanonicalInteractionPath', () => {
 		['users/u1/notes/daily/x.md', 'households/hh1/users/u1/notes/daily/x.md'],
 		['spaces/fam/food/receipts/r.yaml', 'households/hh1/spaces/fam/food/receipts/r.yaml'],
 		['users\\shared\\food\\grocery\\active.yaml', 'households/hh1/shared/food/grocery/active.yaml'],
+		// repeated separators collapse so the result exact-matches FileIndex
+		['users//shared/food/a.yaml', 'households/hh1/shared/food/a.yaml'],
+		// a trailing slash is stripped
+		['users/shared/food/a.yaml/', 'households/hh1/shared/food/a.yaml'],
+		// a `.` segment is rejected, not normalized (path.normalize would resolve it)
+		['users/shared/./food/a.yaml', null],
 		// already canonical for this household: unchanged
 		['households/hh1/shared/food/recipes/a.yaml', 'households/hh1/shared/food/recipes/a.yaml'],
 		// collaborations are cross-household and membership-checked downstream: unchanged
