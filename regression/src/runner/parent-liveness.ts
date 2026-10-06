@@ -18,7 +18,7 @@ export interface ParentLivenessOptions {
 }
 
 /** Default poll. Tests pass a shorter interval. */
-export const PARENT_POLL_MS = 500;
+const PARENT_POLL_MS = 500;
 
 export function installParentLiveness(opts: ParentLivenessOptions = {}): () => void {
 	const exit = opts.exit ?? ((code: number) => process.exit(code));

@@ -52,7 +52,7 @@ const MONTHS = [
 	'december',
 ];
 
-export function resolveDataPath(p: string, ctx: OutcomeContext): string {
+function resolveDataPath(p: string, ctx: OutcomeContext): string {
 	return p.replaceAll('{householdId}', ctx.householdId).replaceAll('{userId}', ctx.userId);
 }
 

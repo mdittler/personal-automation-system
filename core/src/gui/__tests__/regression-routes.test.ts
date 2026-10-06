@@ -560,6 +560,22 @@ describe('GET /gui/regression — page rendering (REQ-REG-013)', () => {
 		}
 	});
 
+	it('REQ-REG-GUI-V2-007: run, compare and trends bucket selectors each offer an agent bucket', async () => {
+		const { app } = await buildApp({ listedCases: [makeListedCase()] });
+		try {
+			const run = await getAuthed(app, '/gui/regression?view=run');
+			expect(run.body).toMatch(/<option value="agent"[^>]*>Agent<\/option>/);
+			const trends = await getAuthed(app, '/gui/regression?view=trends');
+			expect(trends.body).toMatch(/<option value="agent"[^>]*>Agent<\/option>/);
+			const compare = await getAuthed(app, '/gui/regression?view=compare');
+			expect(compare.body).toMatch(
+				/href="\/gui\/regression\?view=compare&(amp;)?bucket=agent"[^>]*>Agent<\/a>/,
+			);
+		} finally {
+			await app.close();
+		}
+	});
+
 	it('REQ-REG-GUI-V2-017: Compare filter chips render with model/verdict/caseId inputs', async () => {
 		const { app } = await buildApp({ listedCases: [makeListedCase()] });
 		try {

@@ -59,7 +59,7 @@ export function bucketCacheSalt(
  * The expanded-and-hashed harness digest is memoized per path list and repo
  * root for the life of the process.
  */
-export const COMMON_HARNESS_PATHS: readonly string[] = [
+const COMMON_HARNESS_PATHS: readonly string[] = [
 	'regression/src/runner/index.ts',
 	'regression/src/shared/cache-key.ts',
 	'core/src/services/llm/',

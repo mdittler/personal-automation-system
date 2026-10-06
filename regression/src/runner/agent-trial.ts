@@ -20,7 +20,7 @@ export interface AgentEnvLike {
 	dispose: () => Promise<void>;
 }
 
-export interface CostMeter {
+interface CostMeter {
 	getMonthlyTotalCost: () => number;
 	getTokenUsageTotals: () => { input: number; output: number };
 }
@@ -47,7 +47,7 @@ function mimeFor(path: string): string {
 	return path.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
 }
 
-export interface TrialHooks {
+interface TrialHooks {
 	/**
 	 * Provider-level failures recorded during the trial (the app layer swallows
 	 * LLM errors into polite replies, so grading the reply would turn an outage
