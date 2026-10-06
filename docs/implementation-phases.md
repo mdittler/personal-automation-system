@@ -4436,7 +4436,14 @@ A third deliberate `complete()` change: the OpenAI-compatible `doComplete` sends
 
 ### Code review ledger
 
-CODE-REVIEW-PENDING
+Codex `gpt-6-luna` medium ⇄ Grok `grok-4.7-high`. Evidence in `~/Projects/pas-q4-review-evidence/`.
+
+| id | sev | finding | disposition |
+|---|---|---|---|
+| R1-1 | critical | the guard cost estimate ignored images, so a paid vision chat could exceed a household's cap (the plan's decision 24 had excluded images) | fixed-in-code bea33c5: `IMAGE_INPUT_TOKEN_ALLOWANCE` = 1600 input tokens per image in `estimateGuardCost`, used by both guards; real `HouseholdLLMLimiter` refuses a captionless 3-photo paid chat; setting the allowance to 0 fails 5 tests. Conductor overrode decision 24 |
+| R2-1 | critical (pre-existing) | `complete()`/`completeWithMeta()` with images (Food receipt-photo parsing, `receipt-parser.ts:245,264`) reserved no image cost | fixed-in-code: same allowance on the completion path in both guards; household refusal tests; mutation fails 4 tests |
+
+Round 1 also verified D1–D16 and every acceptance row, with 8 mutation checks that all failed as they should, and judged the out-of-scope Food test-timeout raise (59eed0d) justified. Round 2 (confirming) found no new defects. Sonnet simplify pass: c351a98 (one stale comment). Loop closed. Live smoke step 6 (tools refused on a non-tool local model) is unit-tested only, because no installed local model lacks tool support.
 
 **Tests** (final run at d6409aa plus the docs commit; evidence `/Users/mdittler/Projects/pas-q4-review-evidence/suite-d6409aa.txt`, JSON recount `p1-tests-d6409aa.json`):
 - `pnpm lint`: 0 errors, 2051 warnings (baselined).
