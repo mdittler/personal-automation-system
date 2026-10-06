@@ -375,7 +375,7 @@ function toOpenAIMessage(m: ChatMessage): OpenAI.ChatCompletionMessageParam {
 	}
 }
 
-/** `mapOpenAIFinishReason` already maps 'tool_calls'/'function_call' → 'other'; the chat path overrides with the presence of calls. */
+/** Valid function tool calls from a response; a missing id is synthesized. */
 function toToolCallRequests(raw: unknown): ToolCallRequest[] {
 	if (!Array.isArray(raw)) return [];
 	const out: ToolCallRequest[] = [];
