@@ -2701,7 +2701,7 @@ Two pieces: `runAgentTrial` (one trial in-process against an environment — use
 - Create: `regression/src/runner/case-runners/agent-runner.ts`
 - Test: `regression/src/__tests__/agent-trial.test.ts`, `regression/src/__tests__/agent-runner.test.ts`
 
-- [ ] **Step 1: Write the failing trial tests** — create `regression/src/__tests__/agent-trial.test.ts`:
+- [x] **Step 1: Write the failing trial tests** — create `regression/src/__tests__/agent-trial.test.ts`:
 
 ```ts
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -2873,7 +2873,7 @@ describe('runAgentTrial (REQ-REG-AGENT-002)', () => {
 });
 ```
 
-- [ ] **Step 2: Write the failing runner tests** — create `regression/src/__tests__/agent-runner.test.ts`:
+- [x] **Step 2: Write the failing runner tests** — create `regression/src/__tests__/agent-runner.test.ts`:
 
 ```ts
 import { describe, expect, it, vi } from 'vitest';
@@ -2983,12 +2983,12 @@ describe('estimateAgentCaseUsd (REQ-REG-AGENT-004; review C9)', () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `cd regression && npx vitest run src/__tests__/agent-trial.test.ts src/__tests__/agent-runner.test.ts`
 Expected: FAIL — modules not found.
 
-- [ ] **Step 4: Add `noExternalMessages` to the schema and oracle** — in `regression/src/cases/agent/types.ts` add to `AgentExpectation`:
+- [x] **Step 4: Add `noExternalMessages` to the schema and oracle** — in `regression/src/cases/agent/types.ts` add to `AgentExpectation`:
 
 ```ts
 	/** Fail if the bot sends any message to a user other than the requester. */
@@ -3003,7 +3003,7 @@ In `regression/src/oracles/outcome.ts` add `externalMessages?: number;` to `Outc
 	}
 ```
 
-- [ ] **Step 5: Implement `agent-trial.ts`**:
+- [x] **Step 5: Implement `agent-trial.ts`**:
 
 ```ts
 /**
@@ -3154,7 +3154,7 @@ export async function runAgentTrial(
 }
 ```
 
-- [ ] **Step 6: Implement `agent-runner.ts`**:
+- [x] **Step 6: Implement `agent-runner.ts`**:
 
 ```ts
 /**
@@ -3280,12 +3280,12 @@ export async function runAgentCase(c: PersonaCase, deps: AgentRunnerDeps): Promi
 
 In `regression/src/runner/index.ts`, replace the temporary inline `agent:` entry in `BUCKET_ESTIMATE` with `agent: AGENT_ESTIMATE_TOKENS,` (import it from `./case-runners/agent-runner.js`).
 
-- [ ] **Step 7: Run to verify pass**
+- [x] **Step 7: Run to verify pass**
 
 Run: `cd regression && npx vitest run src/__tests__/agent-trial.test.ts src/__tests__/agent-runner.test.ts src/__tests__/outcome-oracle.test.ts`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add regression/src/runner/agent-trial.ts regression/src/runner/case-runners/agent-runner.ts regression/src/runner/index.ts regression/src/cases/agent/types.ts regression/src/oracles/outcome.ts regression/src/__tests__/agent-trial.test.ts regression/src/__tests__/agent-runner.test.ts
@@ -4897,7 +4897,7 @@ The plan→execution contract (`docs/review-protocol.md` §2). Code review adjud
 - [x] **D5** — The rubric judge prompt carries the seed reference data and names the reply block. (Task 4) [observed: rubric-oracle + chatbot-runner tests green; mutation-checks failed for the right reasons: dropping `...reference` fails the reference test, dropping the reply-naming line fails 2 tests, dropping runner forwarding fails the chatbot-runner test]
 - [ ] **D6** — Every chatbot case runs in its own seeded runtime. Every seeded runtime has webhooks and n8n disabled, generous safeguards, and the parent's **reconciled** tiers. (Tasks 5, 10)
 - [ ] **D7** — `agent` is accepted by the CLI, the case validator, the GUI estimator, and the three GUI bucket selectors. The CLI's `--case <id>` (repeatable) selects cases by id after the bucket filter; unknown ids are an error. (Tasks 6, 10) [Task 6 portion observed: `--bucket=agent` (args.test), validator agent block (5 tests), estimator agent rate/tier (2 tests), three `.eta` selectors edited (no automated test exists for the option lists); mutation-checks: coupling guard off fails 2 tests, one-input guard off fails 1, `agent-` prefix guard off fails 1, estimator rate 0 fails 1, estimator tier 'fast' fails 2, dropping 'agent' from VALID_BUCKETS fails 'accepts --bucket=agent'; `--case` part pending Task 10]
-- [ ] **D8** — The outcome oracle grades [Task 7 portion observed: facts (number/text/any-text/date incl. wrong year), forbidden, data state (items/contains/lineRegex/wildcard), unchanged incl. new files — 18 oracle tests green; `exists` implemented but not directly tested; messages to other users pending Task 9]:
+- [x] **D8** — The outcome oracle grades [Task 7 portion observed: facts (number/text/any-text/date incl. wrong year), forbidden, data state (items/contains/lineRegex/wildcard), unchanged incl. new files — 18 oracle tests green; Task 9: `exists` true/false tests added (20 oracle tests green; mutation: disabling the exists=true check or the exists=false check each fails its own test); `noExternalMessages` oracle check + agent-trial test green, mutations (check off; counting zero) fail it]:
   - facts: number, text, any-text, and date, including rejecting an explicit wrong year;
   - forbidden phrases;
   - data state: items, contains, lineRegex, exists, and wildcards;
@@ -4905,7 +4905,7 @@ The plan→execution contract (`docs/review-protocol.md` §2). Code review adjud
   - messages to other users.
   (Tasks 7, 9)
 - [x] **D9** — The 20-file synthetic seed passes its integrity check. Overlays and `{date:±N}` expansion work. (Task 8) [agent-environment.test.ts 5/5 pass; tampering pantry.yaml fails the integrity test, overlay-replace and date-expansion tests cover the rest; the full runtime build is exercised in Task 12]
-- [ ] **D10** — Agent trial behaviour (Tasks 9, 10):
+- [ ] **D10** — Agent trial behaviour (Tasks 9, 10) [Task 9 portion observed: precedence error > budget-exceeded > fail > pass, provider errors incl. drained background calls force `error`, actual overrun stops the case (agent-runner.test.ts, agent-trial.test.ts green; mutations listed under C6/C12/C15); worker/spawn items pending Task 10]:
   - each agent trial runs in its own worker process;
   - verdict precedence is error > budget-exceeded > fail > pass;
   - provider errors, including from drained background calls, force `error`;
@@ -4929,25 +4929,25 @@ Every finding from the plan review that was fixed in this plan's text must be **
 |---|---|---|
 | C1 case id + harness in key; parity tests | Task 2 | [x] `cache-key.test.ts` caseId / harness / expandHarnessPaths tests green; `list-mode-cache-key-parity.test.ts` green with updated expectations [observed: 3 files, 64 passed / 2 skipped; mutation-checks: dropping caseId fails the caseId test, dropping harness hashing fails 'changing a harness file', removing the ENOENT marker and the `__tests__` exclusion fail their tests, removing `caseId` from the runner fails 3 parity tests]; [ ] existence test un-skipped in Task 11 |
 | C2 required `CliOptions` fields | Tasks 3, 10 | [ ] `pnpm --filter @pas/regression typecheck` exits 0 after each of those tasks [Task 3 portion observed: typecheck failed TS2345/TS2304 until the 4th literal in `args.test.ts` (buildTierOverrideFromCli test) and the `archiveCache` import were fixed, then exits 0; Task 10 portion pending] |
-| C3 per-trial process isolation | Tasks 9–10 | [ ] `agent-trial-spawn.test.ts` green; [ ] live smoke shows distinct worker pids (N2) |
+| C3 per-trial process isolation | Tasks 9–10 | [ ] (Task 9 provides in-process `runAgentTrial` + injected `runTrial`; process isolation pending Task 10) `agent-trial-spawn.test.ts` green; [ ] live smoke shows distinct worker pids (N2) |
 | C4 stale `dist/` benchmarked | Task 12 Step 0 | [ ] findings doc records `pnpm build` + `git rev-parse HEAD` before each baseline |
-| C5 injection: notes, other-user messages, real integrations | Tasks 5, 9, 11 | [ ] `agent-trial.test.ts` noExternalMessages test green; [x] `buildSeededConfig` test asserts `webhooks: []`, `n8n.dispatchUrl: ''` (N1) [observed: `seeded-runtime.test.ts` 8 passed; mutation-checks: keeping real webhooks fails 'strips outbound webhooks', keeping real dispatchUrl fails 'empties the n8n dispatch url'];  [ ] `agent-cases.test.ts` "every injection task watches notes/ and context/ and forbids messages to other users" green (asserts `unchanged` ⊇ {`notes/`, `context/`} and `noExternalMessages: true` for all three) |
-| C6 fail + error cached as fail | Task 9 | [ ] `agent-runner.test.ts` "infrastructure error outranks a graded failure" green; mutation-check: swap the precedence → test fails |
+| C5 injection: notes, other-user messages, real integrations | Tasks 5, 9, 11 | [x] `agent-trial.test.ts` noExternalMessages test green [observed; mutations: oracle check off fails it, counting 0 external fails it]; [x] `buildSeededConfig` test asserts `webhooks: []`, `n8n.dispatchUrl: ''` (N1) [observed: `seeded-runtime.test.ts` 8 passed; mutation-checks: keeping real webhooks fails 'strips outbound webhooks', keeping real dispatchUrl fails 'empties the n8n dispatch url'];  [ ] `agent-cases.test.ts` "every injection task watches notes/ and context/ and forbids messages to other users" green (asserts `unchanged` ⊇ {`notes/`, `context/`} and `noExternalMessages: true` for all three) |
+| C6 fail + error cached as fail | Task 9 | [x] `agent-runner.test.ts` "infrastructure error outranks a graded failure" green; mutation-check: swap the precedence → test fails [observed: swapping error below fail fails that test and the budget-outranks-fail test; moving budget-exceeded below fail fails the budget test] |
 | C7 wrong-year dates | Task 7 | [x] `outcome-oracle.test.ts` wrong-year cases incl. `September 9,2025` green [observed: 18 passed; mutation-checks: replacing the year comparison with `return true` fails 'rejects an explicitly wrong year but allows an omitted one'; changing the comma-no-space year capture to require whitespace fails the same test] |
 | C8 seed-facts + photos in key | Task 2 | [x] `BUCKET_HARNESS_PATHS.agent` contains `src/cases/agent/seed-facts.ts` and `fixtures/receipts/` [observed in cache-key.ts]; [ ] existence test green (Task 11) |
-| C9/C16 dry-run vs dispatch pricing; baseline sizing | Tasks 9, 10, 12 | [ ] `agent-runner.test.ts` "prices a case as per-turn estimate × turns × repeats" green (`estimateAgentCaseUsd(2, 3, …)` ≈ 0.006); [ ] `markdown-report.test.ts` per-case override test green; [ ] code review: both the orchestrator pre-check and the dry-run branch call `estimateAgentCaseUsd`; [ ] findings doc shows the completeness gate applied |
+| C9/C16 dry-run vs dispatch pricing; baseline sizing | Tasks 9, 10, 12 | [x] `agent-runner.test.ts` "prices a case as per-turn estimate × turns × repeats" green (`estimateAgentCaseUsd(2, 3, …)` ≈ 0.006) [observed, plus no-turns case]; [ ] `markdown-report.test.ts` per-case override test green; [ ] code review: both the orchestrator pre-check and the dry-run branch call `estimateAgentCaseUsd`; [ ] findings doc shows the completeness gate applied |
 | C10 exact `args.test.ts` expectations | Tasks 3, 10 | [ ] `args.test.ts` green [Task 3 portion observed: both exact `toEqual` expectations carry `archiveCache: false`; 64 passed in args/archive-cache/orchestrator-adjacent run, full suite 692 passed / 2 skipped; Task 10 portion pending] |
 | C11 harness test + smoke ordering | Task 11 | [ ] harness existence test enabled and green in Task 11; smoke run recorded there |
-| C12 swallowed provider errors | Tasks 9–10 | [ ] `agent-trial.test.ts` provider-error test green; [ ] tracker helper test (N4) green; [ ] negative smoke ends `error` |
+| C12 swallowed provider errors | Tasks 9–10 | [x] `agent-trial.test.ts` provider-error test green [observed; plus drain test; mutations: infra check off fails both, drain removed fails the drain test]; [ ] tracker helper test (N4) green; [ ] negative smoke ends `error` |
 | C13/C20 child runs the reported, reconciled models | Task 10 | [ ] `build-deps.test.ts` reconcile test green [Task 5 portion: `buildSeededConfig` tier overrides incl. reasoning fallthrough tested; dropping the fallthrough fails 'reasoning falls through to the production reasoning tier']; [ ] code review confirms `resolvedTiers` reaches both env factories |
 | C14 spend lost on crash/hang | Task 10 | [ ] `agent-trial-spawn.test.ts` "charges the last reported meter" green; [ ] worker emits periodic meters (code review) |
-| C15 overrun ends pass; run remaining ignored | Tasks 9–10 | [ ] `agent-runner.test.ts` overrun tests green; [ ] orchestrator passes `Math.min(case, runBudget.remainingUsd)` (code review) |
+| C15 overrun ends pass; run remaining ignored | Tasks 9–10 | [x] `agent-runner.test.ts` overrun tests green [observed; mutations: overrun stop off fails the final-trial overrun test, pre-dispatch check off fails the budget test]; [ ] orchestrator passes `Math.min(case, runBudget.remainingUsd)` (code review) |
 | C17 guard rejections graded | Task 5 | [x] `buildSeededConfig` test asserts the generous safeguards (N1) [observed: green; mutation-check: `globalMonthlyCostCap: 2` fails 'replaces production safeguards with caps the run budget outranks'] |
 | C19 background calls escape | Task 10 | [ ] in-flight tracker test (N3): follow-up call scheduled after the first completes is awaited; timeout records an error |
 | C21 typecheck (and tsx) via stale declarations | Task 0 | [x] typecheck green with stale `core/dist` [observed: with `core/dist/utils/json-strip-fences.d.ts` removed, typecheck fails TS7016 without the tsconfig path and exits clean with it]; [x] `tsx-resolution.test.ts` green — the tsx-loaded probe prints a `core/src/utils/json-strip-fences.ts` path and no `core/dist` [observed: test fails (probe cannot resolve) before the tsconfig path, passes after; suite 679 passed] |
 | C23 smoke did not select a case or expose trial details | Tasks 10, 11 | [ ] `args.test.ts` `--case` block green; [ ] `orchestrator.test.ts` "dispatches only the named cases and rejects unknown ids" + "runCli --case=<id> reaches runSuite" green; [ ] Task 11 Step 8 table recorded: `totalCases` 1, graded verdict, pid count `2`, heartbeat lines for 1/2 and 2/2; [ ] negative smoke: `error` + provider-error details + unchanged cache dir |
 | C24 harness paths missed extracted modules | Tasks 2, 10, 11 | [x] `cache-key.test.ts` "extracted modules are harness paths" green (`chatbot` has `seeded-runtime.ts`; `agent` has `seeded-runtime.ts`, `provider-call-tracker.ts`, `provider-registry.ts`, `seed.ts`) [observed green]; [ ] existence test and the import-rule test un-skipped in Task 11 and green; [ ] code review: the worker imports `provider-registry.ts`, not `build-deps.ts` |
-| C25 slow case outlives the GUI watchdog; orphaned workers | Task 10 | [ ] `agent-trial-spawn.test.ts` "forwards each meter line to onMeter as it arrives, before the result" green; [ ] `agent-runner.test.ts` "forwards each trial meter to deps.onMeter" green; [ ] `orchestrator.test.ts` "relays every trial meter as a heartbeat", "runCli --json writes heartbeat NDJSON lines before the case-result", and "keeps heartbeats off stdout" green; [ ] core `subprocess.test.ts` "heartbeat NDJSON lines keep a slow run alive" green (40 ms stall window, 90 ms of heartbeats); [ ] `agent-trial-spawn.test.ts` "installWorkerTeardown kills live workers…" green (exit 143, `worker-terminated` log with `costUsd` 0.02, pid gone); [ ] code review: `cli-main.ts` calls `installWorkerTeardown()` |
+| C25 slow case outlives the GUI watchdog; orphaned workers | Task 10 | [ ] `agent-trial-spawn.test.ts` "forwards each meter line to onMeter as it arrives, before the result" green; [x] `agent-runner.test.ts` "forwards each trial meter to deps.onMeter" green [observed; mutation: dropping the hook fails it]; [ ] `orchestrator.test.ts` "relays every trial meter as a heartbeat", "runCli --json writes heartbeat NDJSON lines before the case-result", and "keeps heartbeats off stdout" green; [ ] core `subprocess.test.ts` "heartbeat NDJSON lines keep a slow run alive" green (40 ms stall window, 90 ms of heartbeats); [ ] `agent-trial-spawn.test.ts` "installWorkerTeardown kills live workers…" green (exit 143, `worker-terminated` log with `costUsd` 0.02, pid gone); [ ] code review: `cli-main.ts` calls `installWorkerTeardown()` |
 | C26 weak acceptance rows (C5, C9, C21) | Tasks 0, 9, 11 | [ ] the three strengthened rows above are ticked with the named tests |
 | C27 contractual numbers not pinned | Tasks 8, 10, 11 | [ ] `agent-cases.test.ts`: `cases.length === 46`, `AGENT_CATEGORIES.length === 8` and 8 distinct categories used, every `budgetUsd === 0.75`; [x] `agent-environment.test.ts`: `seed.sha256` has 20 lines (9 receipts, 3 overlay files) [observed: deleting a manifest line fails with 'length 20 but got 19']; [ ] `provider-call-tracker.test.ts`: `DEFAULT_SETTLE_MS === 250`, `DEFAULT_DRAIN_TIMEOUT_MS === 120_000`; [ ] `agent-trial-spawn.test.ts`: `METER_INTERVAL_MS === 2000`, `WORKER_TIMEOUT_MS === 900_000`; [ ] `args.test.ts`: `repeats` defaults to 3, range 1..10 |
 | C28 smoke explanation misattributed the need to build | Task 11 Step 8 | [ ] Step 8 text names `loader.ts:78` (compiled app entry preferred) as the reason and `tsx-resolution.test.ts` as proof core resolves to source; [ ] smoke run recorded after `pnpm build` |

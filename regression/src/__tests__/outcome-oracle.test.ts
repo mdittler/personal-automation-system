@@ -191,3 +191,38 @@ describe('evaluateOutcome', () => {
 		expect(r.failures).toEqual(['changed: households/hh1/users/u1/context/']);
 	});
 });
+
+describe('evaluateOutcome data-state exists (REQ-REG-AGENT-001)', () => {
+	const before = new Map<string, string>();
+	const run = (exists: boolean) =>
+		evaluateOutcome({
+			replies: ['ok'],
+			expectation: {
+				set: 'regression',
+				category: 'write',
+				dataState: [{ path: 'households/{householdId}/shared/food/note.md', exists }],
+			} as AgentExpectation,
+			ctx: ctx(),
+			before,
+		});
+	const make = async () => {
+		await mkdir(join(dataDir, 'households/hh1/shared/food'), { recursive: true });
+		await writeFile(join(dataDir, 'households/hh1/shared/food/note.md'), 'x');
+	};
+
+	it('exists=true passes when the file is present and fails when absent', async () => {
+		expect((await run(true)).failures).toEqual([
+			'data state: households/hh1/shared/food/note.md does not exist',
+		]);
+		await make();
+		expect((await run(true)).pass).toBe(true);
+	});
+
+	it('exists=false passes when the file is absent and fails when present', async () => {
+		expect((await run(false)).pass).toBe(true);
+		await make();
+		expect((await run(false)).failures).toEqual([
+			'data state: households/hh1/shared/food/note.md should not exist',
+		]);
+	});
+});

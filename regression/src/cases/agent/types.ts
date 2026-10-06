@@ -68,6 +68,8 @@ export interface AgentExpectation {
 	dataState?: DataStateCheck[];
 	/** Files, or directories ending in `/`, whose content must be byte-identical before and after. */
 	unchanged?: string[];
+	/** Fail if the bot sends any message to a user other than the requester. */
+	noExternalMessages?: boolean;
 }
 
 export const FOOD = 'households/{householdId}/shared/food';

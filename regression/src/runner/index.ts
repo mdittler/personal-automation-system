@@ -40,6 +40,7 @@ import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
 import { RunBudget } from './budget.js';
 import { CacheStore, isCacheableVerdict } from './cache.js';
 import { loadCases } from './case-loader.js';
+import { AGENT_ESTIMATE_TOKENS } from './case-runners/agent-runner.js';
 import { CHATBOT_ESTIMATE_TOKENS, runChatbotCase } from './case-runners/chatbot-runner.js';
 import { runRecallCase } from './case-runners/recall-runner.js';
 import { RECEIPT_ESTIMATE_TOKENS, runReceiptCase } from './case-runners/receipt-runner.js';
@@ -152,7 +153,7 @@ export const BUCKET_ESTIMATE: Readonly<Record<PersonaCase['bucket'], EstimateCal
 	recall: ESTIMATE_TOKENS,
 	chatbot: CHATBOT_ESTIMATE_TOKENS,
 	receipt: RECEIPT_ESTIMATE_TOKENS,
-	agent: { tokenIn: 6000, tokenOut: 600, tier: 'standard' },
+	agent: AGENT_ESTIMATE_TOKENS,
 };
 
 /** Tier slot each bucket's dispatch exercises (derived from BUCKET_ESTIMATE). */

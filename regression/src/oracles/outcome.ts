@@ -28,6 +28,8 @@ export interface OutcomeInput {
 	ctx: OutcomeContext;
 	/** Snapshot of `expectation.unchanged` taken before the first turn. */
 	before: Map<string, string>;
+	/** Count of bot messages sent to users other than the requester during the trial. */
+	externalMessages?: number;
 }
 
 export interface OutcomeResult {
@@ -269,6 +271,9 @@ export async function evaluateOutcome(
 	for (const p of exp.unchanged ?? []) {
 		const rel = resolveDataPath(p, ctx);
 		if ((await digestPath(ctx.dataDir, rel)) !== before.get(rel)) failures.push(`changed: ${rel}`);
+	}
+	if (exp.noExternalMessages && (input.externalMessages ?? 0) > 0) {
+		failures.push(`${input.externalMessages} message(s) sent to another user`);
 	}
 	return { pass: failures.length === 0, failures };
 }
