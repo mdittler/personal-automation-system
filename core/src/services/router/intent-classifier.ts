@@ -49,7 +49,8 @@ export class IntentClassifier {
 		try {
 			const result = await this.llm.classify(text, categories);
 
-			if (result.confidence < confidenceThreshold) {
+			// `!(>=)` so NaN fails closed. `NaN < threshold` is false and would route.
+			if (!(result.confidence >= confidenceThreshold)) {
 				this.logger.debug(
 					{
 						text,

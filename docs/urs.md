@@ -12955,6 +12955,61 @@ Local models run on the operator's own hardware and are always free; adding a ne
 
 ---
 
+### REQ-LLM-044 — The intent classifier MUST accept index-style and number-prefixed category answers, and the PAS-relevance classifier MUST have an output budget that fits its full label set
+
+**Phase:** Q3b classifier fix (2026-10-06) | **Status:** Implemented
+
+`buildClassifyPrompt` lists categories numbered `1. …`. Haiku (the default fast tier on a fresh install) answered with the index (`{"category": "4"}`, often fenced) or `"5. <text>"`; `parseClassifyResponse` required the exact string and fell back to confidence 0.3/0.1, below the router's 0.4 threshold, so single-intent messages such as "What's on my grocery list right now?" went to the chatbot fallback instead of Food.
+
+- `parseClassifyResponse` resolves the `category` value (string or number) via exact text, trimmed/whitespace/case-insensitive text, a leading `N.`/`N)` prefix, or an in-range 1-based index. A prefixed answer maps only when the trailing text matches `categories[N-1]` (trimmed, case-insensitive). If that text matches a different category, or the index is out of range while the text matches a category, the index and the label contradict, so the answer is unresolved and falls through to the low-confidence fallback (below the router's 0.4 threshold). Index `categories.length + 1` with trailing text `none` is the prompt's "none" slot. A full string that exactly equals a category — including categories that themselves start with digits — still matches first. Out-of-range bare indexes (`0`, `99`, negative) are never mapped. The parser is provider-agnostic.
+- Confidence is NaN-safe. A present value that is not a finite number (`"bad"`, `null`, `"NaN"`, `Infinity`) coerces to 0. The field defaults to 0.8 only when it is absent. `IntentClassifier` rejects a match unless `confidence >= threshold` (`!(confidence >= threshold)`), so a NaN confidence cannot pass the routing gate (`NaN < threshold` is false).
+- `buildClassifyPrompt` additionally instructs the model to answer with the category text, not its number (belt and braces; the parser does not depend on it).
+- `claude-sonnet-5-5` is in `MODEL_PRICING` at Anthropic's published $2 input / $10 output per million tokens (https://www.anthropic.com/claude/sonnet, verified 2026-10-06), so it no longer triggers the unknown-model conservative fallback.
+- `classifyPASMessage` raised `maxTokens` from 10 to 32; 10 truncated Haiku's `YES_PAS NO_SETTINGS YES_DATA` label set (`finishReason: length`). `classifyStructuredOutput` was assessed and is not applicable there: the reply is a space-separated token list, not JSON, and `LLMService.complete()` returns a bare string with no `finishReason`; `parsePASClassifierOutput` already fails open on a truncated set.
+
+**Standard tests:**
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > maps a fenced string index to categories[n-1] keeping confidence
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > maps a numeric index the same way
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > strips a leading "N. " prefix and matches the exact text
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > strips a leading "N) " prefix
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > matches case/whitespace-different exact text
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > maps the "none" slot index (categories.length + 1) to none
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > maps "6. none" to none
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > maps a prefixed label when it matches the indexed category
+- `classify.test.ts` > buildClassifyPrompt — answer-format instruction (Q3b) > tells the model to answer with the category text, not its number
+- `intent-classifier.test.ts` > IntentClassifier with a fast tier that answers by index (Q3b) > routes to the owning app, not the chatbot fallback (null)
+- `model-pricing.test.ts` > model-pricing > getModelPricing > prices claude-sonnet-5-5 at the published $2 / $10 per million tokens
+- `pas-classifier.parser.test.ts` > classifyPASMessage token budget (Q3b) > allows enough output tokens for the longest label set and parses it in full
+
+**Edge case tests:**
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > still returns none for "none"
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > does not map out-of-range index 99 / 0 / 7 / -1 (keeps low-confidence fallback) (4 cases)
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > does not map an out-of-range numeric index
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > exact text answers are unchanged
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > a category whose text is itself numeric-prefixed still matches exactly first
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > maps a case-insensitive trimmed prefix when it matches the indexed category
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > does not map contradictory prefixed answer 4. remove item / 4) remove item at high confidence (2 cases)
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > does not map an out-of-range prefix at high confidence when the label matches a category
+- `pas-classifier.parser.test.ts` > classifyPASMessage token budget (Q3b) > a Haiku-truncated label set (YES_PAS NO_SETTINGS YES_) fails open without a data claim
+
+**Error handling tests:**
+- `classify.test.ts` > parseClassifyResponse > treats a non-numeric confidence of "bad" as 0
+- `classify.test.ts` > parseClassifyResponse > treats a null confidence as 0
+- `classify.test.ts` > parseClassifyResponse > treats a confidence of "NaN" as 0
+- `classify.test.ts` > parseClassifyResponse > treats a non-finite Infinity confidence as 0
+- `intent-classifier.test.ts` > IntentClassifier > returns null when confidence is NaN
+
+Absent confidence still defaults to 0.8 (`classify.test.ts` > parseClassifyResponse > defaults confidence to 0.8 when missing), already counted under REQ-LLM-001.
+
+**Fixes:**
+- Closes the open-items entry "Intent classifier rejects numbered category answers" (2026-10-06, Q3b).
+- **R1-1 (2026-10-06):** A `N.`/`N)` answer maps only when the trailing text matches `categories[N-1]`. A contradictory label, or an out-of-range index whose text matches a category, stays unresolved and falls through below the 0.4 routing threshold. CL: R1-1.
+- **R1-2 (2026-10-06):** Present but non-finite confidence coerces to 0; absence still defaults to 0.8. The intent-classifier threshold uses `!(confidence >= threshold)` so NaN cannot pass the gate. CL: R1-2.
+- **R1-3 (2026-10-06):** `claude-sonnet-5-5` priced at Anthropic's published $2 / $10 per million tokens (https://www.anthropic.com/claude/sonnet, verified 2026-10-06). CL: R1-3.
+
+---
+
+
 ### REQ-REG-021 — A regression cost estimate MUST price each bucket against the tier that actually serves it
 
 **Phase:** Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02) | **Status:** Implemented
@@ -13391,6 +13446,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-041 | json-strip-fences.test.ts, recall-classifier.test.ts, message-segmenter.test.ts, title-generator.test.ts, session-summarizer.test.ts, session-control-classifier.test.ts, data-query.test.ts, route-verifier.test.ts, weakness-summarizer.test.ts | 15 | 20 | Implemented |
 | REQ-LLM-042 | openai-compatible-provider.test.ts, llama-cpp-provider.test.ts | 4 | 6 | Implemented |
 | REQ-LLM-043 | estimator.test.ts, local-model-estimate.test.ts, regression-routes.test.ts, estimate-guard-cost.test.ts, system-info.test.ts | 8 | 14 | Implemented |
+| REQ-LLM-044 | classify.test.ts, intent-classifier.test.ts, model-pricing.test.ts, pas-classifier.parser.test.ts | 12 | 18 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -13910,4 +13966,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **442 test files** | **3158** | **3072** | **6230 tests** |
+| **Totals** | **442 test files** | **3170** | **3090** | **6260 tests** |

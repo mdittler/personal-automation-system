@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { parsePASClassifierOutput } from '../pas-classifier.js';
+import { describe, expect, it, vi } from 'vitest';
+import { classifyPASMessage, parsePASClassifierOutput } from '../pas-classifier.js';
 
 describe('parsePASClassifierOutput — backward-compatible protocol', () => {
 	describe('legacy outputs (must still parse)', () => {
@@ -135,5 +135,22 @@ describe('parsePASClassifierOutput — robustness against prose/quoted tokens', 
 		expect(r.pasRelated).toBe(true); // fail-open
 		expect(r.settingsCandidate).toBe(false);
 		expect(r.dataQueryCandidate).toBe(false);
+	});
+});
+
+describe('classifyPASMessage token budget (Q3b)', () => {
+	it('allows enough output tokens for the longest label set and parses it in full', async () => {
+		const complete = vi.fn().mockResolvedValue('YES_PAS NO_SETTINGS YES_DATA');
+		const r = await classifyPASMessage('tell me about the thing from before', {
+			llm: { complete } as never,
+		});
+		expect(complete.mock.calls[0]?.[1].maxTokens).toBeGreaterThanOrEqual(24);
+		expect(r).toEqual({ pasRelated: true, dataQueryCandidate: true, settingsCandidate: false });
+	});
+
+	it('a Haiku-truncated label set (YES_PAS NO_SETTINGS YES_) fails open without a data claim', () => {
+		const r = parsePASClassifierOutput('YES_PAS NO_SETTINGS YES_');
+		expect(r.pasRelated).toBe(true);
+		expect(r.settingsCandidate).toBe(false);
 	});
 });

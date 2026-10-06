@@ -79,6 +79,51 @@ describe('parseClassifyResponse', () => {
 		expect(result.confidence).toBe(0.8);
 	});
 
+	it('treats a non-numeric confidence of "bad" as 0', () => {
+		const result = parseClassifyResponse(
+			'{"category": "grocery", "confidence": "bad"}',
+			categories,
+			logger,
+		);
+
+		expect(result.category).toBe('grocery');
+		expect(result.confidence).toBe(0);
+	});
+
+	it('treats a null confidence as 0', () => {
+		const result = parseClassifyResponse(
+			'{"category": "grocery", "confidence": null}',
+			categories,
+			logger,
+		);
+
+		expect(result.category).toBe('grocery');
+		expect(result.confidence).toBe(0);
+	});
+
+	it('treats a confidence of "NaN" as 0', () => {
+		const result = parseClassifyResponse(
+			'{"category": "grocery", "confidence": "NaN"}',
+			categories,
+			logger,
+		);
+
+		expect(result.category).toBe('grocery');
+		expect(result.confidence).toBe(0);
+	});
+
+	it('treats a non-finite Infinity confidence as 0', () => {
+		// JSON has no Infinity literal; 1e309 parses as Infinity.
+		const result = parseClassifyResponse(
+			'{"category": "grocery", "confidence": 1e309}',
+			categories,
+			logger,
+		);
+
+		expect(result.category).toBe('grocery');
+		expect(result.confidence).toBe(0);
+	});
+
 	it('falls back to text matching when JSON is invalid', () => {
 		const result = parseClassifyResponse(
 			'I think this is about grocery shopping.',
@@ -128,5 +173,136 @@ describe('parseClassifyResponse', () => {
 
 		expect(result.category).toBe('grocery'); // first in list
 		expect(result.confidence).toBe(0.1);
+	});
+});
+
+describe('parseClassifyResponse — numbered answers (Q3b)', () => {
+	const cats = ['add item', 'remove item', 'plan meals', 'show grocery list', 'log workout'];
+
+	it('maps a fenced string index to categories[n-1] keeping confidence', () => {
+		const r = parseClassifyResponse(
+			'```json\n{"category":"4","confidence":0.95}\n```',
+			cats,
+			logger,
+		);
+		expect(r).toEqual({ category: 'show grocery list', confidence: 0.95 });
+	});
+
+	it('maps a numeric index the same way', () => {
+		const r = parseClassifyResponse('{"category":4,"confidence":0.9}', cats, logger);
+		expect(r).toEqual({ category: 'show grocery list', confidence: 0.9 });
+	});
+
+	it('strips a leading "N. " prefix and matches the exact text', () => {
+		const r = parseClassifyResponse(
+			'{"category":"5. log workout","confidence":0.99}',
+			cats,
+			logger,
+		);
+		expect(r).toEqual({ category: 'log workout', confidence: 0.99 });
+	});
+
+	it('strips a leading "N) " prefix', () => {
+		const r = parseClassifyResponse('{"category":"3) plan meals","confidence":0.8}', cats, logger);
+		expect(r).toEqual({ category: 'plan meals', confidence: 0.8 });
+	});
+
+	it('matches case/whitespace-different exact text', () => {
+		const r = parseClassifyResponse(
+			'{"category":"  Plan   MEALS ","confidence":0.7}',
+			cats,
+			logger,
+		);
+		expect(r).toEqual({ category: 'plan meals', confidence: 0.7 });
+	});
+
+	it('maps the "none" slot index (categories.length + 1) to none', () => {
+		const r = parseClassifyResponse('{"category":"6","confidence":0.9}', cats, logger);
+		expect(r).toEqual({ category: 'none', confidence: 0 });
+	});
+
+	it('maps "6. none" to none', () => {
+		const r = parseClassifyResponse('{"category":"6. none","confidence":0.9}', cats, logger);
+		expect(r).toEqual({ category: 'none', confidence: 0 });
+	});
+
+	it('still returns none for "none"', () => {
+		expect(parseClassifyResponse('{"category":"none","confidence":0.9}', cats, logger)).toEqual({
+			category: 'none',
+			confidence: 0,
+		});
+	});
+
+	it.each(['99', '0', '7', '-1'])(
+		'does not map out-of-range index %s (keeps low-confidence fallback)',
+		(idx) => {
+			const r = parseClassifyResponse(`{"category":"${idx}","confidence":0.95}`, cats, logger);
+			expect(r).toEqual({ category: 'add item', confidence: 0.1 });
+		},
+	);
+
+	it('does not map an out-of-range numeric index', () => {
+		const r = parseClassifyResponse('{"category":99,"confidence":0.95}', cats, logger);
+		expect(r.confidence).toBeLessThan(0.4);
+	});
+
+	it('exact text answers are unchanged', () => {
+		const r = parseClassifyResponse('{"category":"plan meals","confidence":0.6}', cats, logger);
+		expect(r).toEqual({ category: 'plan meals', confidence: 0.6 });
+	});
+
+	it('a category whose text is itself numeric-prefixed still matches exactly first', () => {
+		const odd = ['2 for 1 deals', 'other'];
+		const r = parseClassifyResponse('{"category":"2 for 1 deals","confidence":0.9}', odd, logger);
+		expect(r).toEqual({ category: '2 for 1 deals', confidence: 0.9 });
+	});
+
+	// 1-based index 4 is "plan meals"; "remove item" is a different category.
+	const indexed = ['add item', 'remove item', 'check pantry', 'plan meals', 'log workout'];
+
+	it('maps a prefixed label when it matches the indexed category', () => {
+		const r = parseClassifyResponse(
+			'{"category":"4. plan meals","confidence":0.99}',
+			indexed,
+			logger,
+		);
+		expect(r).toEqual({ category: 'plan meals', confidence: 0.99 });
+	});
+
+	it('maps a case-insensitive trimmed prefix when it matches the indexed category', () => {
+		const r = parseClassifyResponse(
+			'{"category":"4.  Plan Meals","confidence":0.88}',
+			indexed,
+			logger,
+		);
+		expect(r).toEqual({ category: 'plan meals', confidence: 0.88 });
+	});
+
+	it.each(['4. remove item', '4) remove item'])(
+		'does not map contradictory prefixed answer %s at high confidence',
+		(answer) => {
+			const r = parseClassifyResponse(
+				`{"category":"${answer}","confidence":0.99}`,
+				indexed,
+				logger,
+			);
+			expect(r.confidence).toBeLessThan(0.4);
+		},
+	);
+
+	it('does not map an out-of-range prefix at high confidence when the label matches a category', () => {
+		const r = parseClassifyResponse(
+			'{"category":"9. plan meals","confidence":0.99}',
+			indexed,
+			logger,
+		);
+		expect(r.confidence).toBeLessThan(0.4);
+	});
+});
+
+describe('buildClassifyPrompt — answer-format instruction (Q3b)', () => {
+	it('tells the model to answer with the category text, not its number', () => {
+		const prompt = buildClassifyPrompt('hi', ['a', 'b']);
+		expect(prompt).toContain('category text, not its number');
 	});
 });
