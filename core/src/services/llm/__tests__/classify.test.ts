@@ -79,6 +79,51 @@ describe('parseClassifyResponse', () => {
 		expect(result.confidence).toBe(0.8);
 	});
 
+	it('treats a non-numeric confidence of "bad" as 0', () => {
+		const result = parseClassifyResponse(
+			'{"category": "grocery", "confidence": "bad"}',
+			categories,
+			logger,
+		);
+
+		expect(result.category).toBe('grocery');
+		expect(result.confidence).toBe(0);
+	});
+
+	it('treats a null confidence as 0', () => {
+		const result = parseClassifyResponse(
+			'{"category": "grocery", "confidence": null}',
+			categories,
+			logger,
+		);
+
+		expect(result.category).toBe('grocery');
+		expect(result.confidence).toBe(0);
+	});
+
+	it('treats a confidence of "NaN" as 0', () => {
+		const result = parseClassifyResponse(
+			'{"category": "grocery", "confidence": "NaN"}',
+			categories,
+			logger,
+		);
+
+		expect(result.category).toBe('grocery');
+		expect(result.confidence).toBe(0);
+	});
+
+	it('treats a non-finite Infinity confidence as 0', () => {
+		// JSON has no Infinity literal; 1e309 parses as Infinity.
+		const result = parseClassifyResponse(
+			'{"category": "grocery", "confidence": 1e309}',
+			categories,
+			logger,
+		);
+
+		expect(result.category).toBe('grocery');
+		expect(result.confidence).toBe(0);
+	});
+
 	it('falls back to text matching when JSON is invalid', () => {
 		const result = parseClassifyResponse(
 			'I think this is about grocery shopping.',
@@ -210,6 +255,48 @@ describe('parseClassifyResponse — numbered answers (Q3b)', () => {
 		const odd = ['2 for 1 deals', 'other'];
 		const r = parseClassifyResponse('{"category":"2 for 1 deals","confidence":0.9}', odd, logger);
 		expect(r).toEqual({ category: '2 for 1 deals', confidence: 0.9 });
+	});
+
+	// 1-based index 4 is "plan meals"; "remove item" is a different category.
+	const indexed = ['add item', 'remove item', 'check pantry', 'plan meals', 'log workout'];
+
+	it('maps a prefixed label when it matches the indexed category', () => {
+		const r = parseClassifyResponse(
+			'{"category":"4. plan meals","confidence":0.99}',
+			indexed,
+			logger,
+		);
+		expect(r).toEqual({ category: 'plan meals', confidence: 0.99 });
+	});
+
+	it('maps a case-insensitive trimmed prefix when it matches the indexed category', () => {
+		const r = parseClassifyResponse(
+			'{"category":"4.  Plan Meals","confidence":0.88}',
+			indexed,
+			logger,
+		);
+		expect(r).toEqual({ category: 'plan meals', confidence: 0.88 });
+	});
+
+	it.each(['4. remove item', '4) remove item'])(
+		'does not map contradictory prefixed answer %s at high confidence',
+		(answer) => {
+			const r = parseClassifyResponse(
+				`{"category":"${answer}","confidence":0.99}`,
+				indexed,
+				logger,
+			);
+			expect(r.confidence).toBeLessThan(0.4);
+		},
+	);
+
+	it('does not map an out-of-range prefix at high confidence when the label matches a category', () => {
+		const r = parseClassifyResponse(
+			'{"category":"9. plan meals","confidence":0.99}',
+			indexed,
+			logger,
+		);
+		expect(r.confidence).toBeLessThan(0.4);
 	});
 });
 

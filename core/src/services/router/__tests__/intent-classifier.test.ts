@@ -108,6 +108,15 @@ describe('IntentClassifier', () => {
 			confidence: 0.4,
 		});
 	});
+
+	it('returns null when confidence is NaN', async () => {
+		const llm = createMockLLM({ category: 'echo', confidence: Number.NaN });
+		const classifier = new IntentClassifier({ llm, logger: createMockLogger() });
+
+		const result = await classifier.classify('something random', intentTable, 0.4);
+
+		expect(result).toBeNull();
+	});
 });
 
 describe('IntentClassifier with a fast tier that answers by index (Q3b)', () => {

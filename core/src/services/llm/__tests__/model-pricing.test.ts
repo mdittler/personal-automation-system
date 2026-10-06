@@ -25,9 +25,9 @@ describe('model-pricing', () => {
 			expect(pricing).toEqual({ input: 2.0, output: 8.0 });
 		});
 
-		it('resolves claude-sonnet-5-5 without the unknown-model fallback (mirrors claude-sonnet-4-6)', () => {
+		it('prices claude-sonnet-5-5 at the published $2 / $10 per million tokens', () => {
 			expect(hasPricing('claude-sonnet-5-5')).toBe(true);
-			expect(getModelPricing('claude-sonnet-5-5')).toEqual(getModelPricing('claude-sonnet-4-6'));
+			expect(getModelPricing('claude-sonnet-5-5')).toEqual({ input: 2.0, output: 10.0 });
 		});
 
 		it('returns null for an unknown model', () => {

@@ -41,9 +41,12 @@ const normalizeText = (t: string): string => t.trim().replace(/\s+/g, ' ').toLow
  * undefined (unresolvable). The prompt lists categories numbered, and some
  * models (e.g. Haiku) answer with the index (`"4"`, `4`) or `"5. <text>"`
  * instead of the text. Accepts: exact text, trimmed/case-insensitive text,
- * `N.`/`N)` prefixed text, or an in-range 1-based index. Index
- * `categories.length + 1` is the prompt's "none" slot. Out-of-range indexes
- * are NOT mapped.
+ * an in-range 1-based index, or `N.`/`N)` prefixed text only when the
+ * trailing text matches `categories[N-1]` (trimmed, case-insensitive).
+ * Index `categories.length + 1` with trailing text `none` is the prompt's
+ * "none" slot. A prefix whose index and label disagree, or an out-of-range
+ * index whose label matches some category, is unresolved. Out-of-range
+ * indexes are NOT mapped.
  */
 function resolveCategory(value: unknown, categories: string[]): string | undefined {
 	if (typeof value !== 'string' && typeof value !== 'number') return undefined;
@@ -68,10 +71,37 @@ function resolveCategory(value: unknown, categories: string[]): string | undefin
 		return undefined;
 	}
 
-	const prefixed = raw.match(/^\d+\s*[.)]\s*(.+)$/);
-	if (prefixed?.[1]) return matchText(prefixed[1]);
+	const prefixed = raw.match(/^(\d+)\s*[.)]\s*(.+)$/);
+	if (prefixed?.[1] && prefixed[2]) {
+		const n = Number(prefixed[1]);
+		const label = prefixed[2];
+		if (n >= 1 && n <= categories.length) {
+			const expected = categories[n - 1];
+			if (expected !== undefined && normalizeText(label) === normalizeText(expected)) {
+				return expected;
+			}
+			// Index and label contradict, or the label is not that category.
+			return undefined;
+		}
+		if (n === categories.length + 1 && normalizeText(label) === 'none') {
+			return 'none';
+		}
+		// Out of range, including when the trailing text names a real category.
+		return undefined;
+	}
 
 	return undefined;
+}
+
+/**
+ * Confidence from model output. Absent keeps the historical default (0.8).
+ * Present but not a finite number fails safe to 0 so `NaN`/`Infinity` cannot
+ * satisfy a `confidence >= threshold` routing gate.
+ */
+function coerceConfidence(value: unknown): number {
+	if (value === undefined) return 0.8;
+	if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+	return Math.min(1, Math.max(0, value));
 }
 
 /**
@@ -89,7 +119,7 @@ export function parseClassifyResponse(
 	try {
 		const jsonMatch = response.match(/\{[\s\S]*\}/);
 		if (jsonMatch) {
-			const parsed = JSON.parse(jsonMatch[0]) as { category?: unknown; confidence?: number };
+			const parsed = JSON.parse(jsonMatch[0]) as { category?: unknown; confidence?: unknown };
 			const resolved = resolveCategory(parsed.category, categories);
 			if (resolved === 'none') {
 				return { category: 'none', confidence: 0.0 };
@@ -97,7 +127,7 @@ export function parseClassifyResponse(
 			if (resolved !== undefined) {
 				return {
 					category: resolved,
-					confidence: Math.min(1, Math.max(0, parsed.confidence ?? 0.8)),
+					confidence: coerceConfidence(parsed.confidence),
 				};
 			}
 		}
