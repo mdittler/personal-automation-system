@@ -58,6 +58,8 @@ export interface ChatbotRunnerDeps {
 	judgeLlm: RubricJudgeLLM;
 	judgeModelId: string;
 	judgeModelRef?: ModelRef;
+	/** Seed ground truth shown to the rubric judge. */
+	referenceData?: string;
 	costTracker: {
 		getMonthlyTotalCost: () => number;
 		getTokenUsageTotals: () => { input: number; output: number };
@@ -161,6 +163,7 @@ export async function runChatbotCase(c: PersonaCase, deps: ChatbotRunnerDeps): P
 			oracle = await runRubricOracle({
 				rubric: c.rubric,
 				actualResponse: newMessages,
+				...(deps.referenceData !== undefined ? { referenceData: deps.referenceData } : {}),
 				deps: {
 					llm: deps.judgeLlm,
 					judgeModelId: deps.judgeModelId,

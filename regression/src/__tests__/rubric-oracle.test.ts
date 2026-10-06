@@ -380,3 +380,53 @@ describe('runRubricOracle', () => {
 		expect(result.meter.tokenOut).toBe(8);
 	});
 });
+
+describe('runRubricOracle — reference data + reply labelling (REQ-REG-026)', () => {
+	const costMeter = {
+		getMonthlyTotalCost: () => 0,
+		getTokenUsageTotals: () => ({ input: 0, output: 0 }),
+	};
+	function capturingLlm(seen: { prompt: string }) {
+		return {
+			complete: async () => '',
+			completeWithMeta: async (prompt: string) => {
+				seen.prompt = prompt;
+				return { text: '{"score": 5, "explanation": "ok"}', finishReason: 'stop' as const };
+			},
+		};
+	}
+
+	it('includes the reference data block and names the reply block', async () => {
+		const seen = { prompt: '' };
+		await runRubricOracle({
+			rubric: '1. Reply MUST mention $7.69.',
+			actualResponse: 'Costco: Blueberries is $7.69.',
+			referenceData: 'prices/costco.md:\n- Blueberries: $7.69',
+			deps: {
+				llm: capturingLlm(seen),
+				judgeModelId: 'j',
+				costMeter,
+				logger: { warn: () => {} },
+			},
+		});
+		expect(seen.prompt).toContain('Reference data');
+		expect(seen.prompt).toContain('- Blueberries: $7.69');
+		expect(seen.prompt).toContain('The block labelled "rubric-response" IS the assistant reply');
+	});
+
+	it('omits the reference block when no reference data is given', async () => {
+		const seen = { prompt: '' };
+		await runRubricOracle({
+			rubric: 'r',
+			actualResponse: 'a',
+			deps: {
+				llm: capturingLlm(seen),
+				judgeModelId: 'j',
+				costMeter,
+				logger: { warn: () => {} },
+			},
+		});
+		expect(seen.prompt).not.toContain('Reference data');
+		expect(seen.prompt).toContain('The block labelled "rubric-response" IS the assistant reply');
+	});
+});

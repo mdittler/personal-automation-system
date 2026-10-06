@@ -1,0 +1,35 @@
+---
+title: 'Receipt: Costco'
+date: 2026-09-09
+tags:
+  - food
+  - receipt
+type: receipt
+entity_keys:
+  - 'costco'
+app: food
+---
+id: 2026-09-09-costco-d
+store: "Costco"
+date: 2026-09-09
+lineItems:
+  - name: Kirkland Coffee Beans 2.5lb
+    quantity: 1
+    unitPrice: 19.49
+    totalPrice: 19.49
+  - name: Strawberries 2lb
+    quantity: 1
+    unitPrice: 6.29
+    totalPrice: 6.29
+  - name: Rotisserie Chicken
+    quantity: 2
+    unitPrice: 4.99
+    totalPrice: 9.98
+  - name: Laundry Detergent
+    quantity: 1
+    unitPrice: 19.99
+    totalPrice: 19.99
+subtotal: 55.75
+tax: 1.60
+total: 57.35
+capturedAt: 2026-09-09T18:00:00.000Z

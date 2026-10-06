@@ -1,0 +1,51 @@
+---
+title: Lemon Garlic Pasta
+date: "2026-08-01T12:00:00.000Z"
+tags:
+  - pas/recipe
+  - pas/food
+type: recipe
+entity_keys:
+  - lemon garlic pasta
+app: food
+---
+id: lemon-garlic-pasta
+title: Lemon Garlic Pasta
+source: manual
+ingredients:
+  - name: Pasta
+    quantity: 1
+    unit: box
+    notes: null
+    canonicalName: pasta
+  - name: Lemon
+    quantity: 1
+    unit: null
+    notes: null
+    canonicalName: lemon
+  - name: Garlic
+    quantity: 3
+    unit: cloves
+    notes: null
+    canonicalName: garlic
+  - name: Olive Oil
+    quantity: 3
+    unit: tbsp
+    notes: null
+    canonicalName: olive oil
+  - name: Parmesan
+    quantity: 0.5
+    unit: cup
+    notes: null
+    canonicalName: parmesan
+instructions:
+  - Boil pasta.
+  - Saute garlic in olive oil, add lemon juice and zest, toss with pasta and parmesan.
+servings: 4
+tags: []
+ratings: []
+history: []
+allergens: []
+status: confirmed
+createdAt: "2026-08-01T12:00:00.000Z"
+updatedAt: "2026-08-01T12:00:00.000Z"

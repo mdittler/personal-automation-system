@@ -77,7 +77,8 @@ Rows are in execution order. **Depends on** names rows that must be `Done` first
 |---|---|---|---|---|---|
 | Q1 | Admin-gate the three model-journal GUI routes | Fix (security) | Done (2026-10-05, merge of `claude/q1-model-journal-admin-gate`; fix 0007f13) | `docs/open-items.md` → Unfinished Corrections, "Model journal crosses household boundaries" (item 2) | — |
 | Q2 | Food data fixes: Trader Joe's store-name re-quoting; "most recent receipt" sorts by scan time; recent-interaction paths in the old layout | Fix | Done (2026-10-05, merge of `claude/q2-food-data-fixes`; fixes 8bfb595, b5fb51c, 50fe1f4) | `docs/open-items.md` → Unfinished Corrections, "Food data bugs (found 2026-10-05)" | — |
-| Q3 | **Agent Runtime P0** — benchmark hygiene, agent bucket, baseline | Phase | **Plan ready** (5 plan-review rounds done; one confirming round still needed — see Workflow step 2) | `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md` | Q2 (so the baseline doesn't penalise known data bugs) |
+| Q3 | **Agent Runtime P0** — benchmark hygiene, agent bucket, baseline | Phase | Done (2026-10-06, merge of `claude/q3-agent-runtime-p0`; baseline `docs/superpowers/plans/findings/2026-10-05-agent-bucket-baseline.md`) | `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md` | Q2 (so the baseline doesn't penalise known data bugs) |
+| Q3b | Classifier accepts index answers: `parseClassifyResponse` rejects `"4"` / `"5. …"` category replies (Haiku, the default fast tier) and misroutes Food messages to the chatbot; plus Sonnet 5.5 pricing entry and PAS-relevance classifier `maxTokens: 10` truncation | Fix | Not started | `docs/open-items.md` → Unfinished Corrections, "Intent classifier rejects numbered category answers (found 2026-10-06)" | Q3 |
 | Q4 | **Agent Runtime P1** — `LLMService.chat()` with native tools; Ollama `/api/chat`, OpenAI-compatible/llama.cpp, Anthropic; capability detection; `num_ctx`, thinking (default off), keep-alive, vision; AbortSignal | Phase | Plan: needs writing | Design §5, §16 | Q3 |
 | Q5 | **Agent Runtime P2** — tool registry (validation, read-only facade, pinning, permission filter), `find_tools`, AgentLoop, confirmations + taint, integrity ledger, trace, ContextAssembler, core tools; `/agent` (admin, dark launch) | Phase | Plan: needs writing | Design §6–§9, §11.1, §14, §16 | Q4 |
 | Q6 | **Agent Runtime P3** — Food + Notes tools, cards, photo import via `agent.vision_model`, `PendingInputRegistry`, migration inventory | Phase | Plan: needs writing | Design §10.3, §11.2–§11.3, §16 | Q5 |
@@ -103,13 +104,16 @@ Each item must appear in that phase's plan. Most came out of the 2026-10-05 desi
 
 **Q6 · P3**
 - Formal thinking comparison (off / low / on) on the agent bucket, scored as pass^3. The pre-P1 evidence is in `docs/superpowers/plans/findings/2026-10-05-qwen38-thinking-comparison.md`; revisit the default if thinking wins.
+- Fix the Food grocery formatter dropping items whose department is not canonical (`formatGroceryMessage` / `DEPT_ORDER` in `apps/food`). Found by the P0 Task 11 live smoke: a list showed "4 items" but rendered 2. Tracked in open-items: Unfinished Corrections, "Food grocery formatter silently drops items with a non-canonical department".
 - Migration inventory: every Food `handleMessage` branch, command continuation, and typed-reply callback maps to a tool, a pending-input flow, or *dropped (operator-approved)*. It gates Q7.
 
 **Q7 · P4**
+- Re-record the frontier baseline after Q3b (classifier fix) before using it as the cut-over gate. The P0 frontier baseline was measured with the `parseClassifyResponse` numbered-answer defect (single-fact 2/10, injection 0/3); see `docs/superpowers/plans/findings/2026-10-05-agent-bucket-baseline.md`.
 - Agent-bucket tasks for `api` and `alert` origins. They need `MessageContext.origin`.
 - Retire the `chatbot` bucket, and the `routing` food-shadow and `recall` cases. Retire their URS entries; don't delete them.
 - Remove the model-journal prompt injection. This closes item 1 of the open-items entry "Model journal crosses household boundaries".
 - Mark legacy memory as unapproved and add the GUI memory review (design §9.2 integrity ledger).
+- The cut-over comparison against the P0 baseline must run with `--no-cache` (P0 code-review vote 1), at a recorded SHA after `pnpm build`, and must re-run the live smoke first if worker/spawn code changed (P0 lesson R6-1).
 
 **Q8 · P5**
 - Rewrite the Master Execution Order. Keep gate 6 (SR-1 Tier C before any public app registry). Re-sequence Tracks A, C, D after this queue.
@@ -149,6 +153,7 @@ Commands, the brief template with the inlined severity rubric, ledger dispositio
 
 | Date | Change |
 |---|---|
+| 2026-10-06 | Q1, Q2, Q3 Done. Q3b (classifier index-answer fix, found by the P0 frontier baseline) added before Q4. |
 | 2026-10-05 | Roles switched to Code Orchestrator's engine roles. Code review now runs on `gpt-6-luna` at medium (operator choice). Grok revises code instead of reviewing it. Plan review is `gpt-6.1-sol` at medium, and Fable plans. |
 | 2026-10-05 | Review & execution protocol adopted from Code Orchestrator (`docs/review-protocol.md`): finding ledger, deliverables contract, mechanical proof, votes. |
 | 2026-10-05 | Queue created. Design approved after 6 Codex rounds. P0 plan written and reviewed over 5 Codex rounds. Thinking comparison run; thinking defaults to off. Q1–Q2 were spun out as separate sessions; check whether they landed (step 2). |

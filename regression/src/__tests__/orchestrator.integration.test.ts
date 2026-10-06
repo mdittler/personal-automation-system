@@ -12,13 +12,14 @@ import { execSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type CostMeterSource, buildClassifierAdapters } from '../runner/dispatch.js';
 import { runSuite } from '../runner/index.js';
 import { VERDICT } from '../shared/types.js';
 import { StubLLMService } from './_stub-provider.js';
 
-const TYPES_PATH = join(process.cwd(), 'regression/src/shared/types.ts');
+const TYPES_PATH = fileURLToPath(new URL('../shared/types.ts', import.meta.url));
 
 let repoRoot: string;
 let casesDir: string;

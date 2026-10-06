@@ -1,44 +1,25 @@
 /**
- * Chatbot bucket environment (REQ-REG-006, REQ-REG-012).
+ * Chatbot bucket environment (REQ-REG-006, REQ-REG-012, REQ-REG-025).
  *
- * One environment per chatbot bucket run — all chatbot cases share the
- * same seeded household + composed runtime.
+ * One environment per chatbot CASE — built fresh and disposed by the
+ * orchestrator so no transcript or session state bleeds between cases. The
+ * shared runtime construction lives in `seeded-runtime.ts` (also used by the
+ * agent bucket); this module adds the chatbot fixture integrity check and the
+ * seed receipts / price lists.
  *
- * Codex C2: builds composeRuntime using the REAL pas.yaml LLM config
- * (loaded via `loadSystemConfig`), then overrides ONLY `dataDir`, users,
- * and timezone. The runner-supplied `ProviderRegistry` is forwarded so
- * the chatbot runtime shares CostTracker scope with the rest of the
- * suite. A `--model-matrix` tier override (added in Task 12) flows in
- * via `tierOverride` so local Gemma runs work end-to-end.
- *
- * Codex I4: the entire post-mkdtemp path is wrapped in try/catch; on
- * any failure (config load, seedUsers, fixture write, composeRuntime),
- * the tmp root is rm'd before the error propagates.
+ * Codex C2: composeRuntime uses the REAL pas.yaml LLM config, overriding only
+ * dataDir, users, and tokens. The runner-supplied `ProviderRegistry` is
+ * forwarded so the runtime shares CostTracker scope with the rest of the suite.
  */
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { type RuntimeHandle, composeRuntime } from '@core/compose-runtime.js';
-import { loadSystemConfig } from '@core/services/config/index.js';
-import { HouseholdService } from '@core/services/household/index.js';
 import type { ProviderRegistry } from '@core/services/llm/providers/provider-registry.js';
-import {
-	type FakeTelegramService,
-	fakeTelegramService,
-} from '@core/testing/fixtures/fake-telegram.js';
-import type { SystemConfig } from '@core/types/config.js';
-import type { ModelRef } from '@core/types/llm.js';
-import type { RegisteredUser } from '@core/types/users.js';
-import { writeYamlFile } from '@core/utils/yaml.js';
-import pino, { type Logger } from 'pino';
+import type { Logger } from 'pino';
 import { verifyFixtureIntegrity } from './seed.js';
+import { type SeededRuntime, type TierOverride, createSeededRuntime } from './seeded-runtime.js';
 
-export interface TierOverride {
-	fast?: ModelRef;
-	standard?: ModelRef;
-	reasoning?: ModelRef;
-}
+export type { TierOverride };
 
 export interface ChatbotEnvironmentOptions {
 	seedJsonPath: string;
@@ -47,9 +28,7 @@ export interface ChatbotEnvironmentOptions {
 	productionConfigPath: string;
 	/**
 	 * Path to the `.env` file with provider/Telegram tokens. Defaults to a
-	 * sibling `.env` of the production config's parent directory (i.e.
-	 * `dirname(dirname(productionConfigPath))/.env`) so callers can pass
-	 * just `productionConfigPath` and have things work regardless of cwd.
+	 * sibling `.env` of the production config's parent directory.
 	 */
 	envPath?: string;
 	/** Optional shared ProviderRegistry — when present, composeRuntime reuses it (shared CostTracker scope). */
@@ -59,15 +38,7 @@ export interface ChatbotEnvironmentOptions {
 	logger?: Logger;
 }
 
-export interface ChatbotEnvironment {
-	tmpRoot: string;
-	dataDir: string;
-	userId: string;
-	householdId: string;
-	telegram: FakeTelegramService;
-	runtime: RuntimeHandle;
-	dispose: () => Promise<void>;
-}
+export type ChatbotEnvironment = SeededRuntime;
 
 interface SeedJson {
 	version: number;
@@ -82,16 +53,8 @@ interface SeedJson {
 export async function createChatbotEnvironment(
 	opts: ChatbotEnvironmentOptions,
 ): Promise<ChatbotEnvironment> {
-	const seedJsonPath = resolve(opts.seedJsonPath);
-	const seedShaPath = resolve(opts.seedShaPath);
-	const productionConfigPath = resolve(opts.productionConfigPath);
-	// Default .env location: sibling of the config dir's parent.
-	// e.g. `/repo/config/pas.yaml` -> `/repo/.env`.
-	const envPath = opts.envPath ?? join(dirname(dirname(productionConfigPath)), '.env');
-
-	// REQ-REG-006: integrity check first — runs BEFORE mkdtemp so a tampered
-	// seed never leaves any tmp directory on disk.
-	const integrity = await verifyFixtureIntegrity(seedShaPath);
+	// REQ-REG-006: integrity check before any temp dir exists.
+	const integrity = await verifyFixtureIntegrity(resolve(opts.seedShaPath));
 	if (!integrity.ok) {
 		throw new Error(
 			`chatbot environment: fixture integrity check failed: ${integrity.failures
@@ -99,164 +62,36 @@ export async function createChatbotEnvironment(
 				.join(', ')}`,
 		);
 	}
-
-	const seed = JSON.parse(await readFile(seedJsonPath, 'utf8')) as SeedJson;
+	const seed = JSON.parse(await readFile(resolve(opts.seedJsonPath), 'utf8')) as SeedJson;
 	if (seed.version !== 1) {
 		throw new Error(`chatbot environment: unsupported seed version ${seed.version}`);
 	}
-
-	const tmpRoot = await mkdtemp(join(tmpdir(), 'regression-chatbot-'));
-	try {
-		const dataDir = join(tmpRoot, 'data');
-		await mkdir(join(dataDir, 'system'), { recursive: true });
-
-		// Codex C2: load real pas.yaml so providers / CostTracker / safeguards
-		// match production. Override only dataDir, users, households, telegram.
-		const realConfig = await loadSystemConfig({
-			configPath: productionConfigPath,
-			envPath,
-			mode: 'strict',
-		});
-
-		// Seeded users start with a placeholder householdId; patched below
-		// after HouseholdService.createHousehold returns the canonical id.
-		const users: RegisteredUser[] = seed.users.map((u) => ({
-			id: u.id,
-			name: u.name,
-			isAdmin: u.isAdmin,
-			enabledApps: ['*'],
-			sharedScopes: [],
-			householdId: 'placeholder',
-		}));
-
-		const config: SystemConfig = {
-			...realConfig,
-			dataDir,
-			users,
-			telegram: { botToken: 'regression-stub' },
-			gui: { authToken: 'regression-stub' },
-			api: { token: 'regression-stub' },
-		};
-		if (opts.tierOverride) {
-			if (!config.llm) {
-				throw new Error(
-					'chatbot environment: --model-matrix override requires llm config in pas.yaml',
-				);
-			}
-			config.llm = {
-				...config.llm,
-				tiers: {
-					fast: opts.tierOverride.fast ?? config.llm.tiers.fast,
-					standard: opts.tierOverride.standard ?? config.llm.tiers.standard,
-					...(opts.tierOverride.reasoning !== undefined
-						? { reasoning: opts.tierOverride.reasoning }
-						: config.llm.tiers.reasoning !== undefined
-							? { reasoning: config.llm.tiers.reasoning }
-							: {}),
-				},
-			};
-		}
-
-		const configPath = join(tmpRoot, 'pas.yaml');
-		await writeYamlFile(configPath, config);
-
-		const logger = opts.logger ?? pino({ level: 'warn' });
-		const householdService = new HouseholdService({
-			dataDir,
-			users,
-			logger: logger.child({ service: 'household' }),
-		});
-		await householdService.init();
-		const seededHousehold = seed.households[0];
-		if (!seededHousehold) {
-			throw new Error('chatbot environment: seed.json must declare at least one household');
-		}
-		const firstUserId = seededHousehold.members[0];
-		if (!firstUserId) {
-			throw new Error('chatbot environment: seeded household must declare at least one member');
-		}
-		const created = await householdService.createHousehold(
-			seededHousehold.id,
-			firstUserId,
-			seededHousehold.members,
-		);
-		for (const u of users) u.householdId = created.id;
-
-		// Write food seed files under the household-shared path.
-		const expand = (p: string): string => p.replace('{householdId}', created.id);
-		for (const fixture of [
-			...(seed.foodSeed?.receipts ?? []),
-			...(seed.foodSeed?.priceLists ?? []),
-		]) {
-			const fullPath = join(dataDir, expand(fixture.path));
-			await mkdir(dirname(fullPath), { recursive: true });
-			await writeFile(fullPath, fixture.contents, 'utf8');
-		}
-
-		// Codex correction: the food app's `requireHousehold` reads its OWN
-		// `household.yaml` from the shared food path (`apps/food/src/utils/household-guard.ts:22`),
-		// distinct from the core HouseholdService's `households.yaml`. Without
-		// it every food-app dispatch returns "Set up a household first" and the
-		// chatbot bucket grades zero replies. Write the food household record
-		// here so seeded dispatches see a member-of-household user.
-		const foodHouseholdPath = join(
-			dataDir,
-			'households',
-			created.id,
-			'shared',
-			'food',
-			'household.yaml',
-		);
-		await mkdir(dirname(foodHouseholdPath), { recursive: true });
-		const foodHousehold = [
-			'---',
-			`title: ${seededHousehold.id}`,
-			'app: food',
-			'tags:',
-			'  - food/household',
-			'---',
-			`id: ${created.id}`,
-			`name: ${seededHousehold.id}`,
-			`createdBy: ${firstUserId}`,
-			'members:',
-			...seededHousehold.members.map((m) => `  - ${m}`),
-			'joinCode: REG001',
-			'createdAt: 2026-05-12T00:00:00.000Z',
-			'',
-		].join('\n');
-		await writeFile(foodHouseholdPath, foodHousehold, 'utf8');
-
-		const telegram = fakeTelegramService();
-		const runtime = await composeRuntime({
-			config,
-			configPath,
-			dataDir,
-			telegramService: telegram,
-			logger,
-			...(opts.providerRegistry ? { providerRegistry: opts.providerRegistry } : {}),
-		});
-
-		const dispose = async (): Promise<void> => {
-			try {
-				await runtime.dispose();
-			} finally {
-				await rm(tmpRoot, { recursive: true, force: true });
-			}
-		};
-
-		return {
-			tmpRoot,
-			dataDir,
-			userId: firstUserId,
-			householdId: created.id,
-			telegram,
-			runtime,
-			dispose,
-		};
-	} catch (err) {
-		// Codex I4: any failure between mkdtemp and the successful return must
-		// clean up the temp dir before the caller sees the error.
-		await rm(tmpRoot, { recursive: true, force: true });
-		throw err;
+	const household = seed.households[0];
+	if (!household) {
+		throw new Error('chatbot environment: seed.json must declare at least one household');
 	}
+	const user = seed.users[0];
+	if (!user) {
+		throw new Error('chatbot environment: seed.json must declare at least one user');
+	}
+	return createSeededRuntime({
+		tmpPrefix: 'regression-chatbot-',
+		productionConfigPath: opts.productionConfigPath,
+		...(opts.envPath ? { envPath: opts.envPath } : {}),
+		...(opts.providerRegistry ? { providerRegistry: opts.providerRegistry } : {}),
+		...(opts.tierOverride ? { tierOverride: opts.tierOverride } : {}),
+		...(opts.logger ? { logger: opts.logger } : {}),
+		user: { id: user.id, name: user.name },
+		householdSeedId: household.id,
+		writeSeed: async ({ dataDir, householdId }) => {
+			for (const fixture of [
+				...(seed.foodSeed?.receipts ?? []),
+				...(seed.foodSeed?.priceLists ?? []),
+			]) {
+				const fullPath = join(dataDir, fixture.path.replace('{householdId}', householdId));
+				await mkdir(dirname(fullPath), { recursive: true });
+				await writeFile(fullPath, fixture.contents, 'utf8');
+			}
+		},
+	});
 }

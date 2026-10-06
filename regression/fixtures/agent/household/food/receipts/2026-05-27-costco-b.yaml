@@ -1,0 +1,47 @@
+---
+title: 'Receipt: Costco'
+date: 2026-05-27
+tags:
+  - food
+  - receipt
+type: receipt
+entity_keys:
+  - 'costco'
+app: food
+---
+id: 2026-05-27-costco-b
+store: "Costco"
+date: 2026-05-27
+lineItems:
+  - name: Kirkland Coffee Beans 2.5lb
+    quantity: 1
+    unitPrice: 18.99
+    totalPrice: 18.99
+  - name: Atlantic Salmon Fillet
+    quantity: 1
+    unitPrice: 21.47
+    totalPrice: 21.47
+  - name: Strawberries 2lb
+    quantity: 2
+    unitPrice: 5.99
+    totalPrice: 11.98
+  - name: Greek Yogurt 48oz
+    quantity: 1
+    unitPrice: 6.49
+    totalPrice: 6.49
+  - name: Large Eggs 24ct
+    quantity: 1
+    unitPrice: 7.29
+    totalPrice: 7.29
+  - name: Sparkling Water 35ct
+    quantity: 1
+    unitPrice: 12.99
+    totalPrice: 12.99
+  - name: Avocados 6ct
+    quantity: 1
+    unitPrice: 6.99
+    totalPrice: 6.99
+subtotal: 86.20
+tax: 2.16
+total: 88.36
+capturedAt: 2026-05-27T18:00:00.000Z

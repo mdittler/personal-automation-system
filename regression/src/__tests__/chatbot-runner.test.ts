@@ -528,4 +528,31 @@ describe('token propagation', () => {
 
 		vi.restoreAllMocks();
 	});
+
+	it('forwards referenceData to the judge prompt (REQ-REG-026)', async () => {
+		let seenPrompt = '';
+		const judgeLlm = {
+			complete: async () => '',
+			completeWithMeta: async (prompt: string) => {
+				seenPrompt = prompt;
+				return { text: '{"score": 5, "explanation": "ok"}', finishReason: 'stop' as const };
+			},
+		};
+		await runChatbotCase(chatbotCase(), {
+			env: fakeEnv('Costco blueberries are $7.69.'),
+			judgeLlm,
+			judgeModelId: 'std-m',
+			referenceData: 'prices/costco.md:\n- Blueberries: $7.69',
+			costTracker: {
+				getMonthlyTotalCost: () => 0,
+				getTokenUsageTotals: () => ({ input: 0, output: 0 }),
+			},
+			modelIds,
+			cacheKey: 'a'.repeat(64),
+			caseBudgetUsd: 1,
+			estimateUsd: () => 0.001,
+			logger: noopLogger,
+		});
+		expect(seenPrompt).toContain('- Blueberries: $7.69');
+	});
 });

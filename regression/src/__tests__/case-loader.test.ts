@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadCases } from '../runner/case-loader.js';
 
@@ -12,8 +13,13 @@ afterEach(async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
+const TYPES_PATH = fileURLToPath(new URL('../shared/types.ts', import.meta.url)).replace(
+	/'/g,
+	"\\'",
+);
+
 const validCaseModule = (id: string) => `
-import type { PersonaCase } from '${join(process.cwd(), 'regression/src/shared/types.ts').replace(/'/g, "\\'")}';
+import type { PersonaCase } from '${TYPES_PATH}';
 const c: PersonaCase = {
   id: '${id}',
   description: 't',
@@ -31,7 +37,7 @@ export default c;
 `;
 
 const indexModule = (ids: string[]) => `
-import type { LoadedCase, PersonaCase } from '${join(process.cwd(), 'regression/src/shared/types.ts').replace(/'/g, "\\'")}';
+import type { LoadedCase, PersonaCase } from '${TYPES_PATH}';
 import { fileURLToPath } from 'node:url';
 const HERE = fileURLToPath(import.meta.url);
 export function buildCases(): LoadedCase[] {

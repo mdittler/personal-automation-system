@@ -4272,6 +4272,71 @@ Round 3 (confirming, full scope) raised no new code defect. Round 4 reviewed the
 
 ---
 
+## Agent Runtime P0 — Benchmark Hygiene + Agent Bucket (2026-10-05)
+
+**Goal:** Make the regression harness trustworthy, then give it an `agent` bucket that grades outcomes only, so the current pipeline's baseline can gate Agent Runtime P4 (the cut-over). Plan: `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md`. Design: `docs/superpowers/specs/2026-10-05-agent-runtime-design.md`.
+
+**Approach:** First close the five harness defects the design review found (cached `error` verdicts, a cache key that ignored the case id and harness code, shared chatbot sessions, a judge blind to the seed, stale grades from the pre-`738f78a` judge override). Then add the bucket: a 20-file synthetic household seed with an integrity manifest, a deterministic outcome oracle (facts, forbidden phrases, file state, unchanged paths, no messages to other users), one worker process per trial, pass^k over `--repeats` trials, infrastructure-first verdicts, 46 tasks over 8 categories with ground truth derived from the seed, and a report section by set and category.
+
+**Tasks 0-13:**
+
+| Task | Outcome |
+|---|---|
+| 0 | `@pas/core` subpaths resolve to source for vitest, typecheck, and tsx, so the regression workspace is green from a stale `core/dist` |
+| 1 | `error` / `budget-exceeded` are never cached; legacy entries are misses (REQ-REG-023) |
+| 2 | Cache key binds the case id and `BUCKET_HARNESS_PATHS`; harness import rule is test-enforced (REQ-REG-024) |
+| 3 | `--archive-cache` (REQ-REG-027) |
+| 4 | Judge sees seed reference data and the reply block is named (REQ-REG-026) |
+| 5 | Fresh seeded runtime per chatbot case via the shared `seeded-runtime.ts` (REQ-REG-025) |
+| 6 | `agent` bucket + `outcome` oracle kind recognised by CLI, validator, GUI estimator and selectors |
+| 7 | Agent task types + deterministic outcome oracle (REQ-REG-AGENT-001) |
+| 8 | Synthetic seed (9 receipts, 8 hand-authored files, 3 overlay files) + per-trial environment |
+| 9 | Trial + case runner: pass^k, error > budget-exceeded > fail > pass, provider-call tracker with drain |
+| 10 | One worker per trial; heartbeat relay; signal teardown; `--case`; orchestrator/CLI/deps/report wiring (REQ-REG-AGENT-002, -004) |
+| 11 | 46 tasks, seed-derived ground truth pinned by a test (REQ-REG-AGENT-003); the live smoke also caught a seed bug (non-canonical grocery departments) fixed test-first, and a Food formatter defect carried to P3 |
+| 12 | Baselines recorded (local + frontier, --no-cache) |
+| 13 | Documentation footprint (this section, URS, open-items, README) |
+
+**Codex review rounds (plan):** six rounds, findings 9 → 7 → 4 → 2 → 3 → 6 (round 6 was the first to review the Deliverables, acceptance checklist, and live-smoke procedure end to end, hence the uptick). All were fixed in-plan with tests and acceptance rows. The end-of-phase code review is recorded below.
+
+**Code review ledger** (Codex `gpt-6-luna` medium, adversarial ⇄ Grok `grok-4.7-high`; evidence in `~/Projects/pas-q3-review-evidence/`):
+
+| id | sev | finding | disposition |
+|---|---|---|---|
+| R1-1 | critical | agent/chatbot cache keys ignored core and app sources, so a code change could be served a pre-change grade | fixed-in-code (R1 commit), then superseded by vote 1 (838c8ca) |
+| R1-2 | critical | an uncaught CLI exception left workers running outside accounting | fixed-in-code: teardown on uncaughtException/unhandledRejection/exit + worker parent-liveness |
+| R1-3 | major | oracle data-state/unchanged paths could escape the trial data dir | fixed-in-code: containment incl. realpath; validate-case rejects at load |
+| R1-4 | minor | forbidden-phrase punctuation evasion ("err-or") | declined — needs an adversarially punctuating model; only forbidden phrase is "error". Accepted: "err-or" passes |
+| R1-5 | minor | tests assumed cwd = regression/ | fixed-in-code: import.meta.url paths |
+| R1-6 | minor | spawn `error` handler mutation not caught | fixed-in-code: ENOENT spawn test |
+| R2-1 | critical | provider identity and config/pas.yaml missing from key | fixed-in-code 12fde13; superseded by vote 1 |
+| R2-2 | critical | ISO dates/numbers matched as embedded substrings (12026-09-09, 17.79) | fixed-in-code 12fde13: digit-boundary matching |
+| R2-3 | major | findRepoRoot marker was the gitignored config/pas.yaml (pre-existing) | fixed-in-code 12fde13: tracked pnpm-workspace.yaml |
+| R2-4 | major | reviewer skipped mutations | declined — reviewer audit gap; round 1's 8 mutations held |
+| Plateau | — | R1-1 and R2-1 same class (key omissions) | **vote 1, unanimous** (Opus, gpt-6.1-sol xhigh, grok-4.7-xhigh): chatbot/agent keys are an execution-closure hash — worktree identity (HEAD + diff + untracked, excl docs/__tests__), apps/*/dist bytes, run config, env allow-list (no secrets), tier+judge refs, repeats, node/os/arch, today+tz (agent). Baselines and the P4 cut-over always run `--no-cache`. Implemented 838c8ca |
+| R3-1 | critical | hand-edited node_modules not in key | declined — dependency changes go through tracked package.json/pnpm-lock.yaml (in the key); deferred with vote 1's Codex amendment (installed-dependency digests) → open-items |
+| R3-2 | minor | findings doc linked but absent | fixed — written after the final baselines |
+| R3-3 | minor | GUI bucket selectors untested | fixed-in-code b5430ce: `REQ-REG-GUI-V2-007` selector test |
+| R4-1 | minor | worker tests didn't distinguish SIGKILL from SIGTERM | fixed-in-code a21ce28: SIGTERM-ignoring worker test (mutation SIGKILL→SIGTERM fails it) |
+| R5-1 | major | (verification) an untracked symlink to a directory crashed the key with EISDIR | fixed-in-code 9e1c128: lstat, hash symlink target, never follow |
+| R6-1 | critical | (verification, live baseline) every agent trial hung to the 15-min worker timeout: `fs.createReadStream` on fd 3 kept workers alive | fixed-in-code 406668b: unref'd `net.Socket`; real-process tests; live smoke re-run (2 trials pass in 49 s; negative → error) |
+| R5-a | minor | hand-launched worker with a non-socket fd 3 exits instead of polling | declined — production always passes a pipe. Accepted: a hand-launched worker with odd fd 3 exits |
+
+Round 5 (confirming, loop cap) raised only R5-a. Loop closed. Sonnet simplify pass: b5430ce (un-exported 5 unused symbols).
+**Lesson:** R6-1 shipped through four review rounds because every worker test used fake processes; the live smoke was not re-run after R1-2's liveness change. Re-run the live smoke after any change to worker/spawn code.
+
+**Tests:** `pnpm --filter @pas/regression test` 787 passing (50 files); root `pnpm test` 12782 passing, 3 skipped, 1 todo, 0 failing (579 files); lint 0 errors; regression typecheck clean. One core test (`regression-integration.test.ts`, real CLI `--list` smoke) needed `agent` added to its allowed bucket list. 9 new URS entries (REQ-REG-023..027, REQ-REG-AGENT-001..004); matrix totals 442 files / 3152 std / 3066 edge / 6218 tests (the previous "449 files" figure did not match a recount of the matrix, which gave 434).
+
+**Baseline headline (pre-agent pipeline, `docs/superpowers/plans/findings/2026-10-05-agent-bucket-baseline.md`):**
+
+| model | capability pass^3 (tasks) | capability trial rate | regression pass^3 (tasks) | regression trial rate |
+|---|---|---|---|---|
+| qwen3.8:27b-mlx (local, 46 tasks x 3, `--no-cache`, 406668b) | 11/25 | 36/75 | 12/21 | 36/63 |
+| haiku-4-5 + sonnet-5-5 (frontier, 46 tasks x 3, `--no-cache`, 406668b) | 8/25 | 26/75 | 7/21 | 21/63 |
+
+Local run: 23 pass / 20 fail / 3 error ($0, median 31.2 s per trial); the 3 errors are the photo tasks ("not applicable - text-only provider"). Frontier run: 15 pass / 31 fail / 0 error ($2.38, median 8.5 s; photo 3/3). Multi-turn is 0/3 on both and write is 1/8 (local) and 2/8 (frontier); no-tool is 4/4 on both. The frontier pipeline scores below local on single-fact (2/10 vs 7/10) and injection (0/3 vs 3/3) because `parseClassifyResponse` rejects Haiku's numbered category answers and the message falls to the chatbot fallback (fix queued as Q3b), so the frontier baseline should be re-recorded after Q3b before P4. Superseded earlier runs (a062159 local, a credit-exhausted frontier attempt, a 9e1c128 hang) are listed in the findings doc.
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.

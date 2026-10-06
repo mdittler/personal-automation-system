@@ -1,0 +1,33 @@
+---
+title: Meal Plan {date:+0} to {date:+6}
+date: "{date:+0}T12:00:00.000Z"
+tags:
+  - pas/meal-plan
+  - pas/food
+app: food
+type: meal-plan
+entity_keys:
+  - agent-week
+---
+id: agentmealplan01
+startDate: {date:+0}
+endDate: {date:+6}
+meals:
+  - recipeId: chickpea-curry
+    recipeTitle: Chickpea Curry
+    date: {date:+0}
+    mealType: dinner
+    votes: {}
+    cooked: false
+    rated: false
+    isNew: false
+  - recipeId: lemon-garlic-pasta
+    recipeTitle: Lemon Garlic Pasta
+    date: {date:+1}
+    mealType: dinner
+    votes: {}
+    cooked: false
+    rated: false
+    isNew: false
+status: active
+createdAt: "{date:+0}T12:00:00.000Z"

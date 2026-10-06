@@ -6,11 +6,14 @@ describe('parseCliArgs', () => {
 		expect(parseCliArgs([])).toEqual({
 			bucketFilter: undefined,
 			rerunIds: undefined,
+			caseIds: undefined,
 			dryRun: false,
 			json: false,
 			help: false,
 			listOnly: false,
 			noCache: false,
+			archiveCache: false,
+			repeats: 3,
 			noManifest: false,
 			runId: undefined,
 			manifestDir: undefined,
@@ -158,6 +161,10 @@ describe('parseCliArgs', () => {
 		expect(parseCliArgs(['--bucket=routing']).bucketFilter).toBe('routing');
 	});
 
+	it('accepts --bucket=agent', () => {
+		expect(parseCliArgs(['--bucket=agent']).bucketFilter).toBe('agent');
+	});
+
 	it('parses --bucket routing (space-form)', () => {
 		expect(parseCliArgs(['--bucket', 'routing']).bucketFilter).toBe('routing');
 	});
@@ -214,6 +221,8 @@ describe('parseCliArgs', () => {
 			help: false,
 			listOnly: false,
 			noCache: false,
+			archiveCache: false,
+			repeats: 3,
 			noManifest: false,
 		});
 	});
@@ -292,6 +301,8 @@ describe('buildTierOverrideFromCli', () => {
 				help: false,
 				listOnly: false,
 				noCache: false,
+				archiveCache: false,
+				repeats: 3,
 				noManifest: false,
 			}),
 		).toBeUndefined();
@@ -338,5 +349,34 @@ describe('buildTierOverrideFromCli', () => {
 			fast: { provider: 'ollama', model: 'gemma4:e4b' },
 			reasoning: { provider: 'anthropic', model: 'claude-opus-4-7' },
 		});
+	});
+});
+
+describe('--archive-cache (REQ-REG-027)', () => {
+	it('parses the flag', () => {
+		expect(parseCliArgs(['--archive-cache']).archiveCache).toBe(true);
+		expect(parseCliArgs([]).archiveCache).toBe(false);
+	});
+});
+
+describe('--repeats (REQ-REG-AGENT-002)', () => {
+	it('defaults to 3 and accepts 1..10', () => {
+		expect(parseCliArgs([]).repeats).toBe(3);
+		expect(parseCliArgs(['--repeats=5']).repeats).toBe(5);
+		expect(() => parseCliArgs(['--repeats=0'])).toThrow(/repeats/);
+		expect(() => parseCliArgs(['--repeats=11'])).toThrow(/repeats/);
+		expect(() => parseCliArgs(['--repeats=abc'])).toThrow(/repeats/);
+	});
+});
+
+describe('--case (REQ-REG-AGENT-004; review C23)', () => {
+	it('accumulates ids in both forms, is absent by default, and validates ids', () => {
+		expect(parseCliArgs([]).caseIds).toBeUndefined();
+		expect(parseCliArgs(['--case=agent-a', '--case', 'agent-b']).caseIds).toEqual(
+			new Set(['agent-a', 'agent-b']),
+		);
+		expect(() => parseCliArgs(['--case='])).toThrow(/--case requires an id/);
+		expect(() => parseCliArgs(['--case', '--json'])).toThrow(/--case requires an id/);
+		expect(() => parseCliArgs(['--case=Bad Id'])).toThrow(/--case requires an id matching/);
 	});
 });

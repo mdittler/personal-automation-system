@@ -4,6 +4,8 @@ import {
 	FOOD_SHADOW_INPUT_FLOOR,
 	buildSummary,
 	computeRoutingAccuracy,
+	formatAgentSection,
+	formatDryRunMarkdown,
 	formatSummaryMarkdown,
 } from '../runner/markdown-report.js';
 import type { RoutingTarget, RunResult } from '../shared/types.js';
@@ -164,5 +166,56 @@ describe('formatSummaryMarkdown', () => {
 	it('renders "below floor" when accuracy is null', () => {
 		const md = formatSummaryMarkdown([], new Map());
 		expect(md).toMatch(/below floor/i);
+	});
+});
+
+describe('formatAgentSection (REQ-REG-AGENT-004)', () => {
+	it('reports pass^k per set and category plus per-trial pass rate', () => {
+		const mkAgent = (
+			caseId: string,
+			set: string,
+			category: string,
+			trialVerdicts: Array<'pass' | 'fail'>,
+		) =>
+			({
+				caseId,
+				cacheKey: 'a'.repeat(64),
+				source: 'fresh',
+				verdict: trialVerdicts.every((v) => v === 'pass') ? 'pass' : 'fail',
+				inputs: [{ payload: {}, expected: { set, category } }],
+				actuals: [],
+				oracleVerdicts: trialVerdicts.map((v) => ({ verdict: v, details: '' })),
+				tokenCounts: { input: 0, output: 0 },
+				costUsd: 0,
+				modelIds: { fast: 'f', standard: 's', reasoning: null },
+				evaluatedTier: 'standard',
+				timestamp: new Date().toISOString(),
+				durationMs: 3000,
+			}) as RunResult;
+		const md = formatAgentSection([
+			mkAgent('agent-a', 'regression', 'single-fact', ['pass', 'pass', 'pass']),
+			mkAgent('agent-b', 'regression', 'single-fact', ['pass', 'fail', 'pass']),
+			mkAgent('agent-c', 'capability', 'photo', ['fail', 'fail', 'fail']),
+		]);
+		expect(md).toContain('| regression | 1/2 | 5/6 |');
+		expect(md).toContain('| capability | 0/1 | 0/3 |');
+		expect(md).toContain('| single-fact | 1/2 | 5/6 |');
+		expect(md).toContain('| photo | 0/1 | 0/3 |');
+	});
+});
+
+describe('formatDryRunMarkdown — per-case estimate override (REQ-REG-AGENT-004)', () => {
+	it('uses the supplied per-result estimate when given', () => {
+		const r = {
+			caseId: 'agent-a',
+			inputs: [{ payload: {}, expected: {} }],
+			evaluatedTier: 'standard',
+		} as unknown as RunResult;
+		const md = formatDryRunMarkdown(
+			[r],
+			() => 0.001,
+			() => 0.75,
+		);
+		expect(md).toContain('| estimated cost upper-bound (USD) | 0.750000 |');
 	});
 });

@@ -25,6 +25,7 @@
       <option value="routing" <% if (it.selectedBucket === 'routing') { %>selected<% } %>>Routing</option>
       <option value="receipt" <% if (it.selectedBucket === 'receipt') { %>selected<% } %>>Receipt</option>
       <option value="chatbot" <% if (it.selectedBucket === 'chatbot') { %>selected<% } %>>Chatbot</option>
+      <option value="agent" <% if (it.selectedBucket === 'agent') { %>selected<% } %>>Agent</option>
       <option value="recall" <% if (it.selectedBucket === 'recall') { %>selected<% } %>>Recall</option>
     </select>
   </label>

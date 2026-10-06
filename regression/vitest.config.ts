@@ -9,13 +9,16 @@ export default defineConfig({
 		passWithNoTests: true,
 	},
 	resolve: {
-		alias: {
+		alias: [
 			// Match the path aliases in tsconfig.json so vitest can resolve them at
-			// runtime. Order matters — `@core/types/...` style imports map cleanly
-			// because vitest checks each prefix.
-			'@regression': here('./src'),
-			'@core': here('../core/src'),
-			'@food': here('../apps/food/src'),
-		},
+			// runtime.
+			{ find: /^@regression\/(.*)$/, replacement: here('./src/$1') },
+			{ find: /^@core\/(.*)$/, replacement: here('../core/src/$1') },
+			{ find: /^@food\/(.*)$/, replacement: here('../apps/food/src/$1') },
+			// Apps import core helpers through the package export map
+			// (`@pas/core/utils/...` -> `core/dist/...`). Resolve them to source so
+			// tests never run against a stale build artifact.
+			{ find: /^@pas\/core\/(.*)$/, replacement: here('../core/src/$1') },
+		],
 	},
 });

@@ -425,6 +425,35 @@ describe('spawnRegression — output-stall watchdog', () => {
 			| undefined;
 		expect(failed?.stderrTail).toContain('no output for 5ms');
 	});
+
+	it('heartbeat NDJSON lines keep a slow run alive and are not surfaced as events (review C25)', async () => {
+		const proc = new EventEmitter() as SpawnProcLike;
+		const stdout = new Readable({ read() {} });
+		const stderr = new Readable({ read() {} });
+		proc.stdout = stdout;
+		proc.stderr = stderr;
+		proc.pid = 1;
+		proc.kill = () => true;
+		const evts: RegressionEvent[] = [];
+		const handle = await spawnRegression(['--json'], {
+			spawnFn: () => proc,
+			onEvent: (e) => evts.push(e),
+			outputStallTimeoutMs: 40,
+		});
+		// Six heartbeats 15 ms apart (90 ms total) — well past the 40 ms stall window — then a normal finish.
+		for (let i = 0; i < 6; i++) {
+			await new Promise((r) => setTimeout(r, 15));
+			stdout.push(
+				`${JSON.stringify({ type: 'heartbeat', caseId: 'agent-a', trial: 1, repeats: 3, costUsd: i / 100, tokenIn: i, tokenOut: i })}\n`,
+			);
+		}
+		stdout.push(`${JSON.stringify({ type: 'summary', summary: { totalCases: 1 } })}\n`);
+		stdout.push(null);
+		stderr.push(null);
+		proc.emit('exit', 0, null);
+		await handle.whenComplete;
+		expect(evts.map((e) => e.type)).toEqual(['summary', 'complete']);
+	});
 });
 
 describe('validateSpawnArgs — allowlist (security)', () => {

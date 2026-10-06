@@ -14,7 +14,7 @@
 import type { PersonaCase } from './types.js';
 
 const ID_RE = /^[a-z][a-z0-9-]{0,127}$/;
-const BUCKETS: PersonaCase['bucket'][] = ['receipt', 'chatbot', 'recall', 'routing'];
+const BUCKETS: PersonaCase['bucket'][] = ['receipt', 'chatbot', 'recall', 'routing', 'agent'];
 const VALID_ROUTING_TARGETS = new Set<string>(['food-shadow', 'session-control', 'pas']);
 
 function isPosixRepoRelative(p: string): boolean {
@@ -67,6 +67,23 @@ export function validatePersonaCase(c: PersonaCase): void {
 	if (!Array.isArray(c.inputs) || c.inputs.length === 0) {
 		throw new Error('PersonaCase.inputs must be non-empty');
 	}
+	if (c.bucket === 'agent' || c.oracle === 'outcome') {
+		if (c.bucket !== 'agent' || c.oracle !== 'outcome') {
+			throw new Error(
+				`PersonaCase: oracle 'outcome' and bucket 'agent' go together (got bucket="${c.bucket}", oracle="${c.oracle}", case: ${c.id})`,
+			);
+		}
+		if (c.inputs.length !== 1) {
+			throw new Error(
+				`PersonaCase: agent cases take exactly one input (one task per case): ${c.id}`,
+			);
+		}
+		if (!c.id.startsWith('agent-')) {
+			throw new Error(`PersonaCase: agent case ids must start with "agent-": ${c.id}`);
+		}
+		validateAgentDataPaths(c.inputs[0]?.expected, c.id);
+		return;
+	}
 	if (c.oracle === 'judge') {
 		throw new Error(`PersonaCase.oracle 'judge' is reserved (REQ-REG-014)`);
 	}
@@ -86,7 +103,45 @@ export function validatePersonaCase(c: PersonaCase): void {
 	}
 	if (c.oracle !== 'structural') {
 		throw new Error(
-			`PersonaCase.oracle must be 'structural' or 'rubric': ${JSON.stringify(c.oracle)}`,
+			`PersonaCase.oracle must be 'structural', 'rubric' or 'outcome': ${JSON.stringify(c.oracle)}`,
 		);
+	}
+}
+
+/** Reject `..` and absolute outcome paths before a trial can resolve them outside its data dir. */
+function trialDataPathEscapes(p: string): boolean {
+	const substituted = p.replaceAll('{householdId}', 'h').replaceAll('{userId}', 'u');
+	if (!substituted || substituted.includes('\0') || substituted.includes('\\')) return true;
+	if (substituted.startsWith('/') || /^[A-Za-z]:/.test(substituted)) return true;
+	return substituted.split('/').includes('..');
+}
+
+function validateAgentDataPaths(expected: unknown, caseId: string): void {
+	if (expected === null || typeof expected !== 'object' || Array.isArray(expected)) return;
+	const exp = expected as { dataState?: unknown; unchanged?: unknown };
+	if (exp.dataState !== undefined) {
+		if (!Array.isArray(exp.dataState)) {
+			throw new Error(`PersonaCase dataState must be an array (case: ${caseId})`);
+		}
+		for (const check of exp.dataState) {
+			const path = (check as { path?: unknown } | null)?.path;
+			if (typeof path !== 'string' || trialDataPathEscapes(path)) {
+				throw new Error(
+					`PersonaCase dataState path escapes trial data dir: ${JSON.stringify(path)} (case: ${caseId})`,
+				);
+			}
+		}
+	}
+	if (exp.unchanged !== undefined) {
+		if (!Array.isArray(exp.unchanged)) {
+			throw new Error(`PersonaCase unchanged must be an array (case: ${caseId})`);
+		}
+		for (const path of exp.unchanged) {
+			if (typeof path !== 'string' || trialDataPathEscapes(path)) {
+				throw new Error(
+					`PersonaCase unchanged path escapes trial data dir: ${JSON.stringify(path)} (case: ${caseId})`,
+				);
+			}
+		}
 	}
 }

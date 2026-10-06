@@ -1,9 +1,22 @@
 import { execSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { computeCacheKey } from '../shared/cache-key.js';
+import {
+	BUCKET_HARNESS_PATHS,
+	EXECUTION_CLOSURE_ENV_VARS,
+	clearHarnessDigestCache,
+	computeCacheKey,
+	executionClosureComputeCount,
+	expandHarnessPaths,
+	harnessDigestComputeCount,
+} from '../shared/cache-key.js';
+
+/** Repo root from this file, so the suite does not assume `cwd === regression/`. */
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 import { hashRepoRelative } from '../shared/git-hash.js';
 
 let tempRepo: string;
@@ -15,7 +28,16 @@ beforeEach(async () => {
 	execSync('git config user.name T', { cwd: tempRepo });
 });
 afterEach(async () => {
-	await rm(tempRepo, { recursive: true, force: true });
+	// git leaves .git busy for a moment; macOS rm can report ENOTEMPTY mid-delete.
+	for (let attempt = 0; attempt < 5; attempt++) {
+		try {
+			await rm(tempRepo, { recursive: true, force: true });
+			return;
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== 'ENOTEMPTY' || attempt === 4) throw err;
+			await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+		}
+	}
 });
 
 describe('hashRepoRelative', () => {
@@ -271,5 +293,495 @@ describe('computeCacheKey', () => {
 			const after = await computeCacheKey(base);
 			expect(after).not.toBe(before);
 		});
+	});
+});
+
+describe('computeCacheKey — caseId (REQ-REG-024)', () => {
+	it('two cases defined in the same file get different keys', async () => {
+		await writeFile(join(tempRepo, 'cases.ts'), 'export {}\n');
+		const base = {
+			casePath: 'cases.ts',
+			coveragePaths: [],
+			modelIds: { fast: 'f', standard: 's', reasoning: null },
+			repoRoot: tempRepo,
+		};
+		const a = await computeCacheKey({ ...base, caseId: 'case-a' });
+		const b = await computeCacheKey({ ...base, caseId: 'case-b' });
+		expect(a).not.toBe(b);
+	});
+});
+
+describe('computeCacheKey — harness paths (REQ-REG-024)', () => {
+	it('changing a harness file changes the key', async () => {
+		await writeFile(join(tempRepo, 'cases.ts'), 'export {}\n');
+		await mkdir(join(tempRepo, 'h'), { recursive: true });
+		await writeFile(join(tempRepo, 'h', 'runner.ts'), 'v1\n');
+		const args = {
+			casePath: 'cases.ts',
+			coveragePaths: [],
+			modelIds: { fast: 'f', standard: 's', reasoning: null },
+			repoRoot: tempRepo,
+			caseId: 'c',
+			harnessPaths: ['h/'],
+		};
+		const before = await computeCacheKey(args);
+		await writeFile(join(tempRepo, 'h', 'runner.ts'), 'v2\n');
+		// The digest is memoized for the process; a content change is a new run.
+		clearHarnessDigestCache();
+		const after = await computeCacheKey(args);
+		expect(after).not.toBe(before);
+	});
+
+	it('a missing harness file contributes a stable marker instead of throwing', async () => {
+		await writeFile(join(tempRepo, 'cases.ts'), 'export {}\n');
+		const args = {
+			casePath: 'cases.ts',
+			coveragePaths: [],
+			modelIds: { fast: 'f', standard: 's', reasoning: null },
+			repoRoot: tempRepo,
+			caseId: 'c',
+			harnessPaths: ['does/not/exist.ts'],
+		};
+		expect(await computeCacheKey(args)).toBe(await computeCacheKey(args));
+	});
+
+	it('expandHarnessPaths lists files under a directory entry, excluding __tests__', async () => {
+		await mkdir(join(tempRepo, 'd', '__tests__'), { recursive: true });
+		await writeFile(join(tempRepo, 'd', 'a.ts'), 'a\n');
+		await writeFile(join(tempRepo, 'd', '__tests__', 'a.test.ts'), 't\n');
+		expect(await expandHarnessPaths(['d/'], tempRepo)).toEqual(['d/a.ts']);
+	});
+
+	it('every BUCKET_HARNESS_PATHS entry exists in the real repository', () => {
+		for (const paths of Object.values(BUCKET_HARNESS_PATHS)) {
+			for (const p of paths) expect(existsSync(join(REPO_ROOT, p)), p).toBe(true);
+		}
+	});
+
+	it('hashes the harness digest once for N cases that share a bucket and repo', async () => {
+		clearHarnessDigestCache();
+		await mkdir(join(tempRepo, 'apps/food/src'), { recursive: true });
+		await writeFile(join(tempRepo, 'apps/food/src/grocery-store.ts'), 'v1\n');
+		await writeFile(join(tempRepo, 'case.ts'), 'export {}\n');
+		const harnessPaths = ['apps/food/src/'] as const;
+		const modelIds = { fast: 'f', standard: 's', reasoning: null as string | null };
+		await Promise.all(
+			['a', 'b', 'c', 'd', 'e'].map((caseId) =>
+				computeCacheKey({
+					casePath: 'case.ts',
+					coveragePaths: [],
+					modelIds,
+					repoRoot: tempRepo,
+					caseId,
+					harnessPaths,
+				}),
+			),
+		);
+		expect(harnessDigestComputeCount()).toBe(1);
+	});
+});
+
+describe('computeCacheKey — provider identity and behavioural config (review R2-1)', () => {
+	const modelIds = { fast: 'gemma', standard: 'gemma', reasoning: null as string | null };
+
+	async function baseArgs() {
+		await writeFile(join(tempRepo, 'case.ts'), 'export {}\n');
+		return {
+			casePath: 'case.ts',
+			coveragePaths: [] as string[],
+			modelIds,
+			repoRoot: tempRepo,
+			caseId: 'case-1',
+		};
+	}
+
+	function refs(fastProvider: string, standardProvider = fastProvider) {
+		return {
+			fast: { provider: fastProvider, model: 'gemma' },
+			standard: { provider: standardProvider, model: 'gemma' },
+			reasoning: null,
+		};
+	}
+
+	it('same model string with a different provider produces a different key', async () => {
+		const base = await baseArgs();
+		const ollama = await computeCacheKey({ ...base, tierRefs: refs('ollama') });
+		const llamaCpp = await computeCacheKey({ ...base, tierRefs: refs('llama-cpp') });
+		expect(llamaCpp).not.toBe(ollama);
+	});
+
+	it('the same provider/model produces the same key', async () => {
+		const base = await baseArgs();
+		const first = await computeCacheKey({ ...base, tierRefs: refs('ollama', 'llama-cpp') });
+		const second = await computeCacheKey({ ...base, tierRefs: refs('ollama', 'llama-cpp') });
+		expect(second).toBe(first);
+	});
+
+	it('changing one byte of the config changes the key, and a missing config is stable', async () => {
+		const base = await baseArgs();
+		const configPath = join(tempRepo, 'pas.yaml');
+		await writeFile(configPath, 'routing:\n  multi_intent_split: true\n');
+		const chatBefore = await computeCacheKey({ ...base, caseId: 'chat', configPath });
+		const agentBefore = await computeCacheKey({ ...base, caseId: 'agent', configPath });
+		await writeFile(configPath, 'routing:\n  multi_intent_split: fals\n');
+		const chatAfter = await computeCacheKey({ ...base, caseId: 'chat', configPath });
+		const agentAfter = await computeCacheKey({ ...base, caseId: 'agent', configPath });
+		expect(chatAfter).not.toBe(chatBefore);
+		expect(agentAfter).not.toBe(agentBefore);
+
+		const missing = join(tempRepo, 'missing-pas.yaml');
+		const absentA = await computeCacheKey({ ...base, caseId: 'chat', configPath: missing });
+		const absentB = await computeCacheKey({ ...base, caseId: 'chat', configPath: missing });
+		const absentOtherPath = await computeCacheKey({
+			...base,
+			caseId: 'chat',
+			configPath: join(tempRepo, 'also-missing.yaml'),
+		});
+		expect(absentA).toBe(absentB);
+		expect(absentOtherPath).toBe(absentA);
+		expect(absentA).not.toBe(chatBefore);
+	});
+});
+
+describe('EXECUTION_CLOSURE_ENV_VARS', () => {
+	it('lists behaviour-changing vars and no secret-shaped names', () => {
+		expect(EXECUTION_CLOSURE_ENV_VARS).toContain('OLLAMA_URL');
+		expect(EXECUTION_CLOSURE_ENV_VARS.length).toBeGreaterThan(0);
+		for (const name of EXECUTION_CLOSURE_ENV_VARS) {
+			expect(name, name).not.toMatch(/KEY|TOKEN|SECRET|PASSWORD/i);
+		}
+	});
+});
+
+describe('computeCacheKey — execution closure (chatbot and agent)', () => {
+	const modelIds = { fast: 'f', standard: 's', reasoning: null as string | null };
+
+	function commitAll(message: string): void {
+		execSync(`git add -A && git commit -q -m ${JSON.stringify(message)}`, { cwd: tempRepo });
+	}
+
+	async function seedCase(): Promise<void> {
+		await writeFile(join(tempRepo, 'case.ts'), 'export {}\n');
+		commitAll('init');
+	}
+
+	function closureArgs(
+		bucket: 'chatbot' | 'agent',
+		extra: Record<string, unknown> = {},
+	): Parameters<typeof computeCacheKey>[0] {
+		return {
+			casePath: 'case.ts',
+			coveragePaths: [],
+			modelIds,
+			repoRoot: tempRepo,
+			caseId: bucket,
+			bucket,
+			timezone: 'UTC',
+			...extra,
+		};
+	}
+
+	async function bothKeys(extra: Record<string, unknown> = {}): Promise<{
+		chatbot: string;
+		agent: string;
+	}> {
+		return {
+			chatbot: await computeCacheKey(closureArgs('chatbot', extra)),
+			agent: await computeCacheKey(closureArgs('agent', extra)),
+		};
+	}
+
+	async function withEnv<T>(
+		name: string,
+		value: string | undefined,
+		fn: () => Promise<T>,
+	): Promise<T> {
+		const prev = process.env[name];
+		if (value === undefined) delete process.env[name];
+		else process.env[name] = value;
+		try {
+			return await fn();
+		} finally {
+			if (prev === undefined) delete process.env[name];
+			else process.env[name] = prev;
+		}
+	}
+
+	it('a tracked-file edit changes the chatbot key and the agent key', async () => {
+		await seedCase();
+		await mkdir(join(tempRepo, 'core/src'), { recursive: true });
+		await writeFile(join(tempRepo, 'core/src/live.ts'), 'v1\n');
+		commitAll('live');
+		const before = await bothKeys();
+		await writeFile(join(tempRepo, 'core/src/live.ts'), 'v2\n');
+		clearHarnessDigestCache();
+		const after = await bothKeys();
+		expect(after.chatbot).not.toBe(before.chatbot);
+		expect(after.agent).not.toBe(before.agent);
+	});
+
+	it('a new untracked file changes the chatbot key and the agent key', async () => {
+		await seedCase();
+		const before = await bothKeys();
+		await mkdir(join(tempRepo, 'src'), { recursive: true });
+		await writeFile(join(tempRepo, 'src/extra.ts'), 'new\n');
+		clearHarnessDigestCache();
+		const after = await bothKeys();
+		expect(after.chatbot).not.toBe(before.chatbot);
+		expect(after.agent).not.toBe(before.agent);
+	});
+
+	// `.gitignore`'s `vendor-link/` matches a directory, not a symlink, so git
+	// lists the link as untracked. The target lives under docs/ so its bytes
+	// are outside the worktree identity.
+	async function seedIgnoredDirSymlink(target: string): Promise<void> {
+		await seedCase();
+		await writeFile(join(tempRepo, '.gitignore'), 'vendor-link/\n');
+		commitAll('gitignore');
+		await mkdir(join(tempRepo, 'docs', target), { recursive: true });
+		await writeFile(join(tempRepo, 'docs', target, 'pkg.js'), 'v1\n');
+		await symlink(`docs/${target}`, join(tempRepo, 'vendor-link'));
+	}
+
+	it('an untracked symlink to a directory does not throw and contributes a stable key', async () => {
+		await seedIgnoredDirSymlink('modules');
+		const withLink = await bothKeys();
+		clearHarnessDigestCache();
+		const again = await bothKeys();
+		expect(again.chatbot).toBe(withLink.chatbot);
+		expect(again.agent).toBe(withLink.agent);
+
+		await writeFile(join(tempRepo, 'docs/modules/pkg.js'), 'v2\n');
+		clearHarnessDigestCache();
+		const afterInterior = await bothKeys();
+		expect(afterInterior.chatbot).toBe(withLink.chatbot);
+		expect(afterInterior.agent).toBe(withLink.agent);
+
+		await rm(join(tempRepo, 'vendor-link'));
+		clearHarnessDigestCache();
+		const without = await bothKeys();
+		expect(without.chatbot).not.toBe(withLink.chatbot);
+		expect(without.agent).not.toBe(withLink.agent);
+	});
+
+	it('changing an untracked directory symlink target changes the chatbot and agent key', async () => {
+		await seedIgnoredDirSymlink('modules-a');
+		await mkdir(join(tempRepo, 'docs/modules-b'), { recursive: true });
+		await writeFile(join(tempRepo, 'docs/modules-b/pkg.js'), 'v1\n');
+		const before = await bothKeys();
+		await rm(join(tempRepo, 'vendor-link'));
+		await symlink('docs/modules-b', join(tempRepo, 'vendor-link'));
+		clearHarnessDigestCache();
+		const after = await bothKeys();
+		expect(after.chatbot).not.toBe(before.chatbot);
+		expect(after.agent).not.toBe(before.agent);
+	});
+
+	it('an untracked symlink to a file is keyed by its target string, not the file bytes', async () => {
+		await seedCase();
+		await mkdir(join(tempRepo, 'docs'), { recursive: true });
+		await writeFile(join(tempRepo, 'docs/secret.txt'), 'same\n');
+		await writeFile(join(tempRepo, 'docs/other.txt'), 'same\n');
+		await symlink('docs/secret.txt', join(tempRepo, 'link.txt'));
+		const before = await bothKeys();
+
+		await writeFile(join(tempRepo, 'docs/secret.txt'), 'different bytes\n');
+		clearHarnessDigestCache();
+		const afterContent = await bothKeys();
+		expect(afterContent.chatbot).toBe(before.chatbot);
+		expect(afterContent.agent).toBe(before.agent);
+
+		await rm(join(tempRepo, 'link.txt'));
+		await symlink(join(tempRepo, 'docs/secret.txt'), join(tempRepo, 'link.txt'));
+		clearHarnessDigestCache();
+		const afterTarget = await bothKeys();
+		expect(afterTarget.chatbot).not.toBe(before.chatbot);
+		expect(afterTarget.agent).not.toBe(before.agent);
+	});
+
+	it('an edit under docs/ or a __tests__ directory does not change the chatbot or agent key', async () => {
+		await seedCase();
+		await mkdir(join(tempRepo, 'docs'), { recursive: true });
+		await mkdir(join(tempRepo, 'core/src/__tests__'), { recursive: true });
+		await writeFile(join(tempRepo, 'docs/guide.md'), 'v1\n');
+		await writeFile(join(tempRepo, 'core/src/__tests__/router.test.ts'), 'v1\n');
+		commitAll('docs-and-tests');
+		const before = await bothKeys();
+		await writeFile(join(tempRepo, 'docs/guide.md'), 'v2\n');
+		await writeFile(join(tempRepo, 'core/src/__tests__/router.test.ts'), 'v2\n');
+		await writeFile(join(tempRepo, 'docs/new.md'), 'untracked\n');
+		await writeFile(join(tempRepo, 'core/src/__tests__/extra.test.ts'), 'untracked\n');
+		clearHarnessDigestCache();
+		const after = await bothKeys();
+		expect(after.chatbot).toBe(before.chatbot);
+		expect(after.agent).toBe(before.agent);
+	});
+
+	it('a dist symlink to a directory is keyed by its target string, not the directory contents', async () => {
+		await seedCase();
+		await writeFile(join(tempRepo, '.gitignore'), 'dist/\n');
+		commitAll('ignore-dist');
+		await mkdir(join(tempRepo, 'docs/dist-a'), { recursive: true });
+		await mkdir(join(tempRepo, 'docs/dist-b'), { recursive: true });
+		await writeFile(join(tempRepo, 'docs/dist-a/mod.js'), 'v1\n');
+		await writeFile(join(tempRepo, 'docs/dist-b/mod.js'), 'v1\n');
+		await mkdir(join(tempRepo, 'apps/food/dist'), { recursive: true });
+		await symlink('../../../docs/dist-a', join(tempRepo, 'apps/food/dist/linked'));
+
+		const before = await bothKeys();
+		await writeFile(join(tempRepo, 'docs/dist-a/mod.js'), 'v2\n');
+		clearHarnessDigestCache();
+		const afterContent = await bothKeys();
+		expect(afterContent.chatbot).toBe(before.chatbot);
+		expect(afterContent.agent).toBe(before.agent);
+
+		await rm(join(tempRepo, 'apps/food/dist/linked'));
+		await symlink('../../../docs/dist-b', join(tempRepo, 'apps/food/dist/linked'));
+		clearHarnessDigestCache();
+		const afterTarget = await bothKeys();
+		expect(afterTarget.chatbot).not.toBe(before.chatbot);
+		expect(afterTarget.agent).not.toBe(before.agent);
+	});
+
+	it('a dist symlink to a file is keyed by its target string, not the file bytes', async () => {
+		await seedCase();
+		await writeFile(join(tempRepo, '.gitignore'), 'dist/\n');
+		commitAll('ignore-dist');
+		await mkdir(join(tempRepo, 'docs'), { recursive: true });
+		await writeFile(join(tempRepo, 'docs/a.js'), 'same\n');
+		await writeFile(join(tempRepo, 'docs/b.js'), 'same\n');
+		await mkdir(join(tempRepo, 'apps/food/dist'), { recursive: true });
+		await symlink('../../../docs/a.js', join(tempRepo, 'apps/food/dist/link.js'));
+
+		const before = await bothKeys();
+		await writeFile(join(tempRepo, 'docs/a.js'), 'different bytes\n');
+		clearHarnessDigestCache();
+		const afterContent = await bothKeys();
+		expect(afterContent.chatbot).toBe(before.chatbot);
+		expect(afterContent.agent).toBe(before.agent);
+
+		await rm(join(tempRepo, 'apps/food/dist/link.js'));
+		await symlink(join(tempRepo, 'docs/a.js'), join(tempRepo, 'apps/food/dist/link.js'));
+		clearHarnessDigestCache();
+		const afterTarget = await bothKeys();
+		expect(afterTarget.chatbot).not.toBe(before.chatbot);
+		expect(afterTarget.agent).not.toBe(before.agent);
+	});
+
+	it('changing a byte under apps/food/dist changes the chatbot key and the agent key', async () => {
+		await seedCase();
+		// dist/ is gitignored in the real repo, so the worktree identity does not
+		// see these bytes. The closure has to read them from disk.
+		await writeFile(join(tempRepo, '.gitignore'), 'dist/\n');
+		commitAll('ignore-dist');
+		await mkdir(join(tempRepo, 'apps/food/dist'), { recursive: true });
+		await writeFile(join(tempRepo, 'apps/food/dist/index.js'), 'v1\n');
+		const before = await bothKeys();
+		await writeFile(join(tempRepo, 'apps/food/dist/index.js'), 'v2\n');
+		clearHarnessDigestCache();
+		const after = await bothKeys();
+		expect(after.chatbot).not.toBe(before.chatbot);
+		expect(after.agent).not.toBe(before.agent);
+	});
+
+	it('a missing dist directory is a stable marker, distinct from an empty dist', async () => {
+		await seedCase();
+		await mkdir(join(tempRepo, 'apps/food'), { recursive: true });
+		const first = await bothKeys();
+		clearHarnessDigestCache();
+		const second = await bothKeys();
+		expect(second.chatbot).toBe(first.chatbot);
+		expect(second.agent).toBe(first.agent);
+		await mkdir(join(tempRepo, 'apps/food/dist'), { recursive: true });
+		clearHarnessDigestCache();
+		const empty = await bothKeys();
+		expect(empty.chatbot).not.toBe(first.chatbot);
+		expect(empty.agent).not.toBe(first.agent);
+	});
+
+	it('changing an allow-listed env var changes the chatbot key and the agent key', async () => {
+		await seedCase();
+		const before = await withEnv('OLLAMA_URL', 'http://127.0.0.1:11434', () => bothKeys());
+		clearHarnessDigestCache();
+		const after = await withEnv('OLLAMA_URL', 'http://127.0.0.1:11435', () => bothKeys());
+		expect(after.chatbot).not.toBe(before.chatbot);
+		expect(after.agent).not.toBe(before.agent);
+	});
+
+	it('changing ANTHROPIC_API_KEY does not change the chatbot or agent key', async () => {
+		await seedCase();
+		const before = await withEnv('ANTHROPIC_API_KEY', 'sk-one', () => bothKeys());
+		const after = await withEnv('ANTHROPIC_API_KEY', 'sk-two', () => bothKeys());
+		expect(after.chatbot).toBe(before.chatbot);
+		expect(after.agent).toBe(before.agent);
+	});
+
+	it('changing the judge ref changes the chatbot key', async () => {
+		await seedCase();
+		const first = await computeCacheKey(
+			closureArgs('chatbot', { judgeRef: { provider: 'ollama', model: 'gemma-a' } }),
+		);
+		const second = await computeCacheKey(
+			closureArgs('chatbot', { judgeRef: { provider: 'ollama', model: 'gemma-b' } }),
+		);
+		expect(second).not.toBe(first);
+	});
+
+	it('the agent key changes when the injected clock crosses a local date', async () => {
+		await seedCase();
+		const day1 = new Date('2026-04-01T12:00:00Z');
+		const day2 = new Date('2026-04-02T12:00:00Z');
+		const first = await computeCacheKey(closureArgs('agent', { now: day1, timezone: 'UTC' }));
+		const second = await computeCacheKey(closureArgs('agent', { now: day2, timezone: 'UTC' }));
+		expect(second).not.toBe(first);
+		const chatDay1 = await computeCacheKey(closureArgs('chatbot', { now: day1, timezone: 'UTC' }));
+		const chatDay2 = await computeCacheKey(closureArgs('chatbot', { now: day2, timezone: 'UTC' }));
+		expect(chatDay2).toBe(chatDay1);
+	});
+
+	it('the agent key changes when the timezone changes for the same instant', async () => {
+		await seedCase();
+		// 03:30Z is still the 14th in New York and already the 15th in UTC.
+		const now = new Date('2026-01-15T03:30:00Z');
+		const utc = await computeCacheKey(closureArgs('agent', { now, timezone: 'UTC' }));
+		const ny = await computeCacheKey(closureArgs('agent', { now, timezone: 'America/New_York' }));
+		expect(ny).not.toBe(utc);
+	});
+
+	it('a core edit does not change the routing key and does change the chatbot key', async () => {
+		await seedCase();
+		await mkdir(join(tempRepo, 'core/src/services'), { recursive: true });
+		await writeFile(join(tempRepo, 'core/src/services/unrelated.ts'), 'v1\n');
+		commitAll('core');
+		const routingArgs = {
+			casePath: 'case.ts',
+			coveragePaths: [] as string[],
+			modelIds,
+			repoRoot: tempRepo,
+			caseId: 'route',
+			bucket: 'routing' as const,
+			harnessPaths: BUCKET_HARNESS_PATHS.routing,
+		};
+		const routingBefore = await computeCacheKey(routingArgs);
+		const chatBefore = await computeCacheKey(closureArgs('chatbot'));
+		await writeFile(join(tempRepo, 'core/src/services/unrelated.ts'), 'v2\n');
+		clearHarnessDigestCache();
+		const routingAfter = await computeCacheKey(routingArgs);
+		const chatAfter = await computeCacheKey(closureArgs('chatbot'));
+		expect(routingAfter).toBe(routingBefore);
+		expect(chatAfter).not.toBe(chatBefore);
+	});
+
+	it('hashes the worktree and app dist once for many chatbot and agent cases', async () => {
+		clearHarnessDigestCache();
+		await seedCase();
+		await Promise.all(
+			['a', 'b', 'c', 'd', 'e'].flatMap((id) =>
+				(['chatbot', 'agent'] as const).map((bucket) =>
+					computeCacheKey({ ...closureArgs(bucket), caseId: id }),
+				),
+			),
+		);
+		expect(executionClosureComputeCount()).toBe(1);
 	});
 });

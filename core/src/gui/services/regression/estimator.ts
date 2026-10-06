@@ -28,6 +28,7 @@ const PER_CASE_USD_BY_BUCKET = {
 	receipt: 0.06,
 	chatbot: 0.04,
 	recall: 0.01,
+	agent: 0.12,
 } as const;
 
 export type Bucket = keyof typeof PER_CASE_USD_BY_BUCKET;
@@ -44,6 +45,7 @@ export const BUCKET_TIER: Readonly<Record<Bucket, ModelTier>> = {
 	recall: 'fast',
 	receipt: 'standard',
 	chatbot: 'standard',
+	agent: 'standard',
 };
 
 export interface EstimatedCase {
@@ -89,6 +91,7 @@ export function estimateRunCostUsd(
 		receipt: 0,
 		chatbot: 0,
 		recall: 0,
+		agent: 0,
 	};
 	let counted = 0;
 	let localCount = 0;
@@ -103,8 +106,7 @@ export function estimateRunCostUsd(
 		}
 		perBucketUsd[c.bucket] += rate;
 	}
-	const estimateUsd =
-		perBucketUsd.routing + perBucketUsd.receipt + perBucketUsd.chatbot + perBucketUsd.recall;
+	const estimateUsd = Object.values(perBucketUsd).reduce((a, b) => a + b, 0);
 	return {
 		estimateUsd,
 		ceilingUsd: options.ceilingUsd,

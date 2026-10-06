@@ -1,0 +1,35 @@
+---
+title: 'Receipt: Wegmans'
+date: 2026-09-06
+tags:
+  - food
+  - receipt
+type: receipt
+entity_keys:
+  - 'wegmans'
+app: food
+---
+id: 2026-09-06-wegmans-b
+store: "Wegmans"
+date: 2026-09-06
+lineItems:
+  - name: Large Eggs 18ct
+    quantity: 1
+    unitPrice: 5.49
+    totalPrice: 5.49
+  - name: Baby Spinach 16oz
+    quantity: 1
+    unitPrice: 5.99
+    totalPrice: 5.99
+  - name: Coffee Filters 200ct
+    quantity: 1
+    unitPrice: 3.79
+    totalPrice: 3.79
+  - name: Garlic 3ct
+    quantity: 1
+    unitPrice: 1.99
+    totalPrice: 1.99
+subtotal: 17.26
+tax: 0.00
+total: 17.26
+capturedAt: 2026-09-06T18:00:00.000Z

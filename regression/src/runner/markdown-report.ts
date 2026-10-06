@@ -79,6 +79,7 @@ export function buildSummary(
 export function formatDryRunMarkdown(
 	results: readonly RunResult[],
 	estimateUsd: EstimateUsdFn,
+	perCaseUsd?: (r: RunResult) => number | undefined,
 ): string {
 	const ESTIMATE_TOKENS = { tokenIn: 400, tokenOut: 80 };
 	const totalCases = results.length;
@@ -88,6 +89,8 @@ export function formatDryRunMarkdown(
 	// under-charges receipt/chatbot and, on a mixed local/remote matrix,
 	// quotes remote rates for buckets served by a local model.
 	const estimatedCost = results.reduce((usd, r) => {
+		const override = perCaseUsd?.(r);
+		if (typeof override === 'number') return usd + override;
 		const tier = r.evaluatedTier;
 		const call: EstimateCall =
 			tier === 'fast' || tier === 'standard' || tier === 'reasoning'
@@ -128,5 +131,49 @@ export function formatSummaryMarkdown(
 		`| routing accuracy (REQ-REG-011) | ${acc} |`,
 		`| total cost (USD) | ${s.totalCostUsd.toFixed(6)} |`,
 		`| total wall time (ms) | ${s.totalDurationMs} |`,
+	].join('\n');
+}
+
+/**
+ * Agent bucket section (REQ-REG-AGENT-004): pass^k (tasks whose every trial
+ * passed) and the per-trial pass rate, grouped by task set and by category.
+ */
+export function formatAgentSection(results: readonly RunResult[]): string {
+	type Acc = { tasks: number; passK: number; trials: number; trialPass: number };
+	const bySet = new Map<string, Acc>();
+	const byCategory = new Map<string, Acc>();
+	const add = (m: Map<string, Acc>, key: string, r: RunResult) => {
+		const a = m.get(key) ?? { tasks: 0, passK: 0, trials: 0, trialPass: 0 };
+		a.tasks++;
+		if (r.verdict === VERDICT.pass) a.passK++;
+		a.trials += r.oracleVerdicts.length;
+		a.trialPass += r.oracleVerdicts.filter((v) => v.verdict === VERDICT.pass).length;
+		m.set(key, a);
+	};
+	for (const r of results) {
+		const exp = (r.inputs[0]?.expected ?? {}) as { set?: string; category?: string };
+		add(bySet, exp.set ?? 'unknown', r);
+		add(byCategory, exp.category ?? 'unknown', r);
+	}
+	const rows = (m: Map<string, Acc>) =>
+		[...m.entries()]
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([k, a]) => `| ${k} | ${a.passK}/${a.tasks} | ${a.trialPass}/${a.trials} |`);
+	const perTrial = results
+		.map((r) => r.durationMs / Math.max(1, r.oracleVerdicts.length))
+		.sort((a, b) => a - b);
+	const median = perTrial.length ? perTrial[Math.floor(perTrial.length / 2)]! : 0;
+	return [
+		'### Agent bucket',
+		'',
+		'| set | pass^k (tasks) | trial pass rate |',
+		'|---|---|---|',
+		...rows(bySet),
+		'',
+		'| category | pass^k (tasks) | trial pass rate |',
+		'|---|---|---|',
+		...rows(byCategory),
+		'',
+		`Median wall time per trial (includes worker start-up): ${(median / 1000).toFixed(1)} s`,
 	].join('\n');
 }

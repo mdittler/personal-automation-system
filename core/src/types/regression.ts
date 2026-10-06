@@ -6,7 +6,7 @@
  * REQ-REG-002, REQ-REG-008, REQ-REG-011, REQ-REG-013, REQ-REG-014.
  */
 
-export type OracleKind = 'structural' | 'rubric' | 'judge';
+export type OracleKind = 'structural' | 'rubric' | 'judge' | 'outcome';
 
 export type Verdict = 'pass' | 'fail' | 'error' | 'budget-exceeded';
 
@@ -43,7 +43,7 @@ export interface PersonaInput {
 export interface PersonaCase {
 	id: string;
 	description: string;
-	bucket: 'receipt' | 'chatbot' | 'recall' | 'routing';
+	bucket: 'receipt' | 'chatbot' | 'recall' | 'routing' | 'agent';
 	/** Required when `bucket === 'routing'`; forbidden otherwise. */
 	routingTarget?: RoutingTarget;
 	coverage: string[]; // repo-relative POSIX paths only
@@ -214,6 +214,7 @@ export const VALID_BUCKETS: readonly PersonaCase['bucket'][] = [
 	'receipt',
 	'chatbot',
 	'recall',
+	'agent',
 ] as const;
 
 export function isValidBucket(s: string): s is PersonaCase['bucket'] {

@@ -33,12 +33,26 @@ import {
 	VERDICT,
 } from '@core/types/regression.js';
 import type { RubricJudgeLLM } from '../oracles/rubric.js';
-import { bucketCacheSalt, computeCacheKey } from '../shared/cache-key.js';
+import {
+	BUCKET_HARNESS_PATHS,
+	type TierCacheRefs,
+	bucketCacheSalt,
+	computeCacheKey,
+	usesExecutionClosure,
+} from '../shared/cache-key.js';
 import type { EstimateCall, EstimateUsdFn } from '../shared/types.js';
+import { archiveCache } from './archive-cache.js';
 import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
 import { RunBudget } from './budget.js';
-import { CacheStore } from './cache.js';
+import { CacheStore, isCacheableVerdict } from './cache.js';
 import { loadCases } from './case-loader.js';
+import {
+	AGENT_ESTIMATE_TOKENS,
+	type AgentTrialRunner,
+	type TrialMeter,
+	estimateAgentCaseUsd,
+	runAgentCase,
+} from './case-runners/agent-runner.js';
 import { CHATBOT_ESTIMATE_TOKENS, runChatbotCase } from './case-runners/chatbot-runner.js';
 import { runRecallCase } from './case-runners/recall-runner.js';
 import { RECEIPT_ESTIMATE_TOKENS, runReceiptCase } from './case-runners/receipt-runner.js';
@@ -53,25 +67,16 @@ import { buildManifest, writeManifest } from './manifest-writer.js';
 import {
 	ACCURACY_GATE_THRESHOLD,
 	buildSummary,
+	formatAgentSection,
 	formatDryRunMarkdown,
 	formatSummaryMarkdown,
 } from './markdown-report.js';
 import type { ManifestDefaults } from './runner-options.js';
 
-/**
- * Cache chatbot grades by both the tested tiers and the rubric judge. A
- * different judge can legitimately reach a different verdict for the same
- * reply, so reusing the prior grade would make model comparisons misleading.
- */
-function cacheSaltForCase(
-	bucket: PersonaCase['bucket'],
-	timezone: string,
-	judgeModelRef?: ModelRef,
-): string | undefined {
-	const bucketSalt = bucketCacheSalt(bucket, timezone);
-	if (bucket !== 'chatbot' || !judgeModelRef) return bucketSalt;
-	const judgeSalt = `judge:${judgeModelRef.provider}/${judgeModelRef.model}`;
-	return bucketSalt ? `${bucketSalt}:${judgeSalt}` : judgeSalt;
+export interface AgentHeartbeat extends TrialMeter {
+	caseId: string;
+	trial: number;
+	repeats: number;
 }
 
 export interface RunSuiteOptions {
@@ -79,6 +84,16 @@ export interface RunSuiteOptions {
 	cacheDir: string;
 	repoRoot: string;
 	modelIds: TierModelSnapshot;
+	/**
+	 * Resolved `provider/model` refs the run actually dispatches. Display
+	 * `modelIds` stay model strings; the cache key uses these refs.
+	 */
+	tierRefs?: TierCacheRefs;
+	/**
+	 * Config file the chatbot and agent runtimes load. Hashed into those
+	 * buckets' keys only. The path is the one used for this run.
+	 */
+	configPath?: string;
 	maxRunBudgetUsd: number;
 	estimateUsd: EstimateUsdFn;
 	classifiers: RoutingClassifierAdapter;
@@ -93,7 +108,20 @@ export interface RunSuiteOptions {
 		captureHandler: () => () => string | null;
 		endActiveSession: () => Promise<void>;
 		dispose: () => Promise<void>;
+		/** Seed ground truth (receipts + price lists) shown to the rubric judge. */
+		referenceData?: string;
 	}>;
+	/** Runs one agent trial in isolation (production: a worker process per trial). REQ-REG-AGENT-002. */
+	agentTrialRunner?: AgentTrialRunner;
+	/** Trials per agent task (default 3). Part of the agent execution closure. */
+	agentRepeats?: number;
+	/** Run only these case ids (applied after `bucketFilter`). Unknown ids throw. Review C23. */
+	caseFilter?: Set<string>;
+	/**
+	 * Fires for every live meter an agent trial reports. The CLI turns these
+	 * into heartbeat lines so a long trial never looks stalled (review C25).
+	 */
+	onHeartbeat?: (h: AgentHeartbeat) => void;
 	/** Judge LLM used by the rubric oracle. Required if any chatbot case is present. */
 	judgeLlm?: RubricJudgeLLM;
 	/** Optional explicit model for the rubric oracle, independent of the tiers under test. */
@@ -104,9 +132,9 @@ export interface RunSuiteOptions {
 	 */
 	receiptLlm?: Pick<LLMService, 'complete' | 'completeWithMeta'>;
 	/**
-	 * Timezone for receipt-bucket "today" computation — feeds both the cache-key
-	 * salt and the receipt-runner's date-fallback assertion. Defaults to 'UTC'
-	 * when omitted.
+	 * Timezone for "today". The receipt bucket mixes it into the cache-key salt;
+	 * the agent execution closure mixes today's date in this zone (seeds expand
+	 * `{date:±N}` against it). Defaults to 'UTC' when omitted.
 	 */
 	timezone?: string;
 	/** CostTracker proxy used by the rubric oracle to meter judge cost (and chatbot turn cost). */
@@ -115,7 +143,7 @@ export interface RunSuiteOptions {
 		getTokenUsageTotals: () => { input: number; output: number };
 	};
 	logger: MinimalLogger;
-	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall';
+	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall' | 'agent';
 	rerunIds?: Set<string>;
 	/** Force fresh dispatch for every case (skip all cache reads). Plumbs the
 	 * `--no-cache` CLI flag through. */
@@ -149,11 +177,54 @@ export const BUCKET_ESTIMATE: Readonly<Record<PersonaCase['bucket'], EstimateCal
 	recall: ESTIMATE_TOKENS,
 	chatbot: CHATBOT_ESTIMATE_TOKENS,
 	receipt: RECEIPT_ESTIMATE_TOKENS,
+	agent: AGENT_ESTIMATE_TOKENS,
 };
 
 /** Tier slot each bucket's dispatch exercises (derived from BUCKET_ESTIMATE). */
 function bucketTier(bucket: PersonaCase['bucket']): EvaluatedTier {
 	return BUCKET_ESTIMATE[bucket].tier ?? 'fast';
+}
+
+/**
+ * One cache-key shape for `runSuite` and `--list`. Chatbot and agent trials
+ * load `configPath` and the execution closure; other buckets keep a narrow
+ * harness-path list, so a config edit must not move their keys.
+ */
+function cacheKeyForCase(
+	filePath: string,
+	persona: PersonaCase,
+	opts: {
+		repoRoot: string;
+		modelIds: TierModelSnapshot;
+		tierRefs?: TierCacheRefs;
+		configPath?: string;
+		hashCache: Map<string, Promise<string>>;
+		timezone: string;
+		judgeModelRef?: ModelRef;
+		agentRepeats?: number;
+	},
+): Promise<string> {
+	const closure = usesExecutionClosure(persona.bucket);
+	const salt = bucketCacheSalt(persona.bucket, opts.timezone);
+	return computeCacheKey({
+		casePath: relative(opts.repoRoot, filePath),
+		coveragePaths: persona.coverage,
+		modelIds: opts.modelIds,
+		...(opts.tierRefs ? { tierRefs: opts.tierRefs } : {}),
+		...(closure && opts.configPath !== undefined ? { configPath: opts.configPath } : {}),
+		repoRoot: opts.repoRoot,
+		hashCache: opts.hashCache,
+		caseId: persona.id,
+		...(closure
+			? {
+					bucket: persona.bucket,
+					timezone: opts.timezone,
+					...(persona.bucket === 'agent' ? { repeats: opts.agentRepeats ?? 3 } : {}),
+					...(persona.bucket === 'chatbot' ? { judgeRef: opts.judgeModelRef ?? null } : {}),
+				}
+			: { harnessPaths: BUCKET_HARNESS_PATHS[persona.bucket] ?? [] }),
+		...(salt !== undefined ? { extraSalt: salt } : {}),
+	});
 }
 
 export interface RunSuiteOutcome {
@@ -172,9 +243,16 @@ const ZERO_COST_METER = {
 export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> {
 	const startedAt = new Date().toISOString();
 	const loaded = await loadCases(opts.casesDir);
-	const filtered = opts.bucketFilter
-		? loaded.filter((lc) => lc.case.bucket === opts.bucketFilter)
-		: loaded;
+	if (opts.caseFilter) {
+		const known = new Set(loaded.map((lc) => lc.case.id));
+		const missing = [...opts.caseFilter].filter((id) => !known.has(id));
+		if (missing.length > 0) throw new Error(`--case: unknown case id(s): ${missing.join(', ')}`);
+	}
+	const filtered = loaded.filter(
+		(lc) =>
+			(!opts.bucketFilter || lc.case.bucket === opts.bucketFilter) &&
+			(!opts.caseFilter || opts.caseFilter.has(lc.case.id)),
+	);
 
 	const cache = new CacheStore(opts.cacheDir);
 	const runBudget = new RunBudget(opts.maxRunBudgetUsd);
@@ -190,17 +268,18 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 	const hashCache = new Map<string, Promise<string>>();
 	const tz = opts.timezone ?? 'UTC';
 	const cacheKeys = await Promise.all(
-		filtered.map((lc) => {
-			const salt = cacheSaltForCase(lc.case.bucket, tz, opts.judgeModelRef);
-			return computeCacheKey({
-				casePath: relative(opts.repoRoot, lc.filePath),
-				coveragePaths: lc.case.coverage,
-				modelIds: opts.modelIds,
+		filtered.map((lc) =>
+			cacheKeyForCase(lc.filePath, lc.case, {
 				repoRoot: opts.repoRoot,
+				modelIds: opts.modelIds,
+				tierRefs: opts.tierRefs,
+				configPath: opts.configPath,
 				hashCache,
-				...(salt !== undefined ? { extraSalt: salt } : {}),
-			});
-		}),
+				timezone: tz,
+				judgeModelRef: opts.judgeModelRef,
+				agentRepeats: opts.agentRepeats,
+			}),
+		),
 	);
 
 	// Pre-read every cache entry in parallel for the cache-hit happy path.
@@ -214,115 +293,106 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 		}),
 	);
 
-	// Chatbot env is built lazily on the first chatbot case; reused across the
-	// run; disposed once in the `finally` below (REQ-REG-006). Codex I3: if the
-	// factory fails once, every subsequent chatbot case yields a synthesized
-	// error result without retrying — the failure message is cached here.
-	let chatbotEnv: Awaited<ReturnType<NonNullable<typeof opts.chatbotEnvFactory>>> | null = null;
+	// Chatbot env is built fresh per case and disposed after it (REQ-REG-025).
+	// Codex I3: if the factory fails once, every subsequent chatbot case yields
+	// a synthesized error result without retrying — the failure message is
+	// cached here.
 	let chatbotEnvFailure: string | null = null;
 
-	try {
-		for (let i = 0; i < filtered.length; i++) {
-			const lc = filtered[i]!;
-			const cacheKey = cacheKeys[i]!;
-			const cached = cacheReads[i];
+	for (let i = 0; i < filtered.length; i++) {
+		const lc = filtered[i]!;
+		const cacheKey = cacheKeys[i]!;
+		const cached = cacheReads[i];
 
-			if (cached) {
-				const out: RunResult = { ...cached, source: 'cached' };
-				results.push(out);
-				opts.onResult?.(out);
-				continue;
-			}
+		if (cached) {
+			const out: RunResult = { ...cached, source: 'cached' };
+			results.push(out);
+			opts.onResult?.(out);
+			continue;
+		}
 
-			if (opts.dryRun) {
-				const dr = makeDryRunResult(lc.case, cacheKey, opts.modelIds);
-				results.push(dr);
-				opts.onResult?.(dr);
-				continue;
-			}
+		if (opts.dryRun) {
+			const dr = makeDryRunResult(lc.case, cacheKey, opts.modelIds);
+			results.push(dr);
+			opts.onResult?.(dr);
+			continue;
+		}
 
-			const caseEstimate =
-				opts.estimateUsd(BUCKET_ESTIMATE[lc.case.bucket]) * Math.max(1, lc.case.inputs.length);
-			if (!runBudget.canAfford(caseEstimate)) {
-				opts.logger.warn(
-					{
-						caseId: lc.case.id,
-						remaining: runBudget.remainingUsd,
-						estimate: caseEstimate,
-					},
-					'orchestrator: run budget exhausted — case skipped without dispatch',
+		const agentTurns =
+			(lc.case.inputs[0]?.payload as { turns?: unknown[] } | undefined)?.turns?.length ?? 1;
+		const caseEstimate =
+			lc.case.bucket === 'agent'
+				? estimateAgentCaseUsd(agentTurns, opts.agentRepeats ?? 3, opts.estimateUsd)
+				: opts.estimateUsd(BUCKET_ESTIMATE[lc.case.bucket]) * Math.max(1, lc.case.inputs.length);
+		if (!runBudget.canAfford(caseEstimate)) {
+			opts.logger.warn(
+				{
+					caseId: lc.case.id,
+					remaining: runBudget.remainingUsd,
+					estimate: caseEstimate,
+				},
+				'orchestrator: run budget exhausted — case skipped without dispatch',
+			);
+			const be = makeBudgetExceededResult(lc.case, cacheKey, opts.modelIds);
+			results.push(be);
+			opts.onResult?.(be);
+			continue;
+		}
+
+		let result: RunResult;
+		if (lc.case.bucket === 'routing') {
+			result = await runRoutingCase(lc.case, {
+				modelIds: opts.modelIds,
+				cacheKey,
+				caseBudgetUsd: lc.case.budgetUsd,
+				estimateUsd: opts.estimateUsd,
+				logger: opts.logger,
+				classifiers: opts.classifiers,
+			});
+		} else if (lc.case.bucket === 'recall') {
+			if (!opts.recallAdapter) {
+				throw new Error(
+					`orchestrator: case "${lc.case.id}" has bucket="recall" but no recallAdapter was provided`,
 				);
-				const be = makeBudgetExceededResult(lc.case, cacheKey, opts.modelIds);
-				results.push(be);
-				opts.onResult?.(be);
+			}
+			result = await runRecallCase(lc.case, {
+				adapter: opts.recallAdapter,
+				modelIds: opts.modelIds,
+				cacheKey,
+				caseBudgetUsd: lc.case.budgetUsd,
+				estimateUsd: opts.estimateUsd,
+				logger: opts.logger,
+			});
+		} else if (lc.case.bucket === 'chatbot') {
+			if (!opts.chatbotEnvFactory || !opts.judgeLlm) {
+				throw new Error(
+					`orchestrator: chatbotEnvFactory + judgeLlm are required to dispatch chatbot case "${lc.case.id}"`,
+				);
+			}
+			// Codex I3: once the factory has failed once, every subsequent
+			// chatbot case in the same run yields an error result without
+			// dispatch — the factory is NOT retried.
+			if (chatbotEnvFailure !== null) {
+				const errResult = makeEnvFailureResult(lc.case, cacheKey, opts.modelIds, chatbotEnvFailure);
+				results.push(errResult);
+				opts.onResult?.(errResult);
 				continue;
 			}
-
-			let result: RunResult;
-			if (lc.case.bucket === 'routing') {
-				result = await runRoutingCase(lc.case, {
-					modelIds: opts.modelIds,
-					cacheKey,
-					caseBudgetUsd: lc.case.budgetUsd,
-					estimateUsd: opts.estimateUsd,
-					logger: opts.logger,
-					classifiers: opts.classifiers,
-				});
-			} else if (lc.case.bucket === 'recall') {
-				if (!opts.recallAdapter) {
-					throw new Error(
-						`orchestrator: case "${lc.case.id}" has bucket="recall" but no recallAdapter was provided`,
-					);
-				}
-				result = await runRecallCase(lc.case, {
-					adapter: opts.recallAdapter,
-					modelIds: opts.modelIds,
-					cacheKey,
-					caseBudgetUsd: lc.case.budgetUsd,
-					estimateUsd: opts.estimateUsd,
-					logger: opts.logger,
-				});
-			} else if (lc.case.bucket === 'chatbot') {
-				if (!opts.chatbotEnvFactory || !opts.judgeLlm) {
-					throw new Error(
-						`orchestrator: chatbotEnvFactory + judgeLlm are required to dispatch chatbot case "${lc.case.id}"`,
-					);
-				}
-				// Codex I3: once the factory has failed once, every subsequent
-				// chatbot case in the same run yields an error result without
-				// dispatch — the factory is NOT retried.
-				if (chatbotEnvFailure !== null) {
-					const errResult = makeEnvFailureResult(
-						lc.case,
-						cacheKey,
-						opts.modelIds,
-						chatbotEnvFailure,
-					);
-					results.push(errResult);
-					opts.onResult?.(errResult);
-					continue;
-				}
-				if (chatbotEnv === null) {
-					try {
-						chatbotEnv = await opts.chatbotEnvFactory();
-					} catch (err) {
-						chatbotEnvFailure = (err as Error).message || 'chatbot env factory failed';
-						opts.logger.warn(
-							{ err: chatbotEnvFailure },
-							'orchestrator: chatbot env factory failed — marking remaining chatbot cases as error',
-						);
-						const errResult = makeEnvFailureResult(
-							lc.case,
-							cacheKey,
-							opts.modelIds,
-							chatbotEnvFailure,
-						);
-						results.push(errResult);
-						opts.onResult?.(errResult);
-						continue;
-					}
-				}
-				const env = chatbotEnv;
+			let env: Awaited<ReturnType<NonNullable<typeof opts.chatbotEnvFactory>>>;
+			try {
+				env = await opts.chatbotEnvFactory();
+			} catch (err) {
+				chatbotEnvFailure = (err as Error).message || 'chatbot env factory failed';
+				opts.logger.warn(
+					{ err: chatbotEnvFailure },
+					'orchestrator: chatbot env factory failed — marking remaining chatbot cases as error',
+				);
+				const errResult = makeEnvFailureResult(lc.case, cacheKey, opts.modelIds, chatbotEnvFailure);
+				results.push(errResult);
+				opts.onResult?.(errResult);
+				continue;
+			}
+			try {
 				result = await runChatbotCase(lc.case, {
 					env: {
 						userId: env.userId,
@@ -338,6 +408,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 					judgeLlm: opts.judgeLlm,
 					judgeModelId: opts.judgeModelRef?.model ?? opts.modelIds.standard,
 					...(opts.judgeModelRef ? { judgeModelRef: opts.judgeModelRef } : {}),
+					...(env.referenceData !== undefined ? { referenceData: env.referenceData } : {}),
 					costTracker: opts.costTracker ?? ZERO_COST_METER,
 					modelIds: opts.modelIds,
 					cacheKey,
@@ -345,40 +416,56 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 					estimateUsd: opts.estimateUsd,
 					logger: opts.logger,
 				});
-			} else if (lc.case.bucket === 'receipt') {
-				if (!opts.receiptLlm) {
-					throw new Error(
-						`orchestrator: receiptLlm is required to dispatch receipt case "${lc.case.id}"`,
-					);
-				}
-				result = await runReceiptCase(lc.case, {
-					llm: opts.receiptLlm,
-					logger: opts.logger,
-					timezone: tz,
-					modelIds: opts.modelIds,
-					cacheKey,
-					caseBudgetUsd: lc.case.budgetUsd,
-					estimateUsd: opts.estimateUsd,
-					costTracker: opts.costTracker ?? ZERO_COST_METER,
-				});
-			} else {
-				// Fallback for any future bucket not yet wired here.
-				opts.logger.info(
-					{ caseId: lc.case.id, bucket: lc.case.bucket },
-					'orchestrator: bucket runner not wired yet — skipping case',
-				);
-				continue;
+			} finally {
+				await env.dispose();
 			}
+		} else if (lc.case.bucket === 'receipt') {
+			if (!opts.receiptLlm) {
+				throw new Error(
+					`orchestrator: receiptLlm is required to dispatch receipt case "${lc.case.id}"`,
+				);
+			}
+			result = await runReceiptCase(lc.case, {
+				llm: opts.receiptLlm,
+				logger: opts.logger,
+				timezone: tz,
+				modelIds: opts.modelIds,
+				cacheKey,
+				caseBudgetUsd: lc.case.budgetUsd,
+				estimateUsd: opts.estimateUsd,
+				costTracker: opts.costTracker ?? ZERO_COST_METER,
+			});
+		} else if (lc.case.bucket === 'agent') {
+			if (!opts.agentTrialRunner) {
+				throw new Error(
+					`orchestrator: agentTrialRunner is required to dispatch agent case "${lc.case.id}"`,
+				);
+			}
+			const repeats = opts.agentRepeats ?? 3;
+			result = await runAgentCase(lc.case, {
+				runTrial: opts.agentTrialRunner,
+				repeats,
+				modelIds: opts.modelIds,
+				cacheKey,
+				// Never let later trials spend past what the run has left.
+				caseBudgetUsd: Math.min(lc.case.budgetUsd, runBudget.remainingUsd),
+				estimateUsd: opts.estimateUsd,
+				logger: opts.logger,
+				onMeter: (trial, m) => opts.onHeartbeat?.({ caseId: lc.case.id, trial, repeats, ...m }),
+			});
+		} else {
+			// Fallback for any future bucket not yet wired here.
+			opts.logger.info(
+				{ caseId: lc.case.id, bucket: lc.case.bucket },
+				'orchestrator: bucket runner not wired yet — skipping case',
+			);
+			continue;
+		}
 
-			runBudget.add(result.costUsd);
-			await cache.write(result);
-			results.push(result);
-			opts.onResult?.(result);
-		}
-	} finally {
-		if (chatbotEnv) {
-			await chatbotEnv.dispose();
-		}
+		runBudget.add(result.costUsd);
+		if (isCacheableVerdict(result.verdict)) await cache.write(result);
+		results.push(result);
+		opts.onResult?.(result);
 	}
 
 	const summary = buildSummary(results, targets);
@@ -435,6 +522,8 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 export type RunCliDeps = Omit<
 	RunSuiteOptions,
 	| 'bucketFilter'
+	| 'caseFilter'
+	| 'onHeartbeat'
 	| 'rerunIds'
 	| 'noCache'
 	| 'dryRun'
@@ -453,10 +542,11 @@ export interface RunCliResult {
 export async function runCli(
 	argv: readonly string[],
 	deps: RunCliDeps,
-	streams: { stdout?: (s: string) => void } = {},
+	streams: { stdout?: (s: string) => void; stderr?: (s: string) => void } = {},
 	manifestDefaults?: ManifestDefaults,
 ): Promise<RunCliResult> {
 	const write = streams.stdout ?? ((s: string) => process.stdout.write(s));
+	const writeErr = streams.stderr ?? ((s: string) => process.stderr.write(s));
 	let cli: CliOptions;
 	try {
 		cli = parseCliArgs(argv);
@@ -471,6 +561,8 @@ export async function runCli(
 				help: false,
 				listOnly: false,
 				noCache: false,
+				archiveCache: false,
+				repeats: 3,
 				noManifest: false,
 			},
 		};
@@ -479,12 +571,17 @@ export async function runCli(
 		write(HELP_TEXT);
 		return { exitCode: 0, outcome: null, options: cli };
 	}
+	if (cli.archiveCache) {
+		const dest = await archiveCache(deps.cacheDir, new Date());
+		write(dest ? `Archived cache to ${dest}\n` : 'No cache directory to archive.\n');
+		return { exitCode: 0, outcome: null, options: cli };
+	}
 	const effectiveDeps: RunCliDeps = {
 		...deps,
 		...(cli.judgeModel ? { judgeModelRef: cli.judgeModel } : {}),
 	};
 	if (cli.listOnly) {
-		await emitCaseList(effectiveDeps, write);
+		await emitCaseList(effectiveDeps, write, cli.repeats);
 		return { exitCode: 0, outcome: null, options: cli };
 	}
 
@@ -500,6 +597,17 @@ export async function runCli(
 	const outcome = await runSuite({
 		...effectiveDeps,
 		bucketFilter: cli.bucketFilter,
+		caseFilter: cli.caseIds,
+		agentRepeats: cli.repeats,
+		// Heartbeats: NDJSON on stdout for the GUI (its parser ignores unknown
+		// types and every stdout chunk re-arms its 10-minute stall watchdog);
+		// a stderr progress line otherwise so the markdown report stays clean.
+		onHeartbeat: cli.json
+			? (h) => write(`${JSON.stringify({ type: 'heartbeat', ...h })}\n`)
+			: (h) =>
+					writeErr(
+						`agent heartbeat: ${h.caseId} trial ${h.trial}/${h.repeats} $${h.costUsd.toFixed(4)}\n`,
+					),
 		rerunIds: cli.rerunIds,
 		noCache: cli.noCache,
 		dryRun: cli.dryRun,
@@ -521,9 +629,16 @@ export async function runCli(
 		// Dry-run cases have empty oracleVerdicts and synthetic pass verdicts.
 		// Reporting them as pass/fail would mislead the operator — render the
 		// estimate-focused dry-run summary instead.
-		write(`${formatDryRunMarkdown(outcome.results, effectiveDeps.estimateUsd)}\n`);
+		const agentEstimate = (r: RunResult): number | undefined => {
+			if (!r.caseId.startsWith('agent-')) return undefined;
+			const turns = (r.inputs[0]?.payload as { turns?: unknown[] } | undefined)?.turns?.length ?? 1;
+			return estimateAgentCaseUsd(turns, cli.repeats, effectiveDeps.estimateUsd);
+		};
+		write(`${formatDryRunMarkdown(outcome.results, effectiveDeps.estimateUsd, agentEstimate)}\n`);
 	} else {
+		const agentResults = outcome.results.filter((r) => r.caseId.startsWith('agent-'));
 		write(`${formatSummaryMarkdown(outcome.results, outcome.targets)}\n`);
+		if (agentResults.length > 0) write(`\n${formatAgentSection(agentResults)}\n`);
 	}
 
 	// REQ-REG-011 gate: skip on dry-run (no oracle ran). Below floor → null →
@@ -549,7 +664,11 @@ export async function runCli(
  * consumer). No dispatch occurs; the orchestrator's classifier adapters
  * are never invoked.
  */
-async function emitCaseList(deps: RunCliDeps, write: (s: string) => void): Promise<void> {
+async function emitCaseList(
+	deps: RunCliDeps,
+	write: (s: string) => void,
+	agentRepeats = 3,
+): Promise<void> {
 	const loaded = await loadCases(deps.casesDir);
 	const hashCache = new Map<string, Promise<string>>();
 	// List-mode must apply the same bucket-specific salts the real run uses,
@@ -557,17 +676,18 @@ async function emitCaseList(deps: RunCliDeps, write: (s: string) => void): Promi
 	// post-dispatch cache file the GUI looks up.
 	const tz = deps.timezone ?? 'UTC';
 	const cacheKeys = await Promise.all(
-		loaded.map((lc) => {
-			const salt = cacheSaltForCase(lc.case.bucket, tz, deps.judgeModelRef);
-			return computeCacheKey({
-				casePath: relative(deps.repoRoot, lc.filePath),
-				coveragePaths: lc.case.coverage,
-				modelIds: deps.modelIds,
+		loaded.map((lc) =>
+			cacheKeyForCase(lc.filePath, lc.case, {
 				repoRoot: deps.repoRoot,
+				modelIds: deps.modelIds,
+				tierRefs: deps.tierRefs,
+				configPath: deps.configPath,
 				hashCache,
-				...(salt !== undefined ? { extraSalt: salt } : {}),
-			});
-		}),
+				timezone: tz,
+				judgeModelRef: deps.judgeModelRef,
+				agentRepeats,
+			}),
+		),
 	);
 	let totalInputs = 0;
 	for (let i = 0; i < loaded.length; i++) {

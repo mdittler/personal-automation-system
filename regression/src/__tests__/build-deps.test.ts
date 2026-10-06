@@ -10,9 +10,9 @@
  * exercised — not bypassed by hand-built adapter shims.
  */
 
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { CostTracker } from '@core/services/llm/cost-tracker.js';
 import { ProviderRegistry } from '@core/services/llm/providers/provider-registry.js';
 import { createStubProviderRegistry } from '@core/testing/fixtures/stub-llm-provider.js';
@@ -28,6 +28,7 @@ import {
 	composeLLMService,
 	findRepoRoot,
 	resolveTierModelIds,
+	resolveTierRefs,
 } from '../runner/build-deps.js';
 
 let tempDir: string;
@@ -179,6 +180,17 @@ describe('build-deps — Chunk C wiring', () => {
 		expect(overridden.modelIds.standard).toBe('gemma4:26b');
 	});
 
+	it('applyModelMatrixOverride keeps provider identity beside the displayed model ids', () => {
+		const overridden = applyModelMatrixOverride(buildDryRunDeps(), {
+			fast: { provider: 'ollama', model: 'gemma' },
+			standard: { provider: 'llama-cpp', model: 'gemma' },
+		});
+		expect(overridden.modelIds.fast).toBe('gemma');
+		expect(overridden.modelIds.standard).toBe('gemma');
+		expect(overridden.tierRefs?.fast).toEqual({ provider: 'ollama', model: 'gemma' });
+		expect(overridden.tierRefs?.standard).toEqual({ provider: 'llama-cpp', model: 'gemma' });
+	});
+
 	it('applyJudgeModelOverride preserves the standard-tier candidate', () => {
 		const baseDeps = buildDryRunDeps();
 		const overridden = applyJudgeModelOverride(baseDeps, {
@@ -323,6 +335,38 @@ describe('resolveTierModelIds — transient override (Batch 0)', () => {
 	});
 });
 
+describe('resolveTierRefs — reconcile against available providers (review C13/C20)', () => {
+	it('a saved tier whose provider is unavailable reverts to the configured default', async () => {
+		const { writeYamlFile } = await import('@core/utils/yaml.js');
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		await writeYamlFile(join(config.dataDir, 'system', 'model-selection.yaml'), {
+			standard: { provider: 'ghost', model: 'saved-standard' },
+			fast: { provider: 'stub', model: 'persisted-fast' },
+		});
+		const unreconciled = await resolveTierRefs(config, logger);
+		expect(unreconciled.standard).toEqual({ provider: 'ghost', model: 'saved-standard' });
+		const reconciled = await resolveTierRefs(config, logger, undefined, new Set(['stub']));
+		expect(reconciled.standard).toEqual({ provider: 'stub', model: 'stub-model' });
+		expect(reconciled.fast).toEqual({ provider: 'stub', model: 'persisted-fast' });
+	});
+});
+
+describe('build-deps — agent trial runner wiring (REQ-REG-AGENT-002)', () => {
+	it('dry-run deps stub the agent trial runner to throw if invoked', async () => {
+		const deps = buildDryRunDeps();
+		await expect(
+			deps.agentTrialRunner?.({
+				caseId: 'agent-x',
+				trial: 1,
+				repeats: 1,
+				payload: { turns: [{ text: 'q' }] },
+				expectation: { set: 'regression', category: 'no-tool' },
+			}),
+		).rejects.toThrow(/agent trials unavailable/);
+	});
+});
+
 describe('composeLLMService — cost-tracker delta', () => {
 	it('cost-tracker delta is non-zero after a real provider call (drives REQ-REG-013 cost field)', async () => {
 		const logger = pino({ level: 'silent' });
@@ -373,14 +417,29 @@ describe('build-deps — receipt runner CostTracker wiring', () => {
 
 describe('findRepoRoot — workspace cwd independence', () => {
 	const originalCwd = process.cwd();
-	afterEach(() => {
+	const temps: string[] = [];
+	afterEach(async () => {
 		process.chdir(originalCwd);
+		await Promise.all(temps.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 	});
 
-	it('returns a path containing config/pas.yaml regardless of cwd', async () => {
+	async function layout(withPasYaml: boolean): Promise<{ root: string; start: string }> {
+		const root = await mkdtemp(join(tmpdir(), 'find-repo-root-'));
+		temps.push(root);
+		const start = join(root, 'regression', 'src', 'runner');
+		await mkdir(start, { recursive: true });
+		await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - regression\n');
+		if (withPasYaml) {
+			await mkdir(join(root, 'config'), { recursive: true });
+			await writeFile(join(root, 'config', 'pas.yaml'), 'defaults:\n  timezone: UTC\n');
+		}
+		return { root, start };
+	}
+
+	it('returns a path containing pnpm-workspace.yaml regardless of cwd', async () => {
 		const root = findRepoRoot();
 		const { existsSync } = await import('node:fs');
-		expect(existsSync(join(root, 'config', 'pas.yaml'))).toBe(true);
+		expect(existsSync(join(root, 'pnpm-workspace.yaml'))).toBe(true);
 	});
 
 	it('returns the same root from the regression workspace cwd', async () => {
@@ -393,5 +452,30 @@ describe('findRepoRoot — workspace cwd independence', () => {
 		const rootFromRepo = findRepoRoot();
 		process.chdir(join(rootFromRepo, 'regression', 'src', 'runner'));
 		expect(findRepoRoot()).toBe(rootFromRepo);
+	});
+
+	it('finds a temp root that has pnpm-workspace.yaml and no config/pas.yaml', async () => {
+		const { root, start } = await layout(false);
+		expect(findRepoRoot(start)).toBe(root);
+	});
+
+	it('finds the same temp root when config/pas.yaml is also present', async () => {
+		const { root, start } = await layout(true);
+		expect(findRepoRoot(start)).toBe(root);
+	});
+
+	it('does not treat config/pas.yaml as the repo root when the workspace marker is absent', async () => {
+		const decoy = await mkdtemp(join(tmpdir(), 'find-repo-root-decoy-'));
+		temps.push(decoy);
+		const start = join(decoy, 'regression', 'src');
+		await mkdir(join(decoy, 'config'), { recursive: true });
+		await mkdir(start, { recursive: true });
+		await writeFile(join(decoy, 'config', 'pas.yaml'), 'defaults:\n  timezone: UTC\n');
+		const cwd = await mkdtemp(join(tmpdir(), 'find-repo-root-cwd-'));
+		temps.push(cwd);
+		process.chdir(cwd);
+		// macOS `process.cwd()` reports `/private/var` after chdir into `/var`.
+		expect(findRepoRoot(start)).toBe(resolve(process.cwd()));
+		expect(findRepoRoot(start)).not.toBe(decoy);
 	});
 });

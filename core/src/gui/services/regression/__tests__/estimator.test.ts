@@ -109,7 +109,7 @@ describe('estimateRunCostUsd — local tiers are free', () => {
 		];
 		const out = estimateRunCostUsd(cases, { ceilingUsd: 5, localTiers: ALL_LOCAL });
 		expect(out.estimateUsd).toBe(0);
-		expect(out.perBucketUsd).toEqual({ routing: 0, receipt: 0, chatbot: 0, recall: 0 });
+		expect(out.perBucketUsd).toEqual({ routing: 0, receipt: 0, chatbot: 0, recall: 0, agent: 0 });
 		expect(out.allLocal).toBe(true);
 	});
 
@@ -169,6 +169,18 @@ describe('estimateRunCostUsd — local tiers are free', () => {
 			recall: 'fast',
 			receipt: 'standard',
 			chatbot: 'standard',
+			agent: 'standard',
 		});
+	});
+
+	it('prices agent cases on the standard tier and charges nothing when it is local', () => {
+		const remote = estimateRunCostUsd([{ caseId: 'a', bucket: 'agent' }], { ceilingUsd: 5 });
+		expect(remote.perBucketUsd.agent).toBeGreaterThan(0);
+		const local = estimateRunCostUsd([{ caseId: 'a', bucket: 'agent' }], {
+			ceilingUsd: 5,
+			localTiers: { standard: true },
+		});
+		expect(local.estimateUsd).toBe(0);
+		expect(local.allLocal).toBe(true);
 	});
 });

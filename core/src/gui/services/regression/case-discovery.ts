@@ -34,7 +34,7 @@ import {
 
 export interface ListedCase {
 	caseId: string;
-	bucket: 'routing' | 'receipt' | 'chatbot' | 'recall';
+	bucket: 'routing' | 'receipt' | 'chatbot' | 'recall' | 'agent';
 	routingTarget?: 'food-shadow' | 'session-control' | 'pas';
 	description: string;
 	oracle: string;

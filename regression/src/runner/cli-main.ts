@@ -17,6 +17,7 @@
  * unit-testable without the top-level-await dance.
  */
 
+import { installWorkerTeardown } from './agent-trial-spawn.js';
 import { buildTierOverrideFromCli, parseCliArgs } from './args.js';
 import type { CliOptions } from './args.js';
 import {
@@ -35,6 +36,11 @@ import { resolveManifestDefaults } from './runner-options.js';
 // `loadSystemConfig` (not at module-load), so setting this before the
 // build-deps call below is sufficient. (Codex P3.2.)
 process.env.DOTENV_CONFIG_QUIET = process.env.DOTENV_CONFIG_QUIET ?? 'true';
+
+// SIGTERM from the GUI (`subprocess.ts` sigtermWithSigkillFallback) or Ctrl-C
+// reaches only this pid: kill live agent-trial workers, log their last meters,
+// and exit 128+signal so no worker keeps spending after the CLI is gone (C25).
+installWorkerTeardown();
 
 const argv = process.argv.slice(2);
 const isList = argv.includes('--list');
@@ -56,6 +62,8 @@ try {
 		help: false,
 		listOnly: false,
 		noCache: false,
+		archiveCache: false,
+		repeats: 3,
 		noManifest: false,
 	};
 }
