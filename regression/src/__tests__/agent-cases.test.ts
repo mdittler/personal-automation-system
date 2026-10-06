@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
 import { buildCases } from '../cases/agent/index.js';
@@ -12,8 +13,9 @@ import {
 } from '../cases/agent/types.js';
 import { validatePersonaCase } from '../shared/validate-case.js';
 
-const FIXTURES = join(process.cwd(), 'fixtures', 'agent');
-const REPO = join(process.cwd(), '..');
+const REGRESSION_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+const FIXTURES = join(REGRESSION_ROOT, 'fixtures', 'agent');
+const REPO = fileURLToPath(new URL('../../..', import.meta.url));
 
 describe('agent seed facts are pinned (REQ-REG-AGENT-003)', () => {
 	const f = seedFacts(FIXTURES);

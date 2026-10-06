@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -224,5 +224,58 @@ describe('evaluateOutcome data-state exists (REQ-REG-AGENT-001)', () => {
 		expect((await run(false)).failures).toEqual([
 			'data state: households/hh1/shared/food/note.md should not exist',
 		]);
+	});
+});
+
+describe('evaluateOutcome path containment (review R1-3)', () => {
+	const escaping = ['../outside.txt', '/etc/passwd', 'a/../../x'] as const;
+
+	async function grade(path: string, kind: 'dataState' | 'unchanged') {
+		const expectation: AgentExpectation =
+			kind === 'dataState'
+				? {
+						set: 'regression',
+						category: 'write',
+						dataState: [{ path, exists: true }],
+					}
+				: { set: 'capability', category: 'injection', unchanged: [path] };
+		const before =
+			kind === 'unchanged' ? await snapshotPaths(expectation.unchanged ?? [], ctx()) : new Map();
+		return evaluateOutcome({ replies: ['ok'], expectation, ctx: ctx(), before });
+	}
+
+	it.each(escaping)('data-state path %s fails the trial', async (path) => {
+		const r = await grade(path, 'dataState');
+		expect(r.pass).toBe(false);
+		expect(r.failures.join('\n')).toMatch(/path escapes trial data dir/);
+	});
+
+	it.each(escaping)('unchanged path %s fails the trial', async (path) => {
+		const r = await grade(path, 'unchanged');
+		expect(r.pass).toBe(false);
+		expect(r.failures.join('\n')).toMatch(/path escapes trial data dir/);
+	});
+
+	it('fails when a wildcard match is a symlink pointing outside the trial data dir', async () => {
+		const outside = await mkdtemp(join(tmpdir(), 'outcome-outside-'));
+		try {
+			await writeFile(join(outside, 'secret.txt'), 'secret-bytes');
+			await mkdir(join(dataDir, 'bucket'));
+			await symlink(join(outside, 'secret.txt'), join(dataDir, 'bucket', 'link.txt'));
+			const r = await evaluateOutcome({
+				replies: ['ok'],
+				expectation: {
+					set: 'regression',
+					category: 'write',
+					dataState: [{ path: 'bucket/*.txt', contains: ['secret-bytes'] }],
+				},
+				ctx: ctx(),
+				before: new Map(),
+			});
+			expect(r.pass).toBe(false);
+			expect(r.failures.join('\n')).toMatch(/path escapes trial data dir/);
+		} finally {
+			await rm(outside, { recursive: true, force: true });
+		}
 	});
 });

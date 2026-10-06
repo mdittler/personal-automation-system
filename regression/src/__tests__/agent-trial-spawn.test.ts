@@ -6,6 +6,7 @@ import {
 	METER_INTERVAL_MS,
 	WORKER_TIMEOUT_MS,
 	installWorkerTeardown,
+	killLiveWorkers,
 	liveWorkerCount,
 	parseMeterLine,
 	spawnAgentTrial,
@@ -16,6 +17,7 @@ beforeEach(async () => {
 	dir = await mkdtemp(join(tmpdir(), 'spawn-'));
 });
 afterEach(async () => {
+	killLiveWorkers('test cleanup');
 	await rm(dir, { recursive: true, force: true });
 });
 
@@ -142,6 +144,7 @@ describe('spawnAgentTrial (REQ-REG-AGENT-002)', () => {
 				handlers[sig] = fn;
 				return fakeProc;
 			}),
+			on: vi.fn(() => fakeProc),
 			exit: vi.fn(),
 		};
 		const log = vi.fn();
@@ -178,5 +181,110 @@ describe('spawnAgentTrial (REQ-REG-AGENT-002)', () => {
 	it('pins the production timers (review C27)', () => {
 		expect(METER_INTERVAL_MS).toBe(2000);
 		expect(WORKER_TIMEOUT_MS).toBe(15 * 60_000);
+	});
+
+	it('settles as an error verdict when spawn emits error (ENOENT) and does not hang', async () => {
+		const out = await spawnAgentTrial(
+			{
+				workerPath: join(dir, 'missing-worker.mjs'),
+				execArgv: [],
+				cwd: join(dir, 'no-such-cwd'),
+				timeoutMs: 5_000,
+			},
+			request,
+		);
+		expect(out.verdict).toBe('error');
+		expect(out.details).toMatch(/ENOENT/);
+		expect(liveWorkerCount()).toBe(0);
+	});
+
+	async function meteredWorker(): Promise<{
+		pending: ReturnType<typeof spawnAgentTrial>;
+		handlers: Record<string, (...args: unknown[]) => void>;
+		fakeProc: { exit: ReturnType<typeof vi.fn> };
+		log: ReturnType<typeof vi.fn>;
+		dispose: () => void;
+	}> {
+		const p = await worker(`process.stdin.resume(); process.stdin.on('end', () => {
+			console.log(JSON.stringify({ type: 'meter', costUsd: 0.02, tokenIn: 10, tokenOut: 4 }));
+			setInterval(() => {}, 1000);
+		});`);
+		const handlers: Record<string, (...args: unknown[]) => void> = {};
+		const fakeProc = {
+			once: vi.fn((ev: string, fn: (...args: unknown[]) => void) => {
+				handlers[ev] = fn;
+				return fakeProc;
+			}),
+			on: vi.fn((ev: string, fn: (...args: unknown[]) => void) => {
+				handlers[ev] = fn;
+				return fakeProc;
+			}),
+			exit: vi.fn(),
+		};
+		const log = vi.fn();
+		const dispose = installWorkerTeardown(fakeProc as unknown as NodeJS.Process, { log });
+		let metered = false;
+		const pending = spawnAgentTrial(
+			{
+				workerPath: p,
+				execArgv: [],
+				cwd: dir,
+				timeoutMs: 10_000,
+				onMeter: () => {
+					metered = true;
+				},
+			},
+			request,
+		);
+		await vi.waitFor(() => expect(metered).toBe(true), { timeout: 5000 });
+		expect(liveWorkerCount()).toBe(1);
+		return { pending, handlers, fakeProc, log, dispose };
+	}
+
+	it('kills registered workers and logs their last meter on uncaughtException, then exits non-zero', async () => {
+		const { pending, handlers, fakeProc, log, dispose } = await meteredWorker();
+		const onUncaught = handlers.uncaughtException;
+		expect(onUncaught, 'uncaughtException handler').toBeTypeOf('function');
+		onUncaught?.(new Error('boom'));
+		expect(fakeProc.exit).toHaveBeenCalledWith(1);
+		expect(log).toHaveBeenCalledWith(
+			expect.stringMatching(/"type":"worker-terminated".*"costUsd":0\.02/),
+		);
+		expect(log.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(/boom/);
+		const out = await pending;
+		expect(out.verdict).toBe('error');
+		expect(out).toMatchObject({ costUsd: 0.02, tokenIn: 10, tokenOut: 4 });
+		expect(liveWorkerCount()).toBe(0);
+		dispose();
+	});
+
+	it('kills registered workers and logs their last meter on unhandledRejection, then exits non-zero', async () => {
+		const { pending, handlers, fakeProc, log, dispose } = await meteredWorker();
+		const onRejection = handlers.unhandledRejection;
+		expect(onRejection, 'unhandledRejection handler').toBeTypeOf('function');
+		onRejection?.('rejection-boom');
+		expect(fakeProc.exit).toHaveBeenCalledWith(1);
+		expect(log).toHaveBeenCalledWith(
+			expect.stringMatching(/"type":"worker-terminated".*"costUsd":0\.02/),
+		);
+		expect(log.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(/rejection-boom/);
+		await pending;
+		expect(liveWorkerCount()).toBe(0);
+		dispose();
+	});
+
+	it('kills registered workers and logs their last meter on process exit without exiting again', async () => {
+		const { pending, handlers, fakeProc, log, dispose } = await meteredWorker();
+		const onExit = handlers.exit;
+		expect(onExit, 'exit handler').toBeTypeOf('function');
+		onExit?.(0);
+		expect(fakeProc.exit).not.toHaveBeenCalled();
+		expect(log).toHaveBeenCalledWith(
+			expect.stringMatching(/"type":"worker-terminated".*"costUsd":0\.02/),
+		);
+		const out = await pending;
+		expect(out.verdict).toBe('error');
+		expect(liveWorkerCount()).toBe(0);
+		dispose();
 	});
 });

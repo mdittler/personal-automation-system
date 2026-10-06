@@ -11,10 +11,15 @@ import { pino } from 'pino';
 import { createAgentEnvironment } from './agent-environment.js';
 import { type AgentWorkerRequest, METER_INTERVAL_MS } from './agent-trial-spawn.js';
 import { runAgentTrial } from './agent-trial.js';
+import { installParentLiveness } from './parent-liveness.js';
 import { createProviderCallTracker } from './provider-call-tracker.js';
 import { createProviderRegistry } from './provider-registry.js';
 
 process.env.DOTENV_CONFIG_QUIET = process.env.DOTENV_CONFIG_QUIET ?? 'true';
+
+// Exit if the parent disappears (SIGKILL included). Installed before any await
+// so a crash during startup cannot leave this process running out the timeout.
+installParentLiveness();
 
 async function readStdin(): Promise<string> {
 	let s = '';

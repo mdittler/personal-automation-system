@@ -81,6 +81,7 @@ export function validatePersonaCase(c: PersonaCase): void {
 		if (!c.id.startsWith('agent-')) {
 			throw new Error(`PersonaCase: agent case ids must start with "agent-": ${c.id}`);
 		}
+		validateAgentDataPaths(c.inputs[0]?.expected, c.id);
 		return;
 	}
 	if (c.oracle === 'judge') {
@@ -104,5 +105,43 @@ export function validatePersonaCase(c: PersonaCase): void {
 		throw new Error(
 			`PersonaCase.oracle must be 'structural', 'rubric' or 'outcome': ${JSON.stringify(c.oracle)}`,
 		);
+	}
+}
+
+/** Reject `..` and absolute outcome paths before a trial can resolve them outside its data dir. */
+function trialDataPathEscapes(p: string): boolean {
+	const substituted = p.replaceAll('{householdId}', 'h').replaceAll('{userId}', 'u');
+	if (!substituted || substituted.includes('\0') || substituted.includes('\\')) return true;
+	if (substituted.startsWith('/') || /^[A-Za-z]:/.test(substituted)) return true;
+	return substituted.split('/').includes('..');
+}
+
+function validateAgentDataPaths(expected: unknown, caseId: string): void {
+	if (expected === null || typeof expected !== 'object' || Array.isArray(expected)) return;
+	const exp = expected as { dataState?: unknown; unchanged?: unknown };
+	if (exp.dataState !== undefined) {
+		if (!Array.isArray(exp.dataState)) {
+			throw new Error(`PersonaCase dataState must be an array (case: ${caseId})`);
+		}
+		for (const check of exp.dataState) {
+			const path = (check as { path?: unknown } | null)?.path;
+			if (typeof path !== 'string' || trialDataPathEscapes(path)) {
+				throw new Error(
+					`PersonaCase dataState path escapes trial data dir: ${JSON.stringify(path)} (case: ${caseId})`,
+				);
+			}
+		}
+	}
+	if (exp.unchanged !== undefined) {
+		if (!Array.isArray(exp.unchanged)) {
+			throw new Error(`PersonaCase unchanged must be an array (case: ${caseId})`);
+		}
+		for (const path of exp.unchanged) {
+			if (typeof path !== 'string' || trialDataPathEscapes(path)) {
+				throw new Error(
+					`PersonaCase unchanged path escapes trial data dir: ${JSON.stringify(path)} (case: ${caseId})`,
+				);
+			}
+		}
 	}
 }

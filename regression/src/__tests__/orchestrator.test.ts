@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RubricJudgeLLM } from '../oracles/rubric.js';
 import type { AgentTrialRunner } from '../runner/case-runners/agent-runner.js';
@@ -43,7 +44,7 @@ afterEach(async () => {
 
 // Absolute import path so the case module can find `PersonaCase` even though
 // it lives outside the temp dir.
-const TYPES_PATH = join(process.cwd(), 'regression/src/shared/types.ts');
+const TYPES_PATH = fileURLToPath(new URL('../shared/types.ts', import.meta.url));
 
 const oneRoutingCase = (id: string) => `
 import type { PersonaCase } from '${TYPES_PATH.replace(/'/g, "\\'")}';

@@ -83,6 +83,8 @@ interface LiveWorker {
 	caseId: string;
 	trial: number;
 	lastMeter: () => TrialMeter | undefined;
+	/** Write end of the parent-liveness pipe. Held so it stays open until this process exits. */
+	liveness?: ChildProcess['stdio'][number];
 }
 
 const liveWorkers = new Map<ChildProcess, LiveWorker>();
@@ -129,28 +131,50 @@ const SIGNAL_EXIT_CODE: Partial<Record<NodeJS.Signals, number>> = {
 	SIGTERM: 143,
 };
 
+function formatCrash(reason: unknown): string {
+	return reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+}
+
 /**
- * Install once from `cli-main.ts`. On SIGTERM/SIGINT/SIGHUP: kill live
- * workers, log one `{"type":"worker-terminated",…}` line per worker (stderr,
- * with its last meter — the spend is visible even though the run is gone),
- * then exit 128+signal. Returns a disposer (tests).
+ * Install once from `cli-main.ts`. On SIGTERM/SIGINT/SIGHUP, and also on
+ * `uncaughtException` / `unhandledRejection` / process `exit`: SIGKILL every
+ * live worker and log one `{"type":"worker-terminated",…}` line per worker
+ * (stderr, with its last meter). Signal handlers then exit 128+signal.
+ * Exception handlers log the crash and exit 1 so it stays visible. The `exit`
+ * handler only kills — it must not call `process.exit` again. Returns a
+ * disposer (tests).
  */
 export function installWorkerTeardown(
-	proc: Pick<NodeJS.Process, 'once' | 'exit'> = process,
+	proc: Pick<NodeJS.Process, 'once' | 'on' | 'exit'> = process,
 	opts: { signals?: NodeJS.Signals[]; log?: (line: string) => void } = {},
 ): () => void {
 	const signals = opts.signals ?? ['SIGTERM', 'SIGINT', 'SIGHUP'];
 	const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
 	let disposed = false;
+	let cleaned = false;
+	const report = (reason: string) => {
+		if (disposed || cleaned) return;
+		cleaned = true;
+		for (const k of killLiveWorkers(reason)) {
+			log(JSON.stringify({ type: 'worker-terminated', ...k }));
+		}
+	};
 	for (const sig of signals) {
 		proc.once(sig, () => {
-			if (disposed) return;
-			for (const k of killLiveWorkers(`parent received ${sig}`)) {
-				log(JSON.stringify({ type: 'worker-terminated', ...k }));
-			}
+			report(`parent received ${sig}`);
 			proc.exit(SIGNAL_EXIT_CODE[sig] ?? 1);
 		});
 	}
+	const crash = (kind: string, reason: unknown) => {
+		report(`parent ${kind}`);
+		log(formatCrash(reason));
+		proc.exit(1);
+	};
+	proc.on('uncaughtException', (err) => crash('uncaughtException', err));
+	proc.on('unhandledRejection', (reason) => crash('unhandledRejection', reason));
+	proc.on('exit', () => {
+		report('parent exit');
+	});
 	return () => {
 		disposed = true;
 	};
@@ -183,13 +207,18 @@ export function spawnAgentTrial(
 			{
 				cwd: opts.cwd,
 				env,
-				stdio: ['pipe', 'pipe', 'pipe'],
+				// fd 3 stays open for the parent's lifetime. The worker treats EOF
+				// on it as "parent is gone" — stdin cannot, because it is ended
+				// as soon as the request JSON is written.
+				stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
 			},
 		);
+		const liveness = child.stdio[3];
 		liveWorkers.set(child, {
 			caseId: request.trial.caseId,
 			trial: request.trial.trial,
 			lastMeter: () => lastMeter,
+			liveness,
 		});
 		let stderr = '';
 		let settled = false;

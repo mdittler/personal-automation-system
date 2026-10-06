@@ -228,4 +228,73 @@ describe('agent bucket (REQ-REG-AGENT-001)', () => {
 	it('requires agent case ids to start with agent-', () => {
 		expect(() => validatePersonaCase(agentCase({ id: 'x-agent' }))).toThrow(/agent-/);
 	});
+
+	it('accepts data paths that stay inside the trial data dir', () => {
+		expect(() =>
+			validatePersonaCase(
+				agentCase({
+					inputs: [
+						{
+							payload: { turns: [{ text: 'hi' }] },
+							expected: {
+								set: 'regression',
+								category: 'write',
+								dataState: [
+									{
+										path: 'households/{householdId}/shared/food/recipes/*.yaml',
+										contains: ['x'],
+									},
+								],
+								unchanged: ['households/{householdId}/shared/food/'],
+							},
+						},
+					],
+				}),
+			),
+		).not.toThrow();
+	});
+
+	it.each(['../outside.txt', '/etc/passwd', 'a/../../x'])(
+		'rejects data-state path %s at load time',
+		(path) => {
+			expect(() =>
+				validatePersonaCase(
+					agentCase({
+						inputs: [
+							{
+								payload: { turns: [{ text: 'hi' }] },
+								expected: {
+									set: 'regression',
+									category: 'write',
+									dataState: [{ path, exists: true }],
+								},
+							},
+						],
+					}),
+				),
+			).toThrow(/path escapes trial data dir/);
+		},
+	);
+
+	it.each(['../outside.txt', '/etc/passwd', 'a/../../x'])(
+		'rejects unchanged path %s at load time',
+		(path) => {
+			expect(() =>
+				validatePersonaCase(
+					agentCase({
+						inputs: [
+							{
+								payload: { turns: [{ text: 'hi' }] },
+								expected: {
+									set: 'capability',
+									category: 'injection',
+									unchanged: [path],
+								},
+							},
+						],
+					}),
+				),
+			).toThrow(/path escapes trial data dir/);
+		},
+	);
 });

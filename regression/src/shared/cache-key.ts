@@ -46,10 +46,18 @@ export function bucketCacheSalt(
 
 /**
  * Harness sources whose behaviour shapes a bucket's verdicts (REQ-REG-024).
- * Mixed into every case's key so a fix in a runner, oracle, seed, or the LLM
- * layer invalidates stale grades. Entries ending in `/` expand to every
- * tracked or untracked (non-ignored) file below them, excluding `__tests__/`.
+ * Mixed into every case's key so a fix in a runner, oracle, seed, the LLM
+ * layer, or the system under test invalidates stale grades. The chatbot and
+ * agent buckets also hash `core/src/` and every app's `src/` plus its
+ * manifest (`SUT_HARNESS_PATHS`): those trials grade the live PAS process, so
+ * a change under core or an app must not be served a grade from before the
+ * change. Entries ending in `/` expand to every tracked or untracked
+ * (non-ignored) file below them, excluding `__tests__/`.
  * A contract test asserts each entry exists in the real repository.
+ *
+ * The expanded-and-hashed harness digest is memoized per path list and repo
+ * root for the life of the process, so a run pays for the ~1000 system-under-test
+ * files once, not once per case.
  */
 export const COMMON_HARNESS_PATHS: readonly string[] = [
 	'regression/src/runner/index.ts',
@@ -70,6 +78,19 @@ export const HARNESS_IMPORT_EXEMPT: ReadonlySet<string> = new Set([
 ]);
 /** Group 1 = `type ` for type-only imports; group 2 = the module specifier. */
 export const HARNESS_IMPORT_RE = /import\s+(type\s+)?[\s\S]*?\sfrom\s+'([^']+)'/g;
+
+/**
+ * Apps graded as the system under test. Must equal every `apps/<id>` that
+ * has both `src/` and `manifest.yaml` — `cache-key.test.ts` checks the list
+ * against the tree so a new app cannot be omitted silently.
+ */
+export const SUT_APP_IDS: readonly string[] = ['echo', 'food', 'notes'];
+
+/** `core/src/` plus each app's sources and manifest. Directory entries end in `/`. */
+export const SUT_HARNESS_PATHS: readonly string[] = [
+	'core/src/',
+	...SUT_APP_IDS.flatMap((id) => [`apps/${id}/src/`, `apps/${id}/manifest.yaml`]),
+];
 
 // Keyed by bucket name as a string so the `agent` entry can land before Task 6
 // adds `'agent'` to the bucket union.
@@ -94,6 +115,7 @@ export const BUCKET_HARNESS_PATHS: Readonly<Record<string, readonly string[]>> =
 	],
 	chatbot: [
 		...COMMON_HARNESS_PATHS,
+		...SUT_HARNESS_PATHS,
 		'regression/src/runner/case-runners/chatbot-runner.ts',
 		'regression/src/runner/chatbot-environment.ts',
 		'regression/src/runner/seeded-runtime.ts', // Task 5 extracts the runtime builder here
@@ -102,10 +124,12 @@ export const BUCKET_HARNESS_PATHS: Readonly<Record<string, readonly string[]>> =
 	],
 	agent: [
 		...COMMON_HARNESS_PATHS,
+		...SUT_HARNESS_PATHS,
 		'regression/src/runner/case-runners/agent-runner.ts',
 		'regression/src/runner/agent-trial.ts',
 		'regression/src/runner/agent-trial-worker.ts',
 		'regression/src/runner/agent-trial-spawn.ts',
+		'regression/src/runner/parent-liveness.ts',
 		'regression/src/runner/agent-environment.ts',
 		'regression/src/runner/seeded-runtime.ts',
 		'regression/src/runner/seed.ts',
@@ -141,6 +165,55 @@ export async function expandHarnessPaths(
 		}
 	}
 	return [...out].sort();
+}
+
+/**
+ * How many times this process actually expanded and hashed a harness path
+ * list. Cache hits do not increment. Tests reset via `clearHarnessDigestCache`.
+ */
+let harnessDigestComputes = 0;
+const harnessDigestCache = new Map<string, Promise<string>>();
+
+export function harnessDigestComputeCount(): number {
+	return harnessDigestComputes;
+}
+
+/** Drop the per-process harness digest memo. A new regression run is a new process. */
+export function clearHarnessDigestCache(): void {
+	harnessDigestCache.clear();
+	harnessDigestComputes = 0;
+}
+
+async function memoizedHarnessDigest(
+	paths: readonly string[],
+	repoRoot: string,
+	hash: (p: string) => Promise<string>,
+): Promise<string> {
+	const key = `${repoRoot}\0${paths.join('\0')}`;
+	const cached = harnessDigestCache.get(key);
+	if (cached) return cached;
+	harnessDigestComputes += 1;
+	const pending = (async () => {
+		const files = await expandHarnessPaths(paths, repoRoot);
+		const entries = await Promise.all(
+			files.map(async (p) => {
+				try {
+					return `${p}:${await hash(p)}`;
+				} catch (err) {
+					if ((err as NodeJS.ErrnoException).code === 'ENOENT') return `${p}:absent`;
+					throw err;
+				}
+			}),
+		);
+		return entries.join('\n');
+	})();
+	harnessDigestCache.set(key, pending);
+	try {
+		return await pending;
+	} catch (err) {
+		harnessDigestCache.delete(key);
+		throw err;
+	}
 }
 
 export interface ComputeCacheKeyArgs {
@@ -188,19 +261,9 @@ export async function computeCacheKey(args: ComputeCacheKeyArgs): Promise<string
 	const hashes = await Promise.all(sortedCoverage.map(hash));
 	const coverageEntries = sortedCoverage.map((p, i) => `${p}:${hashes[i]}`);
 
-	const harnessFiles = args.harnessPaths
-		? await expandHarnessPaths(args.harnessPaths, args.repoRoot)
-		: [];
-	const harnessEntries = await Promise.all(
-		harnessFiles.map(async (p) => {
-			try {
-				return `${p}:${await hash(p)}`;
-			} catch (err) {
-				if ((err as NodeJS.ErrnoException).code === 'ENOENT') return `${p}:absent`;
-				throw err;
-			}
-		}),
-	);
+	const harnessJoined = args.harnessPaths
+		? await memoizedHarnessDigest(args.harnessPaths, args.repoRoot, hash)
+		: '';
 
 	const modelStr = `fast=${args.modelIds.fast},standard=${args.modelIds.standard},reasoning=${args.modelIds.reasoning ?? 'none'}`;
 
@@ -214,9 +277,9 @@ export async function computeCacheKey(args: ComputeCacheKeyArgs): Promise<string
 		h.update('\0');
 		h.update(`case:${args.caseId}`);
 	}
-	if (harnessEntries.length > 0) {
+	if (harnessJoined.length > 0) {
 		h.update('\0');
-		h.update(`harness:${harnessEntries.join('\n')}`);
+		h.update(`harness:${harnessJoined}`);
 	}
 	// Salt is mixed in last with a distinguishing prefix. `extraSalt` omitted
 	// vs `extraSalt: ''` yields different keys (defensive: empty string is a

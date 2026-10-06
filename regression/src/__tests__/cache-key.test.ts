@@ -1,17 +1,24 @@
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
 	BUCKET_HARNESS_PATHS,
 	COMMON_HARNESS_PATHS,
 	HARNESS_IMPORT_EXEMPT,
 	HARNESS_IMPORT_RE,
+	SUT_APP_IDS,
+	clearHarnessDigestCache,
 	computeCacheKey,
 	expandHarnessPaths,
+	harnessDigestComputeCount,
 } from '../shared/cache-key.js';
+
+/** Repo root from this file, so the suite does not assume `cwd === regression/`. */
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 import { hashRepoRelative } from '../shared/git-hash.js';
 
 let tempRepo: string;
@@ -312,6 +319,8 @@ describe('computeCacheKey — harness paths (REQ-REG-024)', () => {
 		};
 		const before = await computeCacheKey(args);
 		await writeFile(join(tempRepo, 'h', 'runner.ts'), 'v2\n');
+		// The digest is memoized for the process; a content change is a new run.
+		clearHarnessDigestCache();
 		const after = await computeCacheKey(args);
 		expect(after).not.toBe(before);
 	});
@@ -337,9 +346,8 @@ describe('computeCacheKey — harness paths (REQ-REG-024)', () => {
 	});
 
 	it('every BUCKET_HARNESS_PATHS entry exists in the real repository', () => {
-		const realRoot = join(process.cwd(), '..');
 		for (const paths of Object.values(BUCKET_HARNESS_PATHS)) {
-			for (const p of paths) expect(existsSync(join(realRoot, p)), p).toBe(true);
+			for (const p of paths) expect(existsSync(join(REPO_ROOT, p)), p).toBe(true);
 		}
 	});
 
@@ -350,6 +358,7 @@ describe('computeCacheKey — harness paths (REQ-REG-024)', () => {
 			'regression/src/runner/provider-call-tracker.ts',
 			'regression/src/runner/provider-registry.ts',
 			'regression/src/runner/seed.ts',
+			'regression/src/runner/parent-liveness.ts',
 		]) {
 			expect(BUCKET_HARNESS_PATHS.agent, p).toContain(p);
 		}
@@ -361,7 +370,7 @@ describe('computeCacheKey — harness paths (REQ-REG-024)', () => {
 	// is itself an agent harness path. Type-only imports, packages and
 	// `@core/*` are excluded (the LLM layer is covered by its directory entry).
 	it('every regression/src module value-imported by an agent-specific harness file is an agent harness path', async () => {
-		const realRoot = join(process.cwd(), '..');
+		const realRoot = REPO_ROOT;
 		const agent = BUCKET_HARNESS_PATHS.agent!;
 		const covered = (p: string) => agent.some((h) => (h.endsWith('/') ? p.startsWith(h) : h === p));
 		const entryFiles = agent.filter(
@@ -385,5 +394,128 @@ describe('computeCacheKey — harness paths (REQ-REG-024)', () => {
 				).toBe(true);
 			}
 		}
+	});
+});
+
+/** Apps that ship both `src/` and `manifest.yaml` — the system under test. */
+function appsWithSrcAndManifest(repoRoot: string): string[] {
+	return readdirSync(join(repoRoot, 'apps'))
+		.filter(
+			(name) =>
+				existsSync(join(repoRoot, 'apps', name, 'src')) &&
+				existsSync(join(repoRoot, 'apps', name, 'manifest.yaml')),
+		)
+		.sort();
+}
+
+describe('computeCacheKey — system under test (review R1-1)', () => {
+	const modelIds = { fast: 'f', standard: 's', reasoning: null as string | null };
+
+	async function writeSut(food: string, coreSrc: string, coreTest: string): Promise<void> {
+		await mkdir(join(tempRepo, 'apps/food/src/services'), { recursive: true });
+		await mkdir(join(tempRepo, 'core/src/services/router'), { recursive: true });
+		await mkdir(join(tempRepo, 'core/src/__tests__'), { recursive: true });
+		await writeFile(join(tempRepo, 'apps/food/src/services/grocery-store.ts'), food);
+		await writeFile(join(tempRepo, 'core/src/services/router/index.ts'), coreSrc);
+		await writeFile(join(tempRepo, 'core/src/__tests__/router.test.ts'), coreTest);
+		await writeFile(join(tempRepo, 'case.ts'), 'export {}\n');
+	}
+
+	function keyArgs(bucket: 'agent' | 'chatbot', caseId: string) {
+		return {
+			casePath: 'case.ts',
+			coveragePaths: [] as string[],
+			modelIds,
+			repoRoot: tempRepo,
+			caseId,
+			harnessPaths: BUCKET_HARNESS_PATHS[bucket]!,
+		};
+	}
+
+	it('SUT_APP_IDS equals the apps that have src/ and a manifest', () => {
+		expect([...SUT_APP_IDS].sort()).toEqual(appsWithSrcAndManifest(REPO_ROOT));
+	});
+
+	it('chatbot and agent buckets list core/src and every app src plus its manifest', () => {
+		const appIds = appsWithSrcAndManifest(REPO_ROOT);
+		expect(appIds.length).toBeGreaterThan(0);
+		for (const bucket of ['chatbot', 'agent'] as const) {
+			const paths = BUCKET_HARNESS_PATHS[bucket]!;
+			expect(paths, bucket).toContain('core/src/');
+			for (const id of appIds) {
+				expect(paths, bucket).toContain(`apps/${id}/src/`);
+				expect(paths, bucket).toContain(`apps/${id}/manifest.yaml`);
+			}
+		}
+	});
+
+	it('expands system-under-test sources into the agent and chatbot keys and skips __tests__', async () => {
+		for (const bucket of ['agent', 'chatbot'] as const) {
+			const files = await expandHarnessPaths(BUCKET_HARNESS_PATHS[bucket]!, REPO_ROOT);
+			expect(files, bucket).toContain('apps/food/src/services/grocery-store.ts');
+			expect(files, bucket).toContain('core/src/services/router/index.ts');
+			expect(
+				files.some((f) => f.includes('/__tests__/')),
+				bucket,
+			).toBe(false);
+		}
+	});
+
+	it('editing a file under apps/food/src changes the agent key and the chatbot key', async () => {
+		await writeSut('food-v1\n', 'core-v1\n', 'test-v1\n');
+		const beforeAgent = await computeCacheKey(keyArgs('agent', 'a'));
+		const beforeChat = await computeCacheKey(keyArgs('chatbot', 'c'));
+		await writeFile(join(tempRepo, 'apps/food/src/services/grocery-store.ts'), 'food-v2\n');
+		clearHarnessDigestCache();
+		const afterAgent = await computeCacheKey(keyArgs('agent', 'a'));
+		const afterChat = await computeCacheKey(keyArgs('chatbot', 'c'));
+		expect(afterAgent).not.toBe(beforeAgent);
+		expect(afterChat).not.toBe(beforeChat);
+	});
+
+	it('editing a file under core/src changes the agent key and the chatbot key', async () => {
+		await writeSut('food-v1\n', 'core-v1\n', 'test-v1\n');
+		const beforeAgent = await computeCacheKey(keyArgs('agent', 'a'));
+		const beforeChat = await computeCacheKey(keyArgs('chatbot', 'c'));
+		await writeFile(join(tempRepo, 'core/src/services/router/index.ts'), 'core-v2\n');
+		clearHarnessDigestCache();
+		const afterAgent = await computeCacheKey(keyArgs('agent', 'a'));
+		const afterChat = await computeCacheKey(keyArgs('chatbot', 'c'));
+		expect(afterAgent).not.toBe(beforeAgent);
+		expect(afterChat).not.toBe(beforeChat);
+	});
+
+	it('editing a __tests__ file under core/src does not change the agent or chatbot key', async () => {
+		await writeSut('food-v1\n', 'core-v1\n', 'test-v1\n');
+		const beforeAgent = await computeCacheKey(keyArgs('agent', 'a'));
+		const beforeChat = await computeCacheKey(keyArgs('chatbot', 'c'));
+		await writeFile(join(tempRepo, 'core/src/__tests__/router.test.ts'), 'test-v2\n');
+		clearHarnessDigestCache();
+		const afterAgent = await computeCacheKey(keyArgs('agent', 'a'));
+		const afterChat = await computeCacheKey(keyArgs('chatbot', 'c'));
+		expect(afterAgent).toBe(beforeAgent);
+		expect(afterChat).toBe(beforeChat);
+	});
+
+	it('hashes the harness digest once for N cases that share a bucket and repo', async () => {
+		clearHarnessDigestCache();
+		await mkdir(join(tempRepo, 'apps/food/src'), { recursive: true });
+		await writeFile(join(tempRepo, 'apps/food/src/grocery-store.ts'), 'v1\n');
+		await writeFile(join(tempRepo, 'case.ts'), 'export {}\n');
+		const harnessPaths = ['apps/food/src/'] as const;
+		const cases = ['a', 'b', 'c', 'd', 'e'];
+		await Promise.all(
+			cases.map((caseId) =>
+				computeCacheKey({
+					casePath: 'case.ts',
+					coveragePaths: [],
+					modelIds,
+					repoRoot: tempRepo,
+					caseId,
+					harnessPaths,
+				}),
+			),
+		);
+		expect(harnessDigestComputeCount()).toBe(1);
 	});
 });

@@ -10,8 +10,8 @@
  * distinctive amounts (two-decimal prices) wherever possible.
  */
 import { createHash } from 'node:crypto';
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import YAML from 'yaml';
 import type { AgentExpectation, DataStateCheck, FactCheck } from '../cases/agent/types.js';
 
@@ -54,6 +54,70 @@ const MONTHS = [
 
 export function resolveDataPath(p: string, ctx: OutcomeContext): string {
 	return p.replaceAll('{householdId}', ctx.householdId).replaceAll('{userId}', ctx.userId);
+}
+
+const ESCAPE = 'path escapes trial data dir';
+
+/** Lexical escapes (`..`, absolute). Symlinks are checked separately via realpath. */
+function lexicalEscape(rel: string): boolean {
+	if (rel.includes('\0') || rel.includes('\\')) return true;
+	if (rel.startsWith('/') || /^[A-Za-z]:/.test(rel)) return true;
+	return rel.split('/').includes('..');
+}
+
+/**
+ * True when `rel` (or a symlink along it, including a glob's parent) resolves
+ * outside `dataDir`. A missing tail is fine; a symlink that leaves the dir is not.
+ */
+async function resolvesOutside(dataDir: string, rel: string): Promise<boolean> {
+	let root: string;
+	try {
+		root = await realpath(dataDir);
+	} catch {
+		return true;
+	}
+	const logical = rel.endsWith('/') ? rel.slice(0, -1) : rel;
+	if (logical === '' || logical === '.') return false;
+	const segments = logical.split('/').filter((s) => s.length > 0 && s !== '.');
+	const last = segments[segments.length - 1] ?? '';
+	const walk = last.includes('*') ? segments.slice(0, -1) : segments;
+	let cursor = root;
+	for (const seg of walk) {
+		if (seg === '..' || seg.includes('*')) return true;
+		cursor = join(cursor, seg);
+		try {
+			const st = await lstat(cursor);
+			if (!st.isSymbolicLink()) continue;
+			const real = await realpath(cursor);
+			const relTo = relative(root, real);
+			if (relTo.startsWith('..') || isAbsolute(relTo)) return true;
+			cursor = real;
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException).code;
+			if (code === 'ENOENT') continue;
+			return true;
+		}
+	}
+	const relTo = relative(root, cursor);
+	return relTo.startsWith('..') || isAbsolute(relTo);
+}
+
+async function escapeFailure(dataDir: string, rel: string): Promise<string | undefined> {
+	if (lexicalEscape(rel) || (await resolvesOutside(dataDir, rel))) return `${ESCAPE}: ${rel}`;
+	return undefined;
+}
+
+/** realpath of an existing path, or undefined when it does not exist. Throws on an outside symlink. */
+async function realInside(root: string, abs: string, label: string): Promise<string | undefined> {
+	try {
+		const real = await realpath(abs);
+		const relTo = relative(root, real);
+		if (relTo.startsWith('..') || isAbsolute(relTo)) throw new Error(`${ESCAPE}: ${label}`);
+		return real;
+	} catch (err) {
+		if (err instanceof Error && err.message.startsWith(ESCAPE)) throw err;
+		return undefined;
+	}
 }
 
 function normalize(s: string): string {
@@ -158,13 +222,25 @@ function yamlBody(raw: string): unknown {
 
 async function checkDataState(check: DataStateCheck, ctx: OutcomeContext): Promise<string[]> {
 	const rel = resolveDataPath(check.path, ctx);
+	const escaped = await escapeFailure(ctx.dataDir, rel);
+	if (escaped) return [escaped];
 	const files = await listMatching(ctx.dataDir, rel);
+	for (const f of files) {
+		const fileEscape = await escapeFailure(ctx.dataDir, f);
+		if (fileEscape) return [fileEscape];
+	}
 	const failures: string[] = [];
 	if (check.exists === true && files.length === 0)
 		failures.push(`data state: ${rel} does not exist`);
 	if (check.exists === false && files.length > 0)
 		failures.push(`data state: ${rel} should not exist`);
-	const contents = await Promise.all(files.map((f) => readFile(join(ctx.dataDir, f), 'utf8')));
+	const root = await realpath(ctx.dataDir);
+	const contents = await Promise.all(
+		files.map(async (f) => {
+			const real = await realInside(root, join(ctx.dataDir, f), f);
+			return real === undefined ? '' : readFile(real, 'utf8');
+		}),
+	);
 	if (check.contains) {
 		const want = check.contains.map(normalize);
 		if (!contents.some((c) => want.every((w) => normalize(c).includes(w)))) {
@@ -204,12 +280,19 @@ async function checkDataState(check: DataStateCheck, ctx: OutcomeContext): Promi
 }
 
 async function digestPath(dataDir: string, rel: string): Promise<string> {
+	const escaped = await escapeFailure(dataDir, rel);
+	if (escaped) throw new Error(escaped);
+	const root = await realpath(dataDir);
 	const abs = join(dataDir, rel);
+	const hashFile = async (file: string): Promise<string> =>
+		createHash('sha256')
+			.update(await readFile(file))
+			.digest('hex');
 	if (!rel.endsWith('/')) {
+		const real = await realInside(root, abs, rel);
+		if (real === undefined) return 'absent';
 		try {
-			return createHash('sha256')
-				.update(await readFile(abs))
-				.digest('hex');
+			return await hashFile(real);
 		} catch {
 			return 'absent';
 		}
@@ -223,17 +306,15 @@ async function digestPath(dataDir: string, rel: string): Promise<string> {
 			return;
 		}
 		for (const n of names) {
-			const p = join(dir, n);
-			if ((await stat(p)).isDirectory()) await walk(p, `${prefix}${n}/`);
-			else
-				entries.push(
-					`${prefix}${n}:${createHash('sha256')
-						.update(await readFile(p))
-						.digest('hex')}`,
-				);
+			const label = `${prefix}${n}`;
+			const real = await realInside(root, join(dir, n), label);
+			if (real === undefined) continue;
+			if ((await stat(real)).isDirectory()) await walk(real, `${label}/`);
+			else entries.push(`${label}:${await hashFile(real)}`);
 		}
 	};
-	await walk(abs, '');
+	const start = (await realInside(root, abs, rel)) ?? abs;
+	await walk(start, '');
 	return entries.length === 0
 		? 'absent'
 		: createHash('sha256').update(entries.join('\n')).digest('hex');
@@ -247,7 +328,13 @@ export async function snapshotPaths(
 	const out = new Map<string, string>();
 	for (const p of paths) {
 		const rel = resolveDataPath(p, ctx);
-		out.set(rel, await digestPath(ctx.dataDir, rel));
+		if (await escapeFailure(ctx.dataDir, rel)) continue;
+		try {
+			out.set(rel, await digestPath(ctx.dataDir, rel));
+		} catch (err) {
+			if (err instanceof Error && err.message.startsWith(ESCAPE)) continue;
+			throw err;
+		}
 	}
 	return out;
 }
@@ -270,7 +357,18 @@ export async function evaluateOutcome(
 	for (const check of exp.dataState ?? []) failures.push(...(await checkDataState(check, ctx)));
 	for (const p of exp.unchanged ?? []) {
 		const rel = resolveDataPath(p, ctx);
-		if ((await digestPath(ctx.dataDir, rel)) !== before.get(rel)) failures.push(`changed: ${rel}`);
+		const escaped = await escapeFailure(ctx.dataDir, rel);
+		if (escaped) {
+			failures.push(escaped);
+			continue;
+		}
+		try {
+			if ((await digestPath(ctx.dataDir, rel)) !== before.get(rel))
+				failures.push(`changed: ${rel}`);
+		} catch (err) {
+			if (err instanceof Error && err.message.startsWith(ESCAPE)) failures.push(err.message);
+			else throw err;
+		}
 	}
 	if (exp.noExternalMessages && (input.externalMessages ?? 0) > 0) {
 		failures.push(`${input.externalMessages} message(s) sent to another user`);
