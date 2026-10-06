@@ -695,6 +695,46 @@ describe('LLMGuard.chat (REQ-LLM-045)', () => {
 		// 100k chars ~ 25k tokens at $0.001/1k ~ $0.025 more than the two-word prompt.
 		expect(estBig - estSmall).toBeGreaterThan(0.02);
 	});
+
+	it('reserves at least N*1600 input tokens of cost more for a chat with N images than the same chat without images, at the serving model price (R1-1)', async () => {
+		const inner = createMockInner();
+		const N = 3;
+		// Serving model is gpt-4.1 ($2/MTok input). The fast-tier price is much
+		// higher so a tier-priced reservation cannot satisfy the exact delta.
+		const servingInputUsdPer1k = 0.002;
+		const priceLookup: PriceLookup = {
+			priceFor: () => ({ inputUsdPer1k: 0.05, outputUsdPer1k: 0.15 }),
+			priceForRef: () => ({ inputUsdPer1k: servingInputUsdPer1k, outputUsdPer1k: 0.008 }),
+		};
+		const modelRef: ModelRef = { provider: 'openai', model: 'gpt-4.1' };
+		const photo = { data: Buffer.alloc(1), mimeType: 'image/png' };
+		const plain: ChatMessage[] = [
+			{ role: 'user', content: 'look' },
+			{ role: 'assistant', content: 'ok' },
+			{ role: 'user', content: 'again' },
+		];
+		const withImages: ChatMessage[] = [
+			{ role: 'user', content: 'look', images: [photo, photo] },
+			{ role: 'assistant', content: 'ok' },
+			{ role: 'user', content: 'again', images: [photo] },
+		];
+		const plainLimiter = createMockHouseholdLimiter();
+		await makeGuard(inner, {
+			householdLimiter: plainLimiter as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).chat(plain, { modelRef });
+		const imageLimiter = createMockHouseholdLimiter();
+		await makeGuard(inner, {
+			householdLimiter: imageLimiter as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).chat(withImages, { modelRef });
+		const estPlain = (plainLimiter.reserveEstimated as ReturnType<typeof vi.fn>).mock
+			.calls[0]?.[3] as number;
+		const estImages = (imageLimiter.reserveEstimated as ReturnType<typeof vi.fn>).mock
+			.calls[0]?.[3] as number;
+		const imageTokenCost = ((N * 1600) / 1000) * servingInputUsdPer1k;
+		expect(estImages - estPlain).toBeCloseTo(imageTokenCost, 6);
+	});
 });
 
 describe('LLMGuard prices the model that serves the request, not the default tier (P2-1)', () => {
@@ -716,7 +756,7 @@ describe('LLMGuard prices the model that serves the request, not the default tie
 	};
 
 	/** Real HouseholdLLMLimiter so checkCost's arithmetic is the production one; household already at $9.99 of a $10 cap. */
-	function makeGuardNearCap(inner: LLMService) {
+	function makeGuardNearCap(inner: LLMService, priceLookup: PriceLookup = localFastPaidClaude) {
 		const costTracker = createMockCostTracker(0, 0, 9.99);
 		const householdLimiter = new HouseholdLLMLimiter({
 			costTracker,
@@ -730,7 +770,7 @@ describe('LLMGuard prices the model that serves the request, not the default tie
 			config: defaultConfig,
 			logger: pino({ level: 'silent' }),
 			householdLimiter,
-			priceLookup: localFastPaidClaude,
+			priceLookup,
 		});
 	}
 
@@ -762,6 +802,34 @@ describe('LLMGuard prices the model that serves the request, not the default tie
 			});
 		});
 		expect(inner.complete).toHaveBeenCalledTimes(1);
+		guard.dispose();
+	});
+
+	it('household budget — captionless 3-photo chat on a paid vision modelRef is refused by HouseholdLLMLimiter.checkCost at $9.99 of $10 (R1-1)', async () => {
+		const inner = createMockInner();
+		// gpt-4.1 ($2/$8 per MTok) is vision-capable. The 1024-token output
+		// allowance alone is $0.008192, so a captionless chat with no images
+		// still fits under $0.01 of headroom. 3 × 1600 image tokens add $0.0096
+		// and the reservation ($0.017792) crosses the cap. Haiku's $1/$5 would
+		// leave the same 3-photo chat at $0.00992, still under the headroom.
+		const vision: ModelRef = { provider: 'openai', model: 'gpt-4.1' };
+		const visionPrice: PriceLookup = {
+			hasBillableProvider: () => true,
+			priceFor: () => ({ inputUsdPer1k: 0, outputUsdPer1k: 0 }),
+			priceForRef: (ref) =>
+				ref.model === vision.model ? { inputUsdPer1k: 0.002, outputUsdPer1k: 0.008 } : undefined,
+		};
+		const photo = { data: Buffer.alloc(1), mimeType: 'image/png' };
+		const captionless: ChatMessage[] = [{ role: 'user', content: '' }];
+		const photos: ChatMessage[] = [{ role: 'user', content: '', images: [photo, photo, photo] }];
+		const guard = makeGuardNearCap(inner, visionPrice);
+		await requestContext.run({ userId: 'u1', householdId: HOUSEHOLD }, async () => {
+			await expect(guard.chat(captionless, { modelRef: vision })).resolves.toBeDefined();
+			await expect(guard.chat(photos, { modelRef: vision })).rejects.toMatchObject({
+				scope: 'household',
+			});
+		});
+		expect(inner.chat).toHaveBeenCalledTimes(1);
 		guard.dispose();
 	});
 

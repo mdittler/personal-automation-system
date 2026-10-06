@@ -187,10 +187,11 @@ export function toOllamaThink(
  * Text the guards estimate against: everything the provider mappings put on
  * the wire as text — each message's content, replayed assistant thinking, the
  * JSON of assistant tool calls (names + arguments; a raw-string argument is
- * included as is), and the tool list as JSON. Images are not counted (same as
- * `complete()`; accepted limitation). R1-5: a 100k-character tool-call history
- * used to estimate as 5 characters, letting `HouseholdLLMLimiter.checkCost`
- * admit a paid replay past the household budget.
+ * included as is), and the tool list as JSON. Images are not in this string;
+ * `countChatImages` feeds `estimateGuardCost`, which adds
+ * `IMAGE_INPUT_TOKEN_ALLOWANCE` input tokens per image (code review R1-1).
+ * R1-5: a 100k-character tool-call history used to estimate as 5 characters,
+ * letting `HouseholdLLMLimiter.checkCost` admit a paid replay past the budget.
  */
 export function serializeChatForEstimate(
 	messages: readonly ChatMessage[],
@@ -204,4 +205,11 @@ export function serializeChatForEstimate(
 	}
 	if (tools?.length) parts.push(JSON.stringify(tools));
 	return parts.join('\n');
+}
+
+/** Images on the chat, across every message. The guard estimate reserves each one. */
+export function countChatImages(messages: readonly ChatMessage[]): number {
+	let count = 0;
+	for (const m of messages) count += m.images?.length ?? 0;
+	return count;
 }

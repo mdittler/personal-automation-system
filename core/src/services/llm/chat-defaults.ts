@@ -25,6 +25,15 @@ export const DEFAULT_AGENT_MODEL: ModelRef = Object.freeze({
 /** Operator decision 2026-10-05 §18.3, measured in the thinking comparison. */
 export const DEFAULT_AGENT_THINKING: ThinkingLevel = 'off';
 
+/**
+ * Input tokens reserved per image on a chat guard estimate.
+ *
+ * Anthropic documents about 1,600 tokens for a max-size image after resizing:
+ * tokens ≈ width * height / 750, with images capped near 1.15 megapixels.
+ * https://platform.claude.com/docs/en/build-with-claude/vision
+ */
+export const IMAGE_INPUT_TOKEN_ALLOWANCE = 1600;
+
 export const THINKING_LEVELS: readonly ThinkingLevel[] = Object.freeze([
 	'off',
 	'low',

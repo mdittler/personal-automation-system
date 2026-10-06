@@ -16,6 +16,7 @@ import {
 	DEFAULT_CHAT_CONTEXT_WINDOW,
 	DEFAULT_OLLAMA_KEEP_ALIVE,
 	DEFAULT_OLLAMA_TIMEOUT_MS,
+	IMAGE_INPUT_TOKEN_ALLOWANCE,
 } from '../chat-defaults.js';
 import {
 	ChatMessageShapeError,
@@ -335,5 +336,9 @@ describe('chat defaults are pinned (design §5.3, §18)', () => {
 		expect(DEFAULT_OLLAMA_TIMEOUT_MS).toBe(120_000);
 		expect(DEFAULT_AGENT_MODEL).toEqual({ provider: 'ollama', model: 'qwen3.8:27b-mlx' });
 		expect(DEFAULT_AGENT_THINKING).toBe('off');
+	});
+
+	it('pins IMAGE_INPUT_TOKEN_ALLOWANCE at 1600 (Anthropic max-size image after resize, code review R1-1)', () => {
+		expect(IMAGE_INPUT_TOKEN_ALLOWANCE).toBe(1600);
 	});
 });

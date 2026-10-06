@@ -1,5 +1,6 @@
 import type { ModelRef, ModelTier } from '../../types/llm.js';
 import { DEFAULT_LLM_SAFEGUARDS } from '../config/defaults.js';
+import { IMAGE_INPUT_TOKEN_ALLOWANCE } from './chat-defaults.js';
 
 export type GuardMethod = 'complete' | 'classify' | 'extractStructured' | 'chat';
 
@@ -45,6 +46,12 @@ export interface EstimateInput {
 	modelRef?: ModelRef;
 	prompt: string;
 	maxOutputTokens?: number;
+	/**
+	 * Images on the chat, across every message. Each one adds
+	 * `IMAGE_INPUT_TOKEN_ALLOWANCE` input tokens. `complete()` does not set
+	 * this — its image option stays outside the reservation.
+	 */
+	imageCount?: number;
 }
 
 /** Upper-bound output token counts per method when maxOutputTokens is not provided. */
@@ -95,7 +102,13 @@ export function estimateGuardCost(
 		outputTokens = METHOD_DEFAULT_OUTPUT_TOKENS[input.method];
 	}
 
-	const inputTokens = approximateTokens(input.prompt);
+	const imageCount = input.imageCount ?? 0;
+	if (!Number.isInteger(imageCount) || imageCount < 0) {
+		throw new TypeError(
+			`estimateGuardCost: imageCount must be a non-negative integer, got ${input.imageCount}`,
+		);
+	}
+	const inputTokens = approximateTokens(input.prompt) + imageCount * IMAGE_INPUT_TOKEN_ALLOWANCE;
 
 	const price = input.modelRef ? prices.priceForRef?.(input.modelRef) : prices.priceFor(input.tier);
 	if (

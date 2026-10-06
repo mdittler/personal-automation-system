@@ -13330,7 +13330,7 @@ Design: `docs/superpowers/specs/2026-10-05-agent-runtime-design.md`; plan: `docs
 
 **Phase:** Agent Runtime P1 (2026-10-06) | **Status:** Implemented
 
-`LLMService.chat(messages, options)` MUST exist on the service and both guards, resolve the model as `completeWithMeta` does (modelRef → tier → fast), validate the message shape before any network call (system prefix included, each system message non-empty, at least one non-system message; every tool call answered exactly once before the next non-tool message and before the history ends; a user turn carries text or images; an assistant turn carries text or tool calls), estimate the guard reservation from message text **plus replayed thinking, tool-call arguments and the tool list** **and price it against the model that will serve the request** (an explicit `modelRef` through `PriceLookup.priceForRef`, legacy `model: 'claude'` as the standard tier — on `complete`/`completeWithMeta` as well as `chat`; an unpriceable ref takes the default reservation, never the tier price), record usage with provider type and app id, and export every chat type from `core/src/types/index.ts`
+`LLMService.chat(messages, options)` MUST exist on the service and both guards, resolve the model as `completeWithMeta` does (modelRef → tier → fast), validate the message shape before any network call (system prefix included, each system message non-empty, at least one non-system message; every tool call answered exactly once before the next non-tool message and before the history ends; a user turn carries text or images; an assistant turn carries text or tool calls), estimate the guard reservation from message text **plus replayed thinking, tool-call arguments, the tool list, and `IMAGE_INPUT_TOKEN_ALLOWANCE` (1600) input tokens per image** **and price it against the model that will serve the request** (an explicit `modelRef` through `PriceLookup.priceForRef`, legacy `model: 'claude'` as the standard tier — on `complete`/`completeWithMeta` as well as `chat`; an unpriceable ref takes the default reservation, never the tier price), record usage with provider type and app id, and export every chat type from `core/src/types/index.ts`
 
 **Standard tests:**
 - `base-provider.test.ts` > BaseProvider.chatWithUsage (REQ-LLM-045) > returns the doChat result and records usage with provider type and app id
@@ -13353,6 +13353,9 @@ Design: `docs/superpowers/specs/2026-10-05-agent-runtime-design.md`; plan: `docs
 - `system-llm-guard.test.ts` > SystemLLMGuard.chat (REQ-LLM-045) > reserves an estimate that grows with the tool list (message text + tool JSON)
 - `system-llm-guard.test.ts` > SystemLLMGuard.chat (REQ-LLM-045) > supportsTools / supportsVision delegate to the inner service
 - `system-llm-guard.test.ts` > SystemLLMGuard.chat (REQ-LLM-045) > reserves an estimate that grows with replayed tool-call arguments (R1-5: 100k chars of tool-call history)
+- `chat-messages.test.ts` > chat defaults are pinned (design §5.3, §18) > pins IMAGE_INPUT_TOKEN_ALLOWANCE at 1600 (Anthropic max-size image after resize, code review R1-1)
+- `llm-guard.test.ts` > LLMGuard.chat (REQ-LLM-045) > reserves at least N*1600 input tokens of cost more for a chat with N images than the same chat without images, at the serving model price (R1-1)
+- `system-llm-guard.test.ts` > SystemLLMGuard.chat (REQ-LLM-045) > reserves at least N*1600 input tokens of cost more for a chat with N images than the same chat without images, at the serving model price (R1-1)
 
 **Edge case tests:**
 - `base-provider.test.ts` > BaseProvider.chatWithUsage (REQ-LLM-045) > does not record usage when the provider reported none
@@ -13393,6 +13396,11 @@ Design: `docs/superpowers/specs/2026-10-05-agent-runtime-design.md`; plan: `docs
 - `system-llm-guard.test.ts` > SystemLLMGuard prices the model that serves the request, not the default tier (P2-1) > household budget — complete(): the same bypass existed at HEAD on the completion path and is closed too
 - `system-llm-guard.test.ts` > SystemLLMGuard prices the model that serves the request, not the default tier (P2-1) > legacy `model: 'claude'` routes to the standard tier in LLMServiceImpl, so the guard prices it as standard, not fast
 - `system-llm-guard.test.ts` > SystemLLMGuard prices the model that serves the request, not the default tier (P2-1) > an explicit modelRef the lookup cannot price falls back to the default reservation, never to the tier price
+- `llm-guard.test.ts` > LLMGuard prices the model that serves the request, not the default tier (P2-1) > household budget — captionless 3-photo chat on a paid vision modelRef is refused by HouseholdLLMLimiter.checkCost at $9.99 of $10 (R1-1)
+- `system-llm-guard.test.ts` > SystemLLMGuard prices the model that serves the request, not the default tier (P2-1) > household budget — captionless 3-photo chat on a paid vision modelRef is refused by HouseholdLLMLimiter.checkCost at $9.99 of $10 (R1-1)
+
+**Fixes:**
+- **R1-1 (2026-10-06):** Chat guard estimates add `IMAGE_INPUT_TOKEN_ALLOWANCE` (1600) input tokens per image, so a household at $9.99 of a $10 cap refuses a captionless 3-photo call on a paid vision model instead of reserving only the output allowance. CL: R1-1-image-allowance.
 
 ---
 
@@ -13786,7 +13794,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-042 | openai-compatible-provider.test.ts, llama-cpp-provider.test.ts | 4 | 6 | Implemented |
 | REQ-LLM-043 | estimator.test.ts, local-model-estimate.test.ts, regression-routes.test.ts, estimate-guard-cost.test.ts, system-info.test.ts | 8 | 14 | Implemented |
 | REQ-LLM-044 | classify.test.ts, intent-classifier.test.ts, model-pricing.test.ts, pas-classifier.parser.test.ts | 12 | 18 | Implemented |
-| REQ-LLM-045 | base-provider.test.ts, chat-messages.test.ts, estimate-guard-cost.test.ts, guard-price-lookup.test.ts, llm-guard.test.ts, llm-service.test.ts, system-llm-guard.test.ts | 20 | 38 | Implemented |
+| REQ-LLM-045 | base-provider.test.ts, chat-messages.test.ts, estimate-guard-cost.test.ts, guard-price-lookup.test.ts, llm-guard.test.ts, llm-service.test.ts, system-llm-guard.test.ts | 23 | 40 | Implemented |
 | REQ-LLM-046 | base-provider.test.ts, chat-messages.test.ts, ollama-provider.test.ts | 21 | 12 | Implemented |
 | REQ-LLM-047 | llama-cpp-provider.test.ts, model-capabilities.test.ts, openai-compatible-provider.test.ts, provider-factory.test.ts | 23 | 6 | Implemented |
 | REQ-LLM-048 | anthropic-provider.test.ts | 6 | 19 | Implemented |
@@ -14315,4 +14323,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **471 test files** | **3266** | **3220** | **6486 tests** |
+| **Totals** | **471 test files** | **3269** | **3222** | **6491 tests** |

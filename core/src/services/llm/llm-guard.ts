@@ -28,7 +28,7 @@ import type {
 	ModelTier,
 } from '../../types/llm.js';
 import { DEFAULT_LLM_SAFEGUARDS } from '../config/defaults.js';
-import { serializeChatForEstimate } from './chat-messages.js';
+import { countChatImages, serializeChatForEstimate } from './chat-messages.js';
 import { classify } from './classify.js';
 import type { CostTracker } from './cost-tracker.js';
 import { LLMCostCapError, LLMRateLimitError } from './errors.js';
@@ -154,6 +154,7 @@ export class LLMGuard implements LLMService {
 			options?.maxTokens,
 			this.pricingKey(options),
 			() => this.inner.chat(messages, { ...options, _appId: this.appId }),
+			countChatImages(messages),
 		);
 	}
 
@@ -197,10 +198,11 @@ export class LLMGuard implements LLMService {
 		maxOutputTokens: number | undefined,
 		key: PricingKey,
 		run: () => Promise<T>,
+		imageCount = 0,
 	): Promise<T> {
 		const hhId = getCurrentHouseholdId();
 		const estCost = estimateGuardCost(
-			{ method, tier: key.tier, modelRef: key.modelRef, prompt, maxOutputTokens },
+			{ method, tier: key.tier, modelRef: key.modelRef, prompt, maxOutputTokens, imageCount },
 			this.priceLookup,
 			this.logger,
 		);
