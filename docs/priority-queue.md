@@ -111,6 +111,7 @@ Each item must appear in that phase's plan. Most came out of the 2026-10-05 desi
 - Retire the `chatbot` bucket, and the `routing` food-shadow and `recall` cases. Retire their URS entries; don't delete them.
 - Remove the model-journal prompt injection. This closes item 1 of the open-items entry "Model journal crosses household boundaries".
 - Mark legacy memory as unapproved and add the GUI memory review (design §9.2 integrity ledger).
+- The cut-over comparison against the P0 baseline must run with `--no-cache` (P0 code-review vote 1), at a recorded SHA after `pnpm build`, and must re-run the live smoke first if worker/spawn code changed (P0 lesson R6-1).
 
 **Q8 · P5**
 - Rewrite the Master Execution Order. Keep gate 6 (SR-1 Tier C before any public app registry). Re-sequence Tracks A, C, D after this queue.
