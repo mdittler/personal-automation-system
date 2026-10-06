@@ -47,9 +47,9 @@ export interface EstimateInput {
 	prompt: string;
 	maxOutputTokens?: number;
 	/**
-	 * Images on the chat, across every message. Each one adds
-	 * `IMAGE_INPUT_TOKEN_ALLOWANCE` input tokens. `complete()` does not set
-	 * this — its image option stays outside the reservation.
+	 * Images on the call. Chat counts them across every message; `complete()`
+	 * and `completeWithMeta()` pass `options.images.length` (R2-1). Each one
+	 * adds `IMAGE_INPUT_TOKEN_ALLOWANCE` input tokens.
 	 */
 	imageCount?: number;
 }

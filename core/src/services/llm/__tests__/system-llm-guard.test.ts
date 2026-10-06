@@ -22,6 +22,10 @@ const logger = pino({ level: 'silent' });
 function createMockInner(): LLMService {
 	return {
 		complete: vi.fn().mockResolvedValue('{"category":"test","confidence":0.9}'),
+		completeWithMeta: vi.fn().mockResolvedValue({
+			text: '{"category":"test","confidence":0.9}',
+			finishReason: 'stop',
+		}),
 		classify: vi.fn().mockResolvedValue({ category: 'test', confidence: 0.9 }),
 		extractStructured: vi.fn().mockResolvedValue({ key: 'value' }),
 		chat: vi.fn().mockResolvedValue({
@@ -605,6 +609,34 @@ describe('SystemLLMGuard.chat (REQ-LLM-045)', () => {
 		const imageTokenCost = ((N * 1600) / 1000) * servingInputUsdPer1k;
 		expect(estImages - estPlain).toBeCloseTo(imageTokenCost, 6);
 	});
+
+	it('reserves at least N*1600 input tokens of cost more for a completeWithMeta with N images than the same call without images, at the serving model price (R2-1)', async () => {
+		const inner = createMockInner();
+		const N = 3;
+		const servingInputUsdPer1k = 0.002;
+		const priceLookup: PriceLookup = {
+			priceFor: () => ({ inputUsdPer1k: 0.05, outputUsdPer1k: 0.15 }),
+			priceForRef: () => ({ inputUsdPer1k: servingInputUsdPer1k, outputUsdPer1k: 0.008 }),
+		};
+		const modelRef: ModelRef = { provider: 'openai', model: 'gpt-4.1' };
+		const photo = { data: Buffer.alloc(1), mimeType: 'image/png' };
+		const plainLimiter = createMockHouseholdLimiter();
+		await makeGuard(inner, {
+			householdLimiter: plainLimiter as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).completeWithMeta('look', { modelRef });
+		const imageLimiter = createMockHouseholdLimiter();
+		await makeGuard(inner, {
+			householdLimiter: imageLimiter as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).completeWithMeta('look', { modelRef, images: [photo, photo, photo] });
+		const estPlain = (plainLimiter.reserveEstimated as ReturnType<typeof vi.fn>).mock
+			.calls[0]?.[3] as number;
+		const estImages = (imageLimiter.reserveEstimated as ReturnType<typeof vi.fn>).mock
+			.calls[0]?.[3] as number;
+		const imageTokenCost = ((N * 1600) / 1000) * servingInputUsdPer1k;
+		expect(estImages - estPlain).toBeCloseTo(imageTokenCost, 6);
+	});
 });
 
 describe('SystemLLMGuard prices the model that serves the request, not the default tier (P2-1)', () => {
@@ -694,6 +726,36 @@ describe('SystemLLMGuard prices the model that serves the request, not the defau
 			});
 		});
 		expect(inner.chat).toHaveBeenCalledTimes(1);
+	});
+
+	it('household budget — 3-image completeWithMeta on a paid vision modelRef is refused by HouseholdLLMLimiter.checkCost at $9.99 of $10 and the no-image control is admitted (R2-1)', async () => {
+		const inner = createMockInner();
+		// gpt-4.1 ($2/$8 per MTok). complete() defaults the output allowance to
+		// 4096 tokens ($0.032768), which already exceeds the $0.01 headroom, so
+		// maxTokens is pinned to the chat allowance (1024, $0.008192). Only the
+		// 3 × 1600 image tokens ($0.0096) push the reservation over the cap.
+		const vision: ModelRef = { provider: 'openai', model: 'gpt-4.1' };
+		const visionPrice: PriceLookup = {
+			hasBillableProvider: () => true,
+			priceFor: () => ({ inputUsdPer1k: 0, outputUsdPer1k: 0 }),
+			priceForRef: (ref) =>
+				ref.model === vision.model ? { inputUsdPer1k: 0.002, outputUsdPer1k: 0.008 } : undefined,
+		};
+		const photo = { data: Buffer.alloc(1), mimeType: 'image/png' };
+		const guard = makeGuardNearCap(inner, visionPrice);
+		await requestContext.run({ userId: 'u1', householdId: HOUSEHOLD }, async () => {
+			await expect(
+				guard.completeWithMeta('', { modelRef: vision, maxTokens: 1024 }),
+			).resolves.toBeDefined();
+			await expect(
+				guard.completeWithMeta('', {
+					modelRef: vision,
+					maxTokens: 1024,
+					images: [photo, photo, photo],
+				}),
+			).rejects.toMatchObject({ scope: 'household' });
+		});
+		expect(inner.completeWithMeta).toHaveBeenCalledTimes(1);
 	});
 
 	it("legacy `model: 'claude'` routes to the standard tier in LLMServiceImpl, so the guard prices it as standard, not fast", async () => {

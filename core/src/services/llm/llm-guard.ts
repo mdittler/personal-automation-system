@@ -121,8 +121,13 @@ export class LLMGuard implements LLMService {
 	}
 
 	async complete(prompt: string, options?: LLMCompletionOptions): Promise<string> {
-		return this.guarded('complete', prompt, options?.maxTokens, this.pricingKey(options), () =>
-			this.inner.complete(prompt, { ...options, _appId: this.appId }),
+		return this.guarded(
+			'complete',
+			prompt,
+			options?.maxTokens,
+			this.pricingKey(options),
+			() => this.inner.complete(prompt, { ...options, _appId: this.appId }),
+			options?.images?.length ?? 0,
 		);
 	}
 
@@ -130,8 +135,13 @@ export class LLMGuard implements LLMService {
 		prompt: string,
 		options?: LLMCompletionOptions,
 	): Promise<LLMCompletionMeta> {
-		return this.guarded('complete', prompt, options?.maxTokens, this.pricingKey(options), () =>
-			this.inner.completeWithMeta(prompt, { ...options, _appId: this.appId }),
+		return this.guarded(
+			'complete',
+			prompt,
+			options?.maxTokens,
+			this.pricingKey(options),
+			() => this.inner.completeWithMeta(prompt, { ...options, _appId: this.appId }),
+			options?.images?.length ?? 0,
 		);
 	}
 
