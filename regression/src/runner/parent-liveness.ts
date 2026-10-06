@@ -1,4 +1,4 @@
-import { type ReadStream, createReadStream } from 'node:fs';
+import { Socket } from 'node:net';
 import type { Readable } from 'node:stream';
 
 /**
@@ -65,13 +65,16 @@ export function installParentLiveness(opts: ParentLivenessOptions = {}): () => v
 	};
 }
 
-function openParentPipe(): ReadStream | null {
+function openParentPipe(): Socket | null {
 	try {
-		const stream = createReadStream('', { fd: 3, autoClose: false });
-		// fs.ReadStream's types omit unref; the runtime stream is a Socket and must not
-		// keep the worker alive by itself.
-		(stream as ReadStream & { unref?: () => void }).unref?.();
-		return stream;
+		// fs.ReadStream on this fd blocks a libuv threadpool thread. That read cannot
+		// be unref'd, so the worker stays alive after the trial — and process.exit
+		// waits on the threadpool forever. A net.Socket polls the fd; unref() keeps
+		// it from holding the event loop. Construction throws when fd 3 is absent
+		// (hand-launched worker); the caller then polls ppid only.
+		const socket = new Socket({ fd: 3, readable: true, writable: false });
+		socket.unref();
+		return socket;
 	} catch {
 		return null;
 	}
