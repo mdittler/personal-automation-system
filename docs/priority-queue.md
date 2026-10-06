@@ -101,6 +101,7 @@ Each item must appear in that phase's plan. Most came out of the 2026-10-05 desi
 - Agent-bucket confirmation tasks: assert nothing is written before ✅. They need P2's confirmation store and callback entry point.
 - Record outbound HTTP attempts during agent trials, and assert none on injection tasks.
 - Tool-call, step, and tool-error metrics in the agent report, sourced from the trace.
+- Anthropic prompt caching (`cache_control` on the last tool and last system block) with cache-aware cost accounting (1.25× writes, 0.1× reads) in `CostTracker`/`model-pricing.ts` and the guard estimators. P1 ships without `cache_control` and carries cache counts unbilled on `ChatUsage`. Tracked in open-items: Deferred Infrastructure Work, "Agent Runtime deferrals", item 9 (P1 plan review R1-1).
 
 **Q6 · P3**
 - Formal thinking comparison (off / low / on) on the agent bucket, scored as pass^3. The pre-P1 evidence is in `docs/superpowers/plans/findings/2026-10-05-qwen38-thinking-comparison.md`; revisit the default if thinking wins.

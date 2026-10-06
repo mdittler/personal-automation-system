@@ -14,8 +14,8 @@
 
 ## Scope boundaries
 
-- **In (design §5, §16 P1 row, §18.1–3, carried items):** `ChatMessage`/`ChatOptions`/`ChatResult` types; `LLMProviderClient.chatWithUsage` + `supportsTools` + `supportsVisionModel`; `LLMService.chat` + `supportsTools` + `supportsVision`; Ollama `/api/chat` with tools, tool results, synthesized call ids, `num_ctx`, `keep_alive`, `think` (boolean and level), images, model-capability-driven vision; OpenAI-compatible/llama.cpp chat with `tools`, `parallel_tool_calls`, `supports_tools` config flag; Anthropic chat with `tools`, `tool_choice: auto`, `tool_result`-first user messages, `is_error`, `cache_control` on tools and system prefix, usage including cache tokens; `AbortSignal` into every SDK call on the chat path, never retried; both guards; the usage-on-failure fix; the regression trial worker's tracker covering `chatWithUsage`; `agent.model` / `agent.vision_model` / `agent.thinking` (+ `agent.context_window`, `agent.keep_alive`, both named in design §5.3) config with defaults; a live smoke against local qwen3.8 and a tiny capped Anthropic call; URS, phase record, open-items, queue row.
-- **Not in P1 (P2 — `docs/priority-queue.md` Q5):** tool registry, `defineTool`, Ajv validation, `AgentLoop`, `find_tools`, confirmations, taint, trace, `ContextAssembler`, `/agent`, per-step cost reservation, prompt compaction, deterministic tool ordering (P1 serializes tools in the order given; P2 orders them), `agent.history_turns` / `agent.load_all_threshold` / `agent.core_tools` settings.
+- **In (design §5, §16 P1 row, §18.1–3, carried items):** `ChatMessage`/`ChatOptions`/`ChatResult` types; `LLMProviderClient.chatWithUsage` + `supportsTools` + `supportsVisionModel`; `LLMService.chat` + `supportsTools` + `supportsVision`; Ollama `/api/chat` with tools, tool results, synthesized call ids, `num_ctx`, `keep_alive`, `think` (boolean and level), images, model-capability-driven vision; OpenAI-compatible/llama.cpp chat with `tools`, `parallel_tool_calls`, the model-aware output-limit field (`max_completion_tokens` for o-series / gpt-5, else `max_tokens`), `supports_tools` config flag; Anthropic chat with `tools`, `tool_choice: auto`, `tool_result`-first user messages, `is_error`, usage with cache-token counts carried separately (**no `cache_control` in P1** — see decision 13); `AbortSignal` into every SDK call on the chat path *and* into the capability probe wait, never retried; both guards; the usage-on-failure fix; the regression trial worker's tracker covering `chatWithUsage`; `agent.model` / `agent.vision_model` / `agent.thinking` (+ `agent.context_window`, `agent.keep_alive`, both named in design §5.3) config with defaults; a live smoke against local qwen3.8 and a tiny capped Anthropic call; URS, phase record, open-items, queue row.
+- **Not in P1 (P2 — `docs/priority-queue.md` Q5):** tool registry, `defineTool`, Ajv validation, `AgentLoop`, `find_tools`, confirmations, taint, trace, `ContextAssembler`, `/agent`, per-step cost reservation, prompt compaction, deterministic tool ordering (P1 serializes tools in the order given; P2 orders them), `agent.history_turns` / `agent.load_all_threshold` / `agent.core_tools` settings; **Anthropic prompt caching (`cache_control`) on the chat path** — needs cache-aware pricing in `CostTracker`/`model-pricing.ts` first (5-minute-TTL writes bill 1.25× input, reads 0.1×), so it ships with P2 (plan review R1-1; open-items "Agent Runtime deferrals" item 9; queue *Carried items — Q5 · P2*).
 - **Not in P1 (later or trigger-based, already in `docs/open-items.md`):** Google tool calling (deferral 1 — Google reports `supportsTools: false` and has no `doChat`); `AbortSignal` on the `complete()` path (Hermes P8b carry-forward stays open for `complete`; this plan closes it for `chat`); Anthropic / OpenAI thinking controls (today only Ollama honours `thinking`; unchanged); GUI settings exposure of `agent.*` (P5 docs/GUI pass); per-step token metering (P2's trace reads `ChatResult.usage`).
 
 ## Commands used throughout
@@ -25,6 +25,7 @@
 - Single regression test file: `cd regression && npx vitest run src/__tests__/<file>.test.ts`
 - Whole suite: `pnpm test`; regression workspace: `pnpm --filter @pas/regression test`; regression typecheck: `pnpm --filter @pas/regression typecheck`
 - Core typecheck: `pnpm --filter @pas/core typecheck` (if the script is absent, `cd core && npx tsc --noEmit -p tsconfig.json`)
+- **Test-inclusive typecheck gate** (Task 6; `core/tsconfig.json` excludes `**/*.test.ts`, and the test-inclusive baseline carries ~950 pre-existing errors, so the gate is a filter on the new members, not a clean exit code): `cd core && npx tsc --noEmit -p tsconfig.tests.json 2>&1 | grep -E "TS27(39|41).*'(chat|supportsTools|supportsVision|chatWithUsage|supportsVisionModel)'|chat-messages.test.ts.*TS2305"` — **must print nothing**.
 - Lint: `pnpm lint` (zero errors)
 - Live smoke: `pnpm tsx scripts/llm-chat-smoke.ts [--anthropic] [--llama-cpp <base-url>]`
 
@@ -32,17 +33,19 @@
 
 | File | Responsibility | Task |
 |---|---|---|
-| `core/src/types/llm.ts` (modify) | `ChatRole`, `ChatMessage`, `ToolCallRequest`, `ChatToolSpec`, `ChatOptions`, `ChatResult`, `ChatFinishReason`, `ThinkingLevel`; widen `LLMCompletionOptions.thinking`; `LLMProviderClient.chatWithUsage/supportsTools/supportsVisionModel`; `LLMService.chat/supportsTools/supportsVision` | 0 |
-| `core/src/services/llm/chat-messages.ts` (create) | `validateChatMessages`, `ChatMessageShapeError`, `synthesizeToolCallId`, `serializeChatForEstimate`, `toOllamaThink` | 0 |
-| `core/src/services/llm/chat-defaults.ts` (create) | `DEFAULT_CHAT_CONTEXT_WINDOW = 32768`, `DEFAULT_OLLAMA_KEEP_ALIVE = '30m'`, `DEFAULT_AGENT_MODEL`, `DEFAULT_AGENT_THINKING = 'off'` — one home for every pinned number | 0 |
+| `core/src/types/llm.ts` (modify) | `ChatRole`, `ChatMessage`, `ToolCallRequest`, `ChatToolSpec`, `ChatOptions`, `ChatResult`, `ChatUsage`, `ChatFinishReason`, `ThinkingLevel`; widen `LLMCompletionOptions.thinking`; `LLMProviderClient.chatWithUsage/supportsTools/supportsVisionModel`; `LLMService.chat/supportsTools/supportsVision` | 0 |
+| `core/src/types/index.ts` (modify) | Barrel exports for every new chat type (apps import from `@pas/core/types`) | 0 |
+| `core/src/services/llm/chat-messages.ts` (create) | `validateChatMessages`, `ChatMessageShapeError`, `synthesizeToolCallId`, `serializeChatForEstimate` (content + tool-call arguments + replayed thinking + tool list), `toOllamaThink`, `abortable` | 0 |
+| `core/src/services/llm/chat-defaults.ts` (create) | `DEFAULT_CHAT_CONTEXT_WINDOW = 32768`, `DEFAULT_OLLAMA_KEEP_ALIVE = '30m'`, `DEFAULT_OLLAMA_TIMEOUT_MS = 120_000`, `DEFAULT_AGENT_MODEL`, `DEFAULT_AGENT_THINKING = 'off'` — one home for every pinned number | 0 |
 | `core/src/services/llm/errors.ts` (modify) | `LLMEmptyOutputError.usage`; new `LLMToolsUnsupportedError` | 1 |
 | `core/src/utils/llm-errors.ts` (modify) | Categories `tools-unsupported` and `aborted` (both non-retryable); `isAbortError` | 1 |
-| `core/src/services/llm/providers/base-provider.ts` (modify) | `chatWithUsage` (abort pre-check, message validation, image + capability gates, retry with abort predicate, temperature self-heal, usage recording); usage recorded from `LLMEmptyOutputError` on both paths; `doChat` default; `supportsTools` default `false`; `supportsVisionModel` default | 2 |
-| `core/src/services/llm/providers/ollama-provider.ts` (modify) | `doChat` on `client.chat`; `OllamaCapabilityCache` over `/api/show`; `num_ctx`, `keep_alive`, `think`, images, `tool_name`; per-call abortable client; `supportsVision` becomes model-driven | 3 |
-| `core/src/services/llm/providers/openai-compatible-provider.ts`, `llama-cpp-provider.ts`, `provider-factory.ts` (modify) | `doChat` on `chat.completions.create` with `tools`/`parallel_tool_calls`, JSON argument parsing, `signal`; `supportsTools` from config (`supports_tools`; default true for openai-compatible, false for llama-cpp) | 4 |
-| `core/src/services/llm/providers/anthropic-provider.ts` (modify) | `doChat` on `messages.create` with `tools` + `cache_control`, `tool_choice: auto`, merged user/tool_result messages, `is_error`, usage incl. cache tokens, `signal`; `supportsTools` true | 5 |
+| `core/src/services/llm/providers/base-provider.ts` (modify) | `chatWithUsage` (abort pre-check, message validation, per-model image gate, capability gate whose probe wait is abortable, retry with abort predicate, temperature self-heal, usage recording); usage recorded from `LLMEmptyOutputError` on both paths; `doChat` default; `supportsTools` default `false`; `supportsVisionModel` default; `BaseProviderOptions.supportsTools?` / `sdkMaxRetries?` | 2, 4, 5 |
+| `core/src/services/llm/providers/ollama-provider.ts` (modify) | `doChat` on `client.chat`; `OllamaCapabilityCache` over `/api/show`; `num_ctx`, `keep_alive`, `think`, images, `tool_name`; per-call abortable client; `supportsVisionModel` is model-driven on the chat path while `supportsVision` (the `complete()` gate) stays `false` | 3 |
+| `core/src/services/llm/model-capabilities.ts` (modify) | `openAIOutputLimitField(modelId)` → `'max_completion_tokens'` for o-series / gpt-5 ids, else `'max_tokens'` | 4 |
+| `core/src/services/llm/providers/openai-compatible-provider.ts`, `llama-cpp-provider.ts`, `provider-factory.ts` (modify) | `doChat` on `chat.completions.create` with `tools`/`parallel_tool_calls`, model-aware output-limit field (also applied to `doComplete`), JSON argument parsing, `signal`; `supportsTools` from config (`supports_tools`; default true for openai-compatible, false for llama-cpp); `maxRetries` from `sdkMaxRetries` | 4 |
+| `core/src/services/llm/providers/anthropic-provider.ts` (modify) | `doChat` on `messages.create` with `tools` (no `cache_control`), `tool_choice: auto`, merged user/tool_result messages, `is_error`, captionless photo turns, usage with cache-token counts carried separately and never priced at the input rate, `signal`; `supportsTools` true; `maxRetries` from `sdkMaxRetries` | 5 |
 | `core/src/services/llm/index.ts`, `llm-guard.ts`, `system-llm-guard.ts`, `estimate-guard-cost.ts` (modify) | `LLMServiceImpl.chat/supportsTools/supportsVision`; both guards wrap `chat` (`GuardMethod` gains `'chat'`, default output 1024) | 6 |
-| `core/src/testing/mock-services.ts` + 7 inline `LLMService` literals (modify) | Mocks satisfy the widened interface | 6 |
+| `core/src/testing/mock-services.ts` + every uncast `LLMService` / `LLMProviderClient` object literal the Task 6 grep enumerates (≈62 sites in `core/src` and `apps/food/src` at HEAD `056abdf`) (modify); `core/tsconfig.tests.json` (create) | Mocks satisfy the widened interface; the test-inclusive typecheck gate proves it | 6 |
 | `core/src/types/config.ts`, `core/src/services/config/{index,pas-yaml-schema,defaults}.ts`, `config/pas.yaml.example` (modify) | `LLMProviderConfig.supportsTools`; `SystemConfig.agent` (`model`, `vision_model`, `thinking`, `context_window`, `keep_alive`) with schema, sanitizers and defaults | 7 |
 | `regression/src/runner/provider-call-tracker.ts` (modify) | `wrap()` also tracks `chatWithUsage` | 8 |
 | `scripts/llm-chat-smoke.ts` (create), `docs/superpowers/plans/findings/2026-10-06-p1-chat-smoke.md` (create) | Live smoke with hard PASS/FAIL per step and the recorded run | 9, 10 |
@@ -62,21 +65,29 @@
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage } from '../../../types/llm.js';
+// Deliberately the barrel, not `llm.js`: apps import chat types through
+// `@pas/core/types`, so a missing re-export is a type error here (TS2305 under
+// the Task 6 test-inclusive typecheck gate).
+import type { ChatMessage, ChatOptions, ChatResult, ChatToolSpec, ThinkingLevel, ToolCallRequest } from '../../../types/index.js';
 import {
 	DEFAULT_AGENT_MODEL,
 	DEFAULT_AGENT_THINKING,
 	DEFAULT_CHAT_CONTEXT_WINDOW,
 	DEFAULT_OLLAMA_KEEP_ALIVE,
+	DEFAULT_OLLAMA_TIMEOUT_MS,
 } from '../chat-defaults.js';
 import {
 	ChatMessageShapeError,
 	TOOL_CALL_ID_RE,
+	abortable,
 	serializeChatForEstimate,
 	synthesizeToolCallId,
 	toOllamaThink,
 	validateChatMessages,
 } from '../chat-messages.js';
+
+// Compile-time use of every barrel export (erased at runtime; checked by the Task 6 gate).
+type _BarrelCheck = [ChatOptions, ChatResult, ChatToolSpec, ThinkingLevel, ToolCallRequest];
 
 const user = (content: string): ChatMessage => ({ role: 'user', content });
 const assistantCall = (id: string): ChatMessage => ({
@@ -156,6 +167,62 @@ describe('validateChatMessages (REQ-LLM-045)', () => {
 			]),
 		).toThrow(/images are only allowed on user messages/);
 	});
+
+	it('rejects images on a leading system message too (R1-7: the system prefix was skipped unvalidated)', () => {
+		expect(() =>
+			validateChatMessages([
+				{ role: 'system', content: 'x', images: [{ data: Buffer.alloc(1), mimeType: 'image/png' }] },
+				user('hi'),
+			]),
+		).toThrow(/images are only allowed on user messages \(message 0\)/);
+	});
+
+	it('rejects a second tool result for an id that was already answered (R1-7)', () => {
+		expect(() =>
+			validateChatMessages([user('hi'), assistantCall('call_1'), toolResult('call_1'), toolResult('call_1')]),
+		).toThrow(/already answered/);
+	});
+
+	it('rejects a user turn while an assistant tool call is still unanswered (R1-7)', () => {
+		expect(() =>
+			validateChatMessages([user('hi'), assistantCall('call_1'), user('and the date?')]),
+		).toThrow(/unanswered tool call 'call_1'/);
+	});
+
+	it('rejects a history that ends with an unanswered assistant tool call (R1-7)', () => {
+		expect(() => validateChatMessages([user('hi'), assistantCall('call_1')])).toThrow(
+			/unanswered tool call 'call_1'/,
+		);
+	});
+
+	it('accepts two tool calls answered in either order', () => {
+		expect(() =>
+			validateChatMessages([
+				user('hi'),
+				{
+					role: 'assistant',
+					content: '',
+					toolCalls: [
+						{ id: 'call_1', name: 'a', arguments: {} },
+						{ id: 'call_2', name: 'b', arguments: {} },
+					],
+				},
+				toolResult('call_2'),
+				toolResult('call_1'),
+				{ role: 'assistant', content: 'done' },
+			]),
+		).not.toThrow();
+	});
+
+	it('rejects a user message with neither text nor images (Anthropic rejects an empty text block — R1-3)', () => {
+		expect(() => validateChatMessages([user('   ')])).toThrow(/user message 0 has neither text nor images/);
+	});
+
+	it('accepts a captionless photo (images, empty text)', () => {
+		expect(() =>
+			validateChatMessages([{ role: 'user', content: '', images: [{ data: Buffer.alloc(1), mimeType: 'image/png' }] }]),
+		).not.toThrow();
+	});
 });
 
 describe('synthesizeToolCallId (REQ-LLM-046)', () => {
@@ -194,12 +261,63 @@ describe('serializeChatForEstimate (REQ-LLM-045)', () => {
 	it('is just the message text when there are no tools', () => {
 		expect(serializeChatForEstimate([user('abc')], undefined)).toBe('abc');
 	});
+
+	it('counts assistant tool-call arguments: a 100k-character tool-call history estimates ≥ 100k characters (R1-5)', () => {
+		const bigArgs = { blob: 'x'.repeat(100_000) };
+		const history: ChatMessage[] = [
+			user('go'),
+			{ role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'lookup', arguments: bigArgs }] },
+			{ role: 'tool', content: 'ok', toolCallId: 'call_1' },
+		];
+		const text = serializeChatForEstimate(history, undefined);
+		expect(text.length).toBeGreaterThanOrEqual(100_000);
+		expect(text).toContain('"blob"');
+	});
+
+	it('counts replayed assistant thinking and raw-string tool-call arguments', () => {
+		const text = serializeChatForEstimate(
+			[
+				user('go'),
+				{
+					role: 'assistant',
+					content: '',
+					thinking: 'T'.repeat(500),
+					toolCalls: [{ id: 'call_1', name: 'lookup', arguments: 'R'.repeat(300) }],
+				},
+				{ role: 'tool', content: 'ok', toolCallId: 'call_1' },
+			],
+			undefined,
+		);
+		expect(text).toContain('T'.repeat(500));
+		expect(text).toContain('R'.repeat(300));
+	});
+});
+
+describe('abortable (REQ-LLM-050, R1-6)', () => {
+	it('returns the promise unchanged when no signal is given', async () => {
+		await expect(abortable(Promise.resolve(1), undefined)).resolves.toBe(1);
+	});
+
+	it('rejects with the signal reason when the signal fires while the promise is pending', async () => {
+		const controller = new AbortController();
+		const pending = new Promise<number>(() => {});
+		const result = abortable(pending, controller.signal);
+		controller.abort();
+		await expect(result).rejects.toMatchObject({ name: 'AbortError' });
+	});
+
+	it('rejects immediately when the signal is already aborted', async () => {
+		const controller = new AbortController();
+		controller.abort(new Error('custom reason'));
+		await expect(abortable(new Promise<number>(() => {}), controller.signal)).rejects.toThrow('custom reason');
+	});
 });
 
 describe('chat defaults are pinned (design §5.3, §18)', () => {
-	it('context window 32768, keep-alive 30m, agent model qwen3.8:27b-mlx on ollama, thinking off', () => {
+	it('context window 32768, keep-alive 30m, Ollama HTTP timeout 120 s, agent model qwen3.8:27b-mlx on ollama, thinking off', () => {
 		expect(DEFAULT_CHAT_CONTEXT_WINDOW).toBe(32768);
 		expect(DEFAULT_OLLAMA_KEEP_ALIVE).toBe('30m');
+		expect(DEFAULT_OLLAMA_TIMEOUT_MS).toBe(120_000);
 		expect(DEFAULT_AGENT_MODEL).toEqual({ provider: 'ollama', model: 'qwen3.8:27b-mlx' });
 		expect(DEFAULT_AGENT_THINKING).toBe('off');
 	});
@@ -285,9 +403,17 @@ export interface ChatOptions
 export type ChatFinishReason = 'stop' | 'tool_calls' | 'length' | 'error' | 'other';
 
 export interface ChatUsage {
+	/** Uncached prompt tokens (Anthropic `input_tokens`; the whole prompt on other providers). Billed at the input rate. */
 	inputTokens: number;
 	outputTokens: number;
-	/** Anthropic prompt-cache reads, when reported (already included in inputTokens). */
+	/**
+	 * Anthropic `cache_creation_input_tokens`, when reported. NOT included in
+	 * `inputTokens` and NOT billed by `CostTracker` in P1 (which has one input
+	 * rate; cache writes bill 1.25×, reads 0.1×). P1 sends no `cache_control`,
+	 * so this is 0 or absent; P2 adds cache-aware pricing before enabling it.
+	 */
+	cacheCreationTokens?: number;
+	/** Anthropic `cache_read_input_tokens`, same rules as `cacheCreationTokens`. */
 	cacheReadTokens?: number;
 }
 
@@ -324,8 +450,9 @@ Extend `LLMService` (after `extractStructured`):
 	/**
 	 * Chat with tools. Model selection priority is the same as `complete()`
 	 * minus the legacy options: `modelRef`, then `tier`, then the fast tier.
-	 * Throws `LLMToolsUnsupportedError` before any network call when `tools`
-	 * are given and the resolved model cannot accept them.
+	 * Throws `LLMToolsUnsupportedError` before any inference call when `tools`
+	 * are given and the resolved model cannot accept them (the capability
+	 * probe itself — Ollama `/api/show` — may run first).
 	 */
 	chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResult>;
 
@@ -335,6 +462,23 @@ Extend `LLMService` (after `extractStructured`):
 	/** False when the provider is not registered; otherwise the provider's answer (which may reject). */
 	supportsVision(ref: ModelRef): Promise<boolean>;
 ```
+
+Add the barrel exports (R1-11) — in `core/src/types/index.ts`, the `// LLM` export block (it currently lists `LLMProvider … ProviderModel` and lacks every chat type) gains:
+
+```ts
+	LLMImage,
+	ChatRole,
+	ChatMessage,
+	ToolCallRequest,
+	ChatToolSpec,
+	ChatOptions,
+	ChatUsage,
+	ChatResult,
+	ChatFinishReason,
+	ThinkingLevel,
+```
+
+(`import type { ChatMessage, ChatOptions } from '@pas/core/types'` is the supported app entry point; `chat-messages.test.ts` imports through the barrel so the Task 6 gate catches an omission as TS2305.)
 
 - [ ] **Step 4: Create `core/src/services/llm/chat-defaults.ts`**
 
@@ -353,6 +497,9 @@ export const DEFAULT_CHAT_CONTEXT_WINDOW = 32768;
 
 /** Ollama `keep_alive` for chat, so the agent model stays loaded (a cold load measured ~13 s). */
 export const DEFAULT_OLLAMA_KEEP_ALIVE = '30m';
+
+/** Per-request HTTP timeout for every Ollama call (generate, chat, show). Was an inline literal in ollama-provider.ts. */
+export const DEFAULT_OLLAMA_TIMEOUT_MS = 120_000;
 
 /** Operator decision 2026-10-05 §18.1. */
 export const DEFAULT_AGENT_MODEL: ModelRef = Object.freeze({
@@ -399,28 +546,80 @@ export function synthesizeToolCallId(): string {
  * are portable between models):
  *  - at least one message;
  *  - system messages only at the start (Anthropic takes them as `system`);
+ *  - images only on user messages — including the system prefix;
+ *  - a user message carries text (non-whitespace) or images (Anthropic
+ *    rejects an empty text block);
  *  - a tool message needs `toolCallId`, must directly follow the assistant
- *    turn that requested it (or another tool result for the same turn), and
- *    its id must be one that turn requested (Anthropic/OpenAI reject
- *    orphans);
- *  - tool-call ids are unique within an assistant turn;
- *  - images only on user messages.
+ *    turn that requested it (or another tool result for the same turn), its
+ *    id must be one that turn requested, and each requested id is answered
+ *    exactly once (Anthropic/OpenAI reject orphans and duplicates);
+ *  - every tool call is answered before the next non-tool message and before
+ *    the history ends (Anthropic: "tool_use ids were found without tool_result
+ *    blocks immediately after");
+ *  - tool-call ids are unique within an assistant turn.
  */
 export function validateChatMessages(messages: readonly ChatMessage[]): void {
 	if (messages.length === 0) throw new ChatMessageShapeError('at least one message is required');
 
-	let i = 0;
-	while (i < messages.length && messages[i]?.role === 'system') i++;
+	/** Ids the current assistant turn requested that have not been answered yet. */
+	let pending: Set<string> | null = null;
+	/** Ids of the current assistant turn that were already answered (duplicate detection). */
+	let answered = new Set<string>();
+	let seenNonSystem = false;
 
-	let openToolCallIds: Set<string> | null = null;
-	for (; i < messages.length; i++) {
-		const m = messages[i] as ChatMessage;
-		if (m.role === 'system') {
-			throw new ChatMessageShapeError(`system messages must come first (message ${i})`);
+	const assertNoPending = (i: number) => {
+		if (pending && pending.size > 0) {
+			const [first] = pending;
+			throw new ChatMessageShapeError(
+				`unanswered tool call '${first}' — every tool call needs a tool result before message ${i}`,
+			);
 		}
+	};
+
+	for (let i = 0; i < messages.length; i++) {
+		const m = messages[i] as ChatMessage;
+
 		if (m.images?.length && m.role !== 'user') {
 			throw new ChatMessageShapeError(`images are only allowed on user messages (message ${i})`);
 		}
+
+		if (m.role === 'system') {
+			if (seenNonSystem) {
+				throw new ChatMessageShapeError(`system messages must come first (message ${i})`);
+			}
+			continue;
+		}
+		seenNonSystem = true;
+
+		if (m.role === 'tool') {
+			if (!m.toolCallId) {
+				throw new ChatMessageShapeError(`tool message ${i} is missing toolCallId`);
+			}
+			if (!pending && answered.size === 0) {
+				throw new ChatMessageShapeError(
+					`tool message ${i} must directly follow the assistant turn that requested it`,
+				);
+			}
+			if (answered.has(m.toolCallId)) {
+				throw new ChatMessageShapeError(
+					`tool message ${i} toolCallId '${m.toolCallId}' was already answered`,
+				);
+			}
+			if (!pending?.has(m.toolCallId)) {
+				throw new ChatMessageShapeError(
+					`tool message ${i} toolCallId '${m.toolCallId}' does not match a requested tool call`,
+				);
+			}
+			pending.delete(m.toolCallId);
+			answered.add(m.toolCallId);
+			continue;
+		}
+
+		// assistant or user: the previous turn's tool calls must all be answered.
+		assertNoPending(i);
+		answered = new Set();
+		pending = null;
+
 		if (m.role === 'assistant') {
 			const ids = new Set<string>();
 			for (const call of m.toolCalls ?? []) {
@@ -429,28 +628,39 @@ export function validateChatMessages(messages: readonly ChatMessage[]): void {
 				}
 				ids.add(call.id);
 			}
-			openToolCallIds = ids.size > 0 ? ids : null;
+			pending = ids.size > 0 ? ids : null;
 			continue;
 		}
-		if (m.role === 'tool') {
-			if (!m.toolCallId) {
-				throw new ChatMessageShapeError(`tool message ${i} is missing toolCallId`);
-			}
-			if (!openToolCallIds) {
-				throw new ChatMessageShapeError(
-					`tool message ${i} must directly follow the assistant turn that requested it`,
-				);
-			}
-			if (!openToolCallIds.has(m.toolCallId)) {
-				throw new ChatMessageShapeError(
-					`tool message ${i} toolCallId '${m.toolCallId}' does not match a requested tool call`,
-				);
-			}
-			continue;
-		}
+
 		// user
-		openToolCallIds = null;
+		if (m.content.trim().length === 0 && !m.images?.length) {
+			throw new ChatMessageShapeError(`user message ${i} has neither text nor images`);
+		}
 	}
+
+	assertNoPending(messages.length);
+}
+
+/**
+ * Settle `promise`, or reject with the signal's reason as soon as `signal`
+ * fires. The underlying work is not cancelled (a shared capability probe must
+ * finish and populate its cache for the next caller); only this caller's wait
+ * ends. Used around the `/api/show` probe so an abort during a cold Ollama
+ * chat returns at once instead of after the 120 s HTTP timeout (R1-6).
+ */
+export function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+	if (!signal) return promise;
+	if (signal.aborted) return Promise.reject(abortReason(signal));
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(abortReason(signal));
+		signal.addEventListener('abort', onAbort, { once: true });
+		promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+	});
+}
+
+/** The signal's own reason, or an AbortError when the caller gave none. */
+export function abortReason(signal: AbortSignal): unknown {
+	return signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
 }
 
 /** Ollama `think`: `false` for off/undefined, `true` for the model default, or an explicit level. */
@@ -462,25 +672,39 @@ export function toOllamaThink(
 	return thinking;
 }
 
-/** Text the guards estimate against: every message's content plus the tool list as JSON. Images are not counted (same as `complete()`). */
+/**
+ * Text the guards estimate against: everything the provider mappings put on
+ * the wire as text — each message's content, replayed assistant thinking, the
+ * JSON of assistant tool calls (names + arguments; a raw-string argument is
+ * included as is), and the tool list as JSON. Images are not counted (same as
+ * `complete()`; accepted limitation). R1-5: a 100k-character tool-call history
+ * used to estimate as 5 characters, letting `HouseholdLLMLimiter.checkCost`
+ * admit a paid replay past the household budget.
+ */
 export function serializeChatForEstimate(
 	messages: readonly ChatMessage[],
 	tools: readonly ChatToolSpec[] | undefined,
 ): string {
-	const text = messages.map((m) => m.content).join('\n');
-	return tools?.length ? `${text}\n${JSON.stringify(tools)}` : text;
+	const parts: string[] = [];
+	for (const m of messages) {
+		parts.push(m.content);
+		if (m.thinking) parts.push(m.thinking);
+		if (m.toolCalls?.length) parts.push(JSON.stringify(m.toolCalls));
+	}
+	if (tools?.length) parts.push(JSON.stringify(tools));
+	return parts.join('\n');
 }
 ```
 
 - [ ] **Step 6: Run the test; expect it green**
 
 Run: `npx vitest run --project core core/src/services/llm/__tests__/chat-messages.test.ts`
-Expected: PASS (17 tests).
+Expected: PASS — 29 tests (validate 15, synthesize 1, toOllamaThink 7, serialize 4, abortable 3, pins 1); read the count from the reporter summary.
 
 - [ ] **Step 7: Typecheck will now fail** (the three `LLMService` implementers and the provider classes lack the new members) — that is expected and is closed by Tasks 2–6. Do **not** make the new members optional to dodge it. Commit only the files from this task.
 
 ```bash
-git add core/src/types/llm.ts core/src/services/llm/chat-messages.ts core/src/services/llm/chat-defaults.ts core/src/services/llm/__tests__/chat-messages.test.ts
+git add core/src/types/llm.ts core/src/types/index.ts core/src/services/llm/chat-messages.ts core/src/services/llm/chat-defaults.ts core/src/services/llm/__tests__/chat-messages.test.ts
 git commit -m "feat(llm): chat-with-tools types, message validation, pinned chat defaults (P1 Task 0)"
 ```
 
@@ -583,11 +807,13 @@ export interface LLMToolsUnsupportedErrorOptions {
 }
 
 /**
- * Thrown by `chatWithUsage` **before any network call** when the caller
+ * Thrown by `chatWithUsage` **before any inference call** when the caller
  * passed `tools` and the resolved model cannot accept native tool
  * definitions (Ollama `/api/show` lacks `tools`; `supports_tools: false`;
- * Google). Deterministic and non-retryable. P2's loop renders this as "this
- * model cannot run the agent" rather than as a provider outage.
+ * Google). The capability probe itself (one `/api/show` per model, cached)
+ * may run first; no `/api/chat` request is made. Deterministic and
+ * non-retryable. P2's loop renders this as "this model cannot run the agent"
+ * rather than as a provider outage.
  */
 export class LLMToolsUnsupportedError extends Error {
 	readonly provider: string;
@@ -674,7 +900,8 @@ git commit -m "feat(llm): usage on LLMEmptyOutputError, LLMToolsUnsupportedError
 	};
 	doChatError?: Error;
 	doChatCalls: Array<{ messages: ChatMessage[]; options?: ChatOptions }> = [];
-	toolsSupported = true;
+	/** A boolean, or a promise (to script a slow / never-settling probe). */
+	toolsSupported: boolean | Promise<boolean> = true;
 	visionModelSupported = true;
 
 	protected override async doChat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResult> {
@@ -683,8 +910,8 @@ git commit -m "feat(llm): usage on LLMEmptyOutputError, LLMToolsUnsupportedError
 		return this.doChatResult;
 	}
 
-	override async supportsTools(): Promise<boolean> {
-		return this.toolsSupported;
+	override supportsTools(): Promise<boolean> {
+		return Promise.resolve(this.toolsSupported);
 	}
 
 	override async supportsVisionModel(): Promise<boolean> {
@@ -806,11 +1033,19 @@ describe('BaseProvider.chatWithUsage — vision gate (REQ-LLM-046)', () => {
 		{ role: 'user', content: 'what is this?', images: [{ data: Buffer.from('x'), mimeType: 'image/png' }] },
 	];
 
-	it('rejects images when the provider does not support vision at all', async () => {
-		const provider = createTestProvider(); // supportsVision = false on TestProvider
+	it('rejects images when the provider does not support vision at all (default supportsVisionModel = provider flag)', async () => {
+		const provider = createTestProvider(); // supportsVision = false on TestProvider; visionModelSupported is ignored by the base default
 		await expect(provider.chatWithUsage(IMAGE_MSG)).rejects.toThrow(
-			/Provider test does not support vision/,
+			/Model 'test-model' on provider test does not support vision/,
 		);
+		expect(provider.doChatCalls).toHaveLength(0);
+	});
+
+	it('the chat gate is per model only: complete() keeps the provider-wide gate and its message (R1-2)', async () => {
+		const provider = createTestProvider();
+		await expect(
+			provider.completeWithUsage('x', { images: [{ data: Buffer.from('x'), mimeType: 'image/png' }] }),
+		).rejects.toThrow(/Provider test does not support vision/);
 	});
 
 	it('rejects images when the provider supports vision but the model does not', async () => {
@@ -875,6 +1110,16 @@ describe('BaseProvider.chatWithUsage — AbortSignal (REQ-LLM-050)', () => {
 		const controller = new AbortController();
 		await provider.chatWithUsage(USER_HI, { signal: controller.signal });
 		expect(provider.doChatCalls[0]?.options?.signal).toBe(controller.signal);
+	});
+
+	it('an abort while the capability probe is still pending rejects at once with AbortError and never reaches doChat (R1-6)', async () => {
+		const provider = createTestProvider();
+		provider.toolsSupported = new Promise<boolean>(() => {}); // a probe that never settles (cold Ollama, 120 s timeout)
+		const controller = new AbortController();
+		const call = provider.chatWithUsage(USER_HI, { tools: ONE_TOOL, signal: controller.signal });
+		setTimeout(() => controller.abort(), 10);
+		await expect(call).rejects.toMatchObject({ name: 'AbortError' });
+		expect(provider.doChatCalls).toHaveLength(0);
 	});
 });
 
@@ -967,7 +1212,7 @@ import type {
 	// …existing imports…
 } from '../../../types/llm.js';
 import { isAbortError, isEmptyOutputError, isParameterRejectionError } from '../../../utils/llm-errors.js';
-import { validateChatMessages } from '../chat-messages.js';
+import { abortReason, abortable, validateChatMessages } from '../chat-messages.js';
 import { LLMEmptyOutputError, LLMToolsUnsupportedError } from '../errors.js';
 ```
 
@@ -999,8 +1244,13 @@ Replace `completeWithUsage` and `completeWithTemperatureFallback` with:
 	 * Chat with optional tools. Same envelope as completeWithUsage — retry,
 	 * temperature self-heal, cost recording — plus: the history is validated
 	 * first, a pre-aborted signal fails before any work, tools are refused
-	 * before any network call when the model lacks them, and images are gated
-	 * per model (Ollama) not only per provider.
+	 * before any inference call when the model lacks them, and images are
+	 * gated **per model** (`supportsVisionModel`), whose base default is the
+	 * provider-wide flag. The provider-wide `supportsVision` is not consulted
+	 * here, so Ollama can accept photos on chat (per-model probe) while
+	 * `complete()` — whose `generate` request sends no images — keeps
+	 * rejecting them (R1-2). Both capability waits are abortable: the probe
+	 * keeps running and fills its cache, but this caller returns on abort.
 	 */
 	async chatWithUsage(messages: ChatMessage[], options: ChatOptions = {}): Promise<ChatResult> {
 		throwIfAborted(options.signal);
@@ -1009,16 +1259,15 @@ Replace `completeWithUsage` and `completeWithTemperatureFallback` with:
 
 		const images = messages.flatMap((m) => m.images ?? []);
 		if (images.length > 0) {
-			this.assertVisionProvider();
 			assertImageMimeTypes(images);
-			if (!(await this.supportsVisionModel(model))) {
+			if (!(await abortable(this.supportsVisionModel(model), options.signal))) {
 				throw new Error(
 					`Model '${model}' on provider ${this.providerId} does not support vision (image input)`,
 				);
 			}
 		}
 
-		if (options.tools?.length && !(await this.supportsTools(model))) {
+		if (options.tools?.length && !(await abortable(this.supportsTools(model), options.signal))) {
 			throw new LLMToolsUnsupportedError({ provider: this.providerId, model });
 		}
 
@@ -1153,9 +1402,11 @@ function assertImageMimeTypes(images: readonly LLMImage[]): void {
 /** Fail fast with the signal's own reason (an AbortError unless the caller supplied one). */
 function throwIfAborted(signal: AbortSignal | undefined): void {
 	if (!signal?.aborted) return;
-	throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+	throw abortReason(signal);
 }
 ```
+
+`assertVisionProvider()` is used by `completeWithUsage` only (unchanged behaviour and message).
 
 `resolveModel` keeps its signature but is now called with `ChatOptions` too; widen it to `protected resolveModel(options?: { modelRef?: ModelRef; claudeModel?: string }): string` (import `ModelRef`).
 
@@ -1295,8 +1546,30 @@ describe('OllamaProvider — capability detection via /api/show (REQ-LLM-049)', 
 		await expect(makeQwenProvider().supportsTools(QWEN)).resolves.toBe(true);
 	});
 
-	it('supportsVision (provider-wide) is now true — the per-model probe is the real gate', () => {
-		expect(makeQwenProvider().supportsVision).toBe(true);
+	it('supportsVision (provider-wide, the complete() gate) stays false: complete() with images is still rejected and generate is never called (R1-2)', async () => {
+		const provider = makeQwenProvider();
+		expect(provider.supportsVision).toBe(false);
+		await expect(
+			provider.completeWithUsage('what is this?', {
+				images: [{ data: Buffer.from('x'), mimeType: 'image/png' }],
+			}),
+		).rejects.toThrow(/Provider ollama does not support vision/);
+		expect(mockGenerate).not.toHaveBeenCalled();
+		expect(mockShow).not.toHaveBeenCalled();
+	});
+
+	it('an abort while /api/show is still pending rejects at once; the probe result is still cached when it lands (R1-6)', async () => {
+		let resolveShow: (v: unknown) => void = () => {};
+		mockShow.mockReturnValueOnce(new Promise((resolve) => { resolveShow = resolve; }));
+		const provider = makeQwenProvider();
+		const controller = new AbortController();
+		const call = provider.chatWithUsage(USER, { tools: [LOOKUP_TOOL], signal: controller.signal });
+		setTimeout(() => controller.abort(), 10);
+		await expect(call).rejects.toMatchObject({ name: 'AbortError' });
+		expect(mockChat).not.toHaveBeenCalled();
+		resolveShow(toolShow);
+		await expect(provider.supportsTools(QWEN)).resolves.toBe(true);
+		expect(mockShow).toHaveBeenCalledTimes(1); // the aborted caller's probe was reused, not re-issued
 	});
 });
 
@@ -1567,8 +1840,37 @@ describe('OllamaProvider — AbortSignal on chat (REQ-LLM-050)', () => {
 		await provider.chatWithUsage(USER);
 		expect(constructorCalls.length).toBe(constructedAtStart);
 	});
+
+	it('the per-call fetch still enforces the 120 s HTTP timeout alongside the caller signal (R1-14 pin)', async () => {
+		vi.useFakeTimers();
+		try {
+			const provider = makeQwenProvider();
+			const controller = new AbortController();
+			await provider.chatWithUsage(USER, { signal: controller.signal });
+			const perCall = constructorCalls[constructorCalls.length - 1] as { fetch: typeof fetch };
+			const seen: RequestInit[] = [];
+			const realFetch = globalThis.fetch;
+			globalThis.fetch = vi.fn((_input: unknown, init?: RequestInit) => {
+				seen.push(init ?? {});
+				return new Promise<Response>(() => {}); // never settles: only the timeout can end it
+			}) as typeof fetch;
+			try {
+				void perCall.fetch('http://localhost:11434/api/chat', { method: 'POST' });
+				vi.advanceTimersByTime(DEFAULT_OLLAMA_TIMEOUT_MS - 1);
+				expect(seen[0]?.signal?.aborted).toBe(false);
+				vi.advanceTimersByTime(1);
+				expect(seen[0]?.signal?.aborted).toBe(true);
+			} finally {
+				globalThis.fetch = realFetch;
+			}
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 });
 ```
+
+(Import `DEFAULT_OLLAMA_TIMEOUT_MS` from `../chat-defaults.js` in the test.)
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -1592,18 +1894,19 @@ import type {
 	ProviderModel,
 	ToolCallRequest,
 } from '../../../types/llm.js';
-import { DEFAULT_CHAT_CONTEXT_WINDOW, DEFAULT_OLLAMA_KEEP_ALIVE } from '../chat-defaults.js';
+import {
+	DEFAULT_CHAT_CONTEXT_WINDOW,
+	DEFAULT_OLLAMA_KEEP_ALIVE,
+	DEFAULT_OLLAMA_TIMEOUT_MS,
+} from '../chat-defaults.js';
 import { synthesizeToolCallId, toOllamaThink } from '../chat-messages.js';
 import { LLMEmptyOutputError } from '../errors.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 ```
 
-Add the capability cache (module-level class, same file):
+Add the capability cache (module-level class, same file; the former inline `120_000` literal is replaced by `DEFAULT_OLLAMA_TIMEOUT_MS` in both `createTimeoutFetch` call sites):
 
 ```ts
-/** Request timeout for every Ollama HTTP call (unchanged from the generate path). */
-const OLLAMA_TIMEOUT_MS = 120_000;
-
 /**
  * Per-model capability probe over `/api/show`, cached for the provider's
  * lifetime: a pinned tag's capabilities do not change. Failures are not
@@ -1655,8 +1958,11 @@ In the class:
 
 ```ts
 export class OllamaProvider extends BaseProvider {
-	/** Provider-wide flag is now true; the per-model `/api/show` probe is the real gate (design §5.2). */
-	override readonly supportsVision: boolean = true;
+	// `supportsVision` deliberately stays at the base default (false): it is
+	// the `complete()` gate, and `doComplete`'s `generate` request sends no
+	// `images`, so flipping it would silently drop photos into text-only
+	// inference (R1-2). The chat path gates per model via `supportsVisionModel`
+	// (design §5.2: vision becomes model-capability-driven — on chat).
 	private readonly client: Ollama;
 	private readonly host: string | undefined;
 	private readonly capabilityCache: OllamaCapabilityCache;
@@ -1664,7 +1970,7 @@ export class OllamaProvider extends BaseProvider {
 	constructor(options: Omit<BaseProviderOptions, 'providerType' | 'apiKey'>) {
 		super({ ...options, providerType: 'ollama', apiKey: '' });
 		this.host = options.baseUrl;
-		this.client = new Ollama({ host: this.host, fetch: createTimeoutFetch(OLLAMA_TIMEOUT_MS) });
+		this.client = new Ollama({ host: this.host, fetch: createTimeoutFetch(DEFAULT_OLLAMA_TIMEOUT_MS) });
 		this.capabilityCache = new OllamaCapabilityCache(
 			(model) => this.client.show({ model }),
 			this.logger,
@@ -1685,7 +1991,7 @@ export class OllamaProvider extends BaseProvider {
 		// streamed requests. A per-call client whose fetch follows our signal is
 		// the smallest honest way to make cancellation reach the wire.
 		const client = options?.signal
-			? new Ollama({ host: this.host, fetch: createTimeoutFetch(OLLAMA_TIMEOUT_MS, options.signal) })
+			? new Ollama({ host: this.host, fetch: createTimeoutFetch(DEFAULT_OLLAMA_TIMEOUT_MS, options.signal) })
 			: this.client;
 
 		const response = await client.chat({
@@ -1848,7 +2154,7 @@ function createTimeoutFetch(timeoutMs: number, outer?: AbortSignal): typeof glob
 - [ ] **Step 4: Run; expect green**
 
 Run: `npx vitest run --project core core/src/services/llm/__tests__/ollama-provider.test.ts core/src/services/llm/__tests__/vision-support.test.ts`
-Expected: PASS. (`vision-support.test.ts` has no Ollama-specific assertion; if any test asserted `OllamaProvider.supportsVision === false`, update it to the new model-driven behaviour and cite REQ-LLM-046.)
+Expected: PASS. (`OllamaProvider.supportsVision` is unchanged — still the base `false` — so `vision-support.test.ts` needs no edits; if a test there fails, the provider-wide flag was touched by mistake.)
 
 - [ ] **Step 5: Mechanical proof** — change `num_ctx: options?.contextWindow ?? DEFAULT_CHAT_CONTEXT_WINDOW` to a conditional spread (omit when unset); expect `always sends num_ctx (default 32768)…` to fail; restore. Change `think: toOllamaThink(...)` to `...(options?.thinking ? { think: … } : {})`; expect the same test to fail on `think`; restore.
 
@@ -1867,8 +2173,9 @@ git commit -m "feat(llm): Ollama /api/chat with tools, /api/show capability cach
 - Modify: `core/src/services/llm/providers/openai-compatible-provider.ts`
 - Modify: `core/src/services/llm/providers/llama-cpp-provider.ts`
 - Modify: `core/src/services/llm/providers/provider-factory.ts`
-- Modify: `core/src/services/llm/providers/base-provider.ts` (`BaseProviderOptions.supportsTools?`)
-- Test: `core/src/services/llm/__tests__/openai-compatible-provider.test.ts`, `core/src/services/llm/__tests__/llama-cpp-provider.test.ts`, `core/src/services/llm/__tests__/provider-factory.test.ts`
+- Modify: `core/src/services/llm/providers/base-provider.ts` (`BaseProviderOptions.supportsTools?`, `BaseProviderOptions.sdkMaxRetries?`)
+- Modify: `core/src/services/llm/model-capabilities.ts` (`openAIOutputLimitField`)
+- Test: `core/src/services/llm/__tests__/openai-compatible-provider.test.ts`, `core/src/services/llm/__tests__/llama-cpp-provider.test.ts`, `core/src/services/llm/__tests__/provider-factory.test.ts`, `core/src/services/llm/__tests__/model-capabilities.test.ts` (create if absent)
 
 - [ ] **Step 1: Write the failing tests** — append to `openai-compatible-provider.test.ts`. The file already mocks `chat.completions.create` as `mockChatCreate`; extend its `makeProvider()` to accept overrides:
 
@@ -2029,6 +2336,59 @@ describe('OpenAICompatibleProvider — chat with tools (REQ-LLM-047)', () => {
 		expect(err).toBeInstanceOf(LLMEmptyOutputError);
 		expect((err as LLMEmptyOutputError).usage).toEqual({ inputTokens: 11, outputTokens: 22 });
 	});
+
+	it('o-series models get max_completion_tokens and no max_tokens on chat (R1-4; SDK 6.27 marks max_tokens incompatible with o-series)', async () => {
+		await makeProvider().chatWithUsage(USER, { modelRef: { provider: 'openai', model: 'o4-mini' }, maxTokens: 200 });
+		const body = mockChatCreate.mock.calls[0]?.[0] as Record<string, unknown>;
+		expect(body.max_completion_tokens).toBe(200);
+		expect(body).not.toHaveProperty('max_tokens');
+	});
+
+	it('non-o-series models keep max_tokens (OpenAI-compatible servers such as Groq/vLLM/llama-server accept only that field)', async () => {
+		await makeProvider().chatWithUsage(USER, { maxTokens: 200 });
+		const body = mockChatCreate.mock.calls[0]?.[0] as Record<string, unknown>;
+		expect(body.max_tokens).toBe(200);
+		expect(body).not.toHaveProperty('max_completion_tokens');
+	});
+
+	it('complete() uses the same model-aware output-limit field (o3 → max_completion_tokens)', async () => {
+		await makeProvider().completeWithUsage('p', { modelRef: { provider: 'openai', model: 'o3' }, maxTokens: 50 });
+		const body = mockChatCreate.mock.calls[0]?.[0] as Record<string, unknown>;
+		expect(body.max_completion_tokens).toBe(50);
+		expect(body).not.toHaveProperty('max_tokens');
+	});
+
+	it('sdkMaxRetries is forwarded to the OpenAI client as maxRetries; absent → not passed (SDK default stays)', () => {
+		constructorCalls.length = 0;
+		new OpenAICompatibleProvider({ providerId: 'openai', apiKey: 'sk-test', defaultModel: 'gpt-4o-mini', logger, costTracker: makeCostTracker() as never, sdkMaxRetries: 0 });
+		expect(constructorCalls[0]).toMatchObject({ maxRetries: 0 });
+		makeProvider();
+		expect(constructorCalls[1]).not.toHaveProperty('maxRetries');
+	});
+});
+```
+
+(For the last test, extend the file's `vi.mock('openai', …)` class with `constructor(opts: Record<string, unknown>) { constructorCalls.push(opts); }` and a module-level `const constructorCalls: Array<Record<string, unknown>> = [];`, mirroring the Ollama test.) Append to `model-capabilities.test.ts`:
+
+```ts
+import { openAIOutputLimitField } from '../model-capabilities.js';
+
+describe('openAIOutputLimitField (REQ-LLM-047, R1-4)', () => {
+	it.each([
+		['o3', 'max_completion_tokens'],
+		['o3-mini', 'max_completion_tokens'],
+		['o4-mini', 'max_completion_tokens'],
+		['o1', 'max_completion_tokens'],
+		['gpt-5', 'max_completion_tokens'],
+		['gpt-5-mini', 'max_completion_tokens'],
+		['gpt-4o', 'max_tokens'],
+		['gpt-4.1-mini', 'max_tokens'],
+		['local-model', 'max_tokens'],
+		['qwen3.8:27b-mlx', 'max_tokens'],
+		['openai/o3-mini', 'max_tokens'], // namespaced ids are served by routers that expect max_tokens
+	] as const)('%s → %s', (model, field) => {
+		expect(openAIOutputLimitField(model)).toBe(field);
+	});
 });
 ```
 
@@ -2082,11 +2442,51 @@ Expected: FAIL on the new describes.
 	 * Undefined = the provider's own default.
 	 */
 	supportsTools?: boolean;
+	/**
+	 * Vendor-SDK retry count (`maxRetries` on the openai / @anthropic-ai/sdk
+	 * clients). Undefined = the SDK default (2), unchanged from today, so
+	 * production retry behaviour is untouched. The live smoke passes 0 so its
+	 * paid-call budget is a hard count of HTTP attempts (R1-8). Ollama/Google
+	 * ignore it.
+	 */
+	sdkMaxRetries?: number;
 ```
 
-and store it: `protected readonly supportsToolsFlag?: boolean;` set from `options.supportsTools` in the constructor.
+and store both: `protected readonly supportsToolsFlag?: boolean;` and `protected readonly sdkMaxRetries?: number;` set from the options in the constructor.
 
-`openai-compatible-provider.ts` — imports: `ChatFinishReason, ChatMessage, ChatOptions, ChatResult, ToolCallRequest` from types. Add:
+`model-capabilities.ts` — add:
+
+```ts
+/**
+ * Which output-limit field an OpenAI-compatible chat request must carry.
+ * `max_tokens` is deprecated by OpenAI and rejected by o-series reasoning
+ * models (openai 6.27 `completions.d.ts`: "not compatible with o-series
+ * models"); `max_completion_tokens` is unknown to many OpenAI-compatible
+ * servers (Groq, vLLM, llama-server, Ollama /v1). So: reasoning-model ids
+ * (`o1`, `o3`, `o4-mini`, …, `gpt-5*`) get the new field; everything else keeps
+ * `max_tokens`. Namespaced ids (`openai/o3-mini`) are served by routers and
+ * keep `max_tokens`.
+ */
+export function openAIOutputLimitField(modelId: string): 'max_tokens' | 'max_completion_tokens' {
+	return /^(o[1-9](-|$)|gpt-5(-|$|\.))/.test(modelId) ? 'max_completion_tokens' : 'max_tokens';
+}
+```
+
+`openai-compatible-provider.ts` — imports: `ChatFinishReason, ChatMessage, ChatOptions, ChatResult, ToolCallRequest` from types; `openAIOutputLimitField, supportsTemperature` from `../model-capabilities.js`. In the constructor, build the client with `...(this.sdkMaxRetries !== undefined ? { maxRetries: this.sdkMaxRetries } : {})` (after `super()`; `sdkMaxRetries` is a base field). In the existing `doComplete`, replace `max_tokens: maxTokens,` with `...outputLimit(model, maxTokens),` (R1-4 applies to `complete()` on o-series too; this is the one deliberate `complete()` change in P1, see D16), where the module-level helper is
+
+```ts
+/** The one output-limit field this model accepts (a typed spread, not a computed key — TS would widen that to an index signature). */
+function outputLimit(
+	model: string,
+	maxTokens: number,
+): Pick<OpenAI.ChatCompletionCreateParams, 'max_tokens' | 'max_completion_tokens'> {
+	return openAIOutputLimitField(model) === 'max_completion_tokens'
+		? { max_completion_tokens: maxTokens }
+		: { max_tokens: maxTokens };
+}
+```
+
+Add:
 
 ```ts
 	override async supportsTools(_modelId: string): Promise<boolean> {
@@ -2114,7 +2514,8 @@ and store it: `protected readonly supportsToolsFlag?: boolean;` set from `option
 			{
 				model,
 				messages: messages.map(toOpenAIMessage),
-				max_tokens: maxTokens,
+				// o-series / gpt-5 reject `max_tokens`; compatible servers reject the other (R1-4).
+				...outputLimit(model, maxTokens),
 				...(supportsTemperature(model) && options?.temperature !== undefined
 					? { temperature: options.temperature }
 					: {}),
@@ -2245,13 +2646,13 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add core/src/services/llm/providers/openai-compatible-provider.ts core/src/services/llm/providers/llama-cpp-provider.ts core/src/services/llm/providers/provider-factory.ts core/src/services/llm/providers/base-provider.ts core/src/types/config.ts core/src/services/llm/__tests__/openai-compatible-provider.test.ts core/src/services/llm/__tests__/llama-cpp-provider.test.ts core/src/services/llm/__tests__/provider-factory.test.ts
-git commit -m "feat(llm): OpenAI-compatible/llama.cpp chat with tools, supports_tools flag, abort signal (P1 Task 4)"
+git add core/src/services/llm/providers/openai-compatible-provider.ts core/src/services/llm/providers/llama-cpp-provider.ts core/src/services/llm/providers/provider-factory.ts core/src/services/llm/providers/base-provider.ts core/src/services/llm/model-capabilities.ts core/src/types/config.ts core/src/services/llm/__tests__/openai-compatible-provider.test.ts core/src/services/llm/__tests__/llama-cpp-provider.test.ts core/src/services/llm/__tests__/provider-factory.test.ts core/src/services/llm/__tests__/model-capabilities.test.ts
+git commit -m "feat(llm): OpenAI-compatible/llama.cpp chat with tools, supports_tools flag, model-aware output limit, abort signal (P1 Task 4)"
 ```
 
 ---
 
-### Task 5: Anthropic — chat with tools, prompt caching, `tool_result`-first messages, abort
+### Task 5: Anthropic — chat with tools, `tool_result`-first messages, cache-safe usage, abort (no prompt caching in P1)
 
 **Files:**
 - Modify: `core/src/services/llm/providers/anthropic-provider.ts`
@@ -2290,18 +2691,27 @@ describe('AnthropicProvider — chat with tools (REQ-LLM-048)', () => {
 		await expect(makeProvider().supportsVisionModel('claude-haiku-4-5')).resolves.toBe(true);
 	});
 
-	it('sends tools with input_schema, cache_control on the last tool, tool_choice auto, and the signal', async () => {
+	it('sends tools with input_schema in the order given, tool_choice auto, the signal — and no cache_control anywhere (R1-1: caching is P2)', async () => {
 		const controller = new AbortController();
 		const second = { ...LOOKUP_TOOL, name: 'second_tool' };
 		await makeProvider().chatWithUsage(USER, { tools: [LOOKUP_TOOL, second], signal: controller.signal, maxTokens: 64 });
 		const [body, reqOpts] = mockCreate.mock.calls[0] as [Record<string, unknown>, { signal?: AbortSignal }];
 		expect(body.tools).toEqual([
 			{ name: LOOKUP_TOOL.name, description: LOOKUP_TOOL.description, input_schema: LOOKUP_TOOL.inputSchema },
-			{ name: 'second_tool', description: LOOKUP_TOOL.description, input_schema: LOOKUP_TOOL.inputSchema, cache_control: { type: 'ephemeral' } },
+			{ name: 'second_tool', description: LOOKUP_TOOL.description, input_schema: LOOKUP_TOOL.inputSchema },
 		]);
+		expect(JSON.stringify(body)).not.toContain('cache_control');
 		expect(body.tool_choice).toEqual({ type: 'auto' });
 		expect(body.max_tokens).toBe(64);
 		expect(reqOpts.signal).toBe(controller.signal);
+	});
+
+	it('sdkMaxRetries is forwarded to the Anthropic client as maxRetries; absent → not passed (SDK default stays)', () => {
+		constructorCalls.length = 0;
+		makeProvider({ sdkMaxRetries: 0 });
+		expect(constructorCalls[0]).toMatchObject({ maxRetries: 0 });
+		makeProvider();
+		expect(constructorCalls[1]).not.toHaveProperty('maxRetries');
 	});
 
 	it('parallelToolCalls: false sets disable_parallel_tool_use; no tools → no tool_choice', async () => {
@@ -2314,7 +2724,7 @@ describe('AnthropicProvider — chat with tools (REQ-LLM-048)', () => {
 		expect(mockCreate.mock.calls[0]?.[0]).not.toHaveProperty('tool_choice');
 	});
 
-	it('leading system messages become the system block array with cache_control on the last block', async () => {
+	it('leading system messages become the system block array (plain text blocks, no cache_control)', async () => {
 		await makeProvider().chatWithUsage([
 			{ role: 'system', content: 'Identity.' },
 			{ role: 'system', content: 'Catalog.' },
@@ -2323,7 +2733,7 @@ describe('AnthropicProvider — chat with tools (REQ-LLM-048)', () => {
 		const body = mockCreate.mock.calls[0]?.[0] as Record<string, unknown>;
 		expect(body.system).toEqual([
 			{ type: 'text', text: 'Identity.' },
-			{ type: 'text', text: 'Catalog.', cache_control: { type: 'ephemeral' } },
+			{ type: 'text', text: 'Catalog.' },
 		]);
 		expect(body.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: 'Costco total?' }] }]);
 	});
@@ -2389,6 +2799,25 @@ describe('AnthropicProvider — chat with tools (REQ-LLM-048)', () => {
 		]);
 	});
 
+	it('a captionless photo sends the image block only — no empty text block, which the API rejects with 400 (R1-3)', async () => {
+		const png = Buffer.from([1, 2, 3]);
+		await makeProvider().chatWithUsage([{ role: 'user', content: '', images: [{ data: png, mimeType: 'image/png' }] }]);
+		const body = mockCreate.mock.calls[0]?.[0] as { messages: Array<{ content: unknown[] }> };
+		expect(body.messages[0]?.content).toEqual([
+			{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') } },
+		]);
+	});
+
+	it('a tool result with empty content omits the content field (the API accepts a bare tool_result)', async () => {
+		await makeProvider().chatWithUsage([
+			...USER,
+			{ role: 'assistant', content: '', toolCalls: [{ id: 'toolu_1', name: 'lookup_receipt_total', arguments: {} }] },
+			{ role: 'tool', content: '', toolCallId: 'toolu_1' },
+		], { tools: [LOOKUP_TOOL] });
+		const body = mockCreate.mock.calls[0]?.[0] as { messages: Array<{ content: Array<Record<string, unknown>> }> };
+		expect(body.messages[2]?.content[0]).toEqual({ type: 'tool_result', tool_use_id: 'toolu_1' });
+	});
+
 	it('returns tool_use blocks as toolCalls with finishReason tool_calls and the text alongside', async () => {
 		mockCreate.mockResolvedValue(chatResponse({
 			content: [{ type: 'text', text: 'Checking.' }, { type: 'tool_use', id: 'toolu_9', name: 'lookup_receipt_total', input: { store: 'Costco' } }],
@@ -2400,10 +2829,24 @@ describe('AnthropicProvider — chat with tools (REQ-LLM-048)', () => {
 		expect(result.message.toolCalls).toEqual([{ id: 'toolu_9', name: 'lookup_receipt_total', arguments: { store: 'Costco' } }]);
 	});
 
-	it('usage inputTokens includes cache creation and cache read tokens, and reports cacheReadTokens', async () => {
+	it('usage: inputTokens is the uncached input_tokens; cache counts ride separately and are never folded into the billed count (R1-1)', async () => {
+		mockCreate.mockResolvedValue(chatResponse({ usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } }));
+		const result = await makeProvider().chatWithUsage(USER, { _appId: 'food' });
+		expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
+	});
+
+	it('usage: if the API ever reports cache tokens (impossible without cache_control), they are carried on usage, warned about, and not billed at the input rate', async () => {
+		const warn = vi.fn();
+		const provider = makeProvider({ logger: { ...logger, warn, child: () => ({ ...logger, warn }) } as never });
 		mockCreate.mockResolvedValue(chatResponse({ usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 200, cache_read_input_tokens: 1500 } }));
-		const result = await makeProvider().chatWithUsage(USER);
-		expect(result.usage).toEqual({ inputTokens: 1710, outputTokens: 5, cacheReadTokens: 1500 });
+		const result = await provider.chatWithUsage(USER, { _appId: 'food' });
+		expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5, cacheCreationTokens: 200, cacheReadTokens: 1500 });
+		const record = (provider as never as { costTracker: { record: ReturnType<typeof vi.fn> } }).costTracker.record;
+		expect(record).toHaveBeenCalledWith(expect.objectContaining({ inputTokens: 10, outputTokens: 5, appId: 'food' }));
+		expect(warn).toHaveBeenCalledWith(
+			expect.objectContaining({ cacheCreationTokens: 200, cacheReadTokens: 1500 }),
+			expect.stringMatching(/cache tokens .* not billed/i),
+		);
 	});
 
 	it.each([
@@ -2439,7 +2882,7 @@ describe('AnthropicProvider — chat with tools (REQ-LLM-048)', () => {
 Run: `npx vitest run --project core core/src/services/llm/__tests__/anthropic-provider.test.ts`
 Expected: FAIL on the new describe.
 
-- [ ] **Step 3: Implement in `anthropic-provider.ts`** — imports: `ChatFinishReason, ChatMessage, ChatOptions, ChatResult, ChatToolSpec, ToolCallRequest` from types; `ChatMessageShapeError` from `../chat-messages.js`. Add to the class:
+- [ ] **Step 3: Implement in `anthropic-provider.ts`** — imports: `ChatFinishReason, ChatMessage, ChatOptions, ChatResult, ChatToolSpec, ToolCallRequest` from types; `ChatMessageShapeError` from `../chat-messages.js`. Extend the test file's SDK mock so constructor options are observable (module-level `const constructorCalls: Array<Record<string, unknown>> = [];` and `constructor(opts: Record<string, unknown>) { constructorCalls.push(opts); }` on `MockAnthropic`). In the constructor, build the client with `...(this.sdkMaxRetries !== undefined ? { maxRetries: this.sdkMaxRetries } : {})` beside `apiKey` and `timeout`. Add to the class:
 
 ```ts
 	override async supportsTools(_modelId: string): Promise<boolean> {
@@ -2484,15 +2927,26 @@ Expected: FAIL on the new describe.
 			toolCalls.length > 0 ? 'tool_calls' : mapAnthropicChatStopReason(response.stop_reason);
 		const cacheCreation = response.usage.cache_creation_input_tokens ?? 0;
 		const cacheRead = response.usage.cache_read_input_tokens ?? 0;
+		if (cacheCreation > 0 || cacheRead > 0) {
+			// P1 sends no `cache_control`, so this cannot happen today. If it does,
+			// say so loudly rather than mis-bill: CostTracker has one input rate,
+			// and cache writes cost 1.25× / reads 0.1× of it (R1-1). P2 adds
+			// cache-aware pricing before enabling caching.
+			this.logger.warn(
+				{ model, cacheCreationTokens: cacheCreation, cacheReadTokens: cacheRead },
+				'Anthropic reported cache tokens on a request that sent no cache_control; cache tokens are carried on usage but not billed (no cache-aware pricing yet — see open-items "Agent Runtime deferrals" item 9)',
+			);
+		}
 
 		return {
 			message: { role: 'assistant', content: text, ...(toolCalls.length > 0 ? { toolCalls } : {}) },
 			finishReason,
 			usage: {
-				// Conservative: cached reads are cheaper than fresh input, but the cost
-				// tracker has one input price, so every prompt token counts as input.
-				inputTokens: response.usage.input_tokens + cacheCreation + cacheRead,
+				// Uncached prompt tokens only — the figure CostTracker prices at the
+				// input rate. Cache counts are reported beside it, never folded in.
+				inputTokens: response.usage.input_tokens,
 				outputTokens: response.usage.output_tokens,
+				...(cacheCreation > 0 ? { cacheCreationTokens: cacheCreation } : {}),
 				...(cacheRead > 0 ? { cacheReadTokens: cacheRead } : {}),
 			},
 			model,
@@ -2500,6 +2954,8 @@ Expected: FAIL on the new describe.
 		};
 	}
 ```
+
+(`BaseProvider.recordUsage` passes `inputTokens`/`outputTokens` only; `ChatUsage`'s cache fields are informational until P2.)
 
 Module-level helpers:
 
@@ -2519,23 +2975,26 @@ function mapAnthropicChatStopReason(stopReason: unknown): ChatFinishReason {
 	}
 }
 
-/** Tools in the order given (P2 makes that order deterministic, §7); cache breakpoint on the last one. */
+/** Tools in the order given (P2 makes that order deterministic, §7). No `cache_control` in P1 (R1-1). */
 function toAnthropicTools(tools: readonly ChatToolSpec[]): Anthropic.Tool[] {
-	return tools.map((t, i) => ({
+	return tools.map((t) => ({
 		name: t.name,
 		description: t.description,
 		input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
-		...(i === tools.length - 1 ? { cache_control: { type: 'ephemeral' as const } } : {}),
 	}));
 }
 
 type AnthropicUserBlock = Anthropic.TextBlockParam | Anthropic.ImageBlockParam | Anthropic.ToolResultBlockParam;
 
 /**
- * Leading system messages → `system` (cache breakpoint on the last block, so
- * the stable prefix is cached across turns). Tool results fold into one user
- * message whose first blocks are `tool_result`; a user text that follows the
- * same step joins that message (Anthropic requires alternating roles).
+ * Leading system messages → `system` block array (no cache breakpoint in P1).
+ * Tool results fold into one user message whose first blocks are
+ * `tool_result`; a user text that follows the same step joins that message
+ * (Anthropic requires every `tool_use` to be answered by `tool_result` blocks
+ * at the start of the very next message; it merges consecutive same-role
+ * messages itself, so folding is a tidiness choice, not a legality one).
+ * Text blocks are emitted only for non-empty text: the API rejects an empty
+ * text block (R1-3), so a captionless photo is image blocks alone.
  */
 function toAnthropicMessages(messages: readonly ChatMessage[]): {
 	system: Anthropic.TextBlockParam[];
@@ -2547,8 +3006,6 @@ function toAnthropicMessages(messages: readonly ChatMessage[]): {
 		system.push({ type: 'text', text: (messages[i] as ChatMessage).content });
 		i++;
 	}
-	const lastSystem = system[system.length - 1];
-	if (lastSystem) lastSystem.cache_control = { type: 'ephemeral' };
 
 	const out: Anthropic.MessageParam[] = [];
 	const appendUserBlocks = (blocks: AnthropicUserBlock[], toolResult: boolean) => {
@@ -2574,7 +3031,7 @@ function toAnthropicMessages(messages: readonly ChatMessage[]): {
 						{
 							type: 'tool_result',
 							tool_use_id: m.toolCallId ?? '',
-							content: m.content,
+							...(m.content.length > 0 ? { content: m.content } : {}),
 							...(m.isError ? { is_error: true } : {}),
 						},
 					],
@@ -2590,7 +3047,9 @@ function toAnthropicMessages(messages: readonly ChatMessage[]): {
 						data: img.data.toString('base64'),
 					},
 				}));
-				blocks.push({ type: 'text', text: m.content });
+				// Empty text block → 400 (R1-3). validateChatMessages already rejects a
+				// user turn with neither text nor images, so `blocks` is never empty here.
+				if (m.content.trim().length > 0) blocks.push({ type: 'text', text: m.content });
 				appendUserBlocks(blocks, false);
 				break;
 			}
@@ -2624,13 +3083,13 @@ function toAnthropicMessages(messages: readonly ChatMessage[]): {
 Run: `npx vitest run --project core core/src/services/llm/__tests__/anthropic-provider.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Mechanical proof** — remove the `cache_control` assignment on the last system block; expect the `leading system messages…` test to fail; restore. Change `inputTokens` to `response.usage.input_tokens`; expect the cache-usage test to fail with `1710` vs `10`; restore.
+- [ ] **Step 5: Mechanical proof** — change `inputTokens: response.usage.input_tokens` to `response.usage.input_tokens + cacheCreation + cacheRead`; expect the `if the API ever reports cache tokens…` test to fail with `1710` vs `10` (and the `record` assertion); restore. Change the user-text guard to an unconditional `blocks.push({ type: 'text', text: m.content })`; expect `a captionless photo sends the image block only…` to fail; restore.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add core/src/services/llm/providers/anthropic-provider.ts core/src/services/llm/__tests__/anthropic-provider.test.ts
-git commit -m "feat(llm): Anthropic chat with tools, prompt caching, tool_result folding, abort signal (P1 Task 5)"
+git commit -m "feat(llm): Anthropic chat with tools, tool_result folding, cache-safe usage, abort signal (P1 Task 5)"
 ```
 
 ---
@@ -2641,7 +3100,8 @@ git commit -m "feat(llm): Anthropic chat with tools, prompt caching, tool_result
 - Modify: `core/src/services/llm/index.ts`
 - Modify: `core/src/services/llm/llm-guard.ts`, `core/src/services/llm/system-llm-guard.ts`
 - Modify: `core/src/services/llm/estimate-guard-cost.ts`
-- Modify: `core/src/testing/mock-services.ts`; inline `LLMService` literals in `core/src/api/__tests__/d5b7-route-enforcement.test.ts`, `core/src/services/llm/__tests__/vision-support.test.ts`, `core/src/services/llm/__tests__/llm-guard.test.ts`, `core/src/services/edit/__tests__/edit.test.ts`, `core/src/services/llm/__tests__/system-llm-guard.test.ts` (two)
+- Modify: `core/src/testing/mock-services.ts` and **every** uncast `LLMService` / `LLMProviderClient` object literal in `core/src` and `apps/*/src` (enumerated by the Step 3 grep — ≈62 sites at HEAD `056abdf`, including `core/src/services/router/__tests__/test-helpers.ts`, which the regression typecheck compiles)
+- Create: `core/tsconfig.tests.json` (test-inclusive typecheck config, modelled on `regression/tsconfig.test.json`)
 - Test: `core/src/services/llm/__tests__/llm-service.test.ts`, `llm-guard.test.ts`, `system-llm-guard.test.ts`, `estimate-guard-cost.test.ts`
 
 - [ ] **Step 1: Write the failing tests** — in `llm-service.test.ts`, extend `createMockProvider` with the three new `LLMProviderClient` members:
@@ -2777,7 +3237,37 @@ describe('LLMGuard.chat (REQ-LLM-045)', () => {
 });
 ```
 
-Append the same four tests to `system-llm-guard.test.ts` with `new SystemLLMGuard({ inner, costTracker, globalMonthlyCostCap: 50.0, logger, …overrides })`, asserting `_appId: 'system'` (the default `attributionId`), and the cap test using `createMockCostTracker(0, 50.0)` (total cost at the global cap) and expecting `LLMCostCapError` with `scope: 'global'`; there is no rate limiter, so drop that assertion. Every `LLMService` object literal in the repo must gain the three members or the core typecheck fails — the known sites: `core/src/testing/mock-services.ts`; `createMockInner` + the inline literal near line 426 in `llm-guard.test.ts`; `createMockInner` + two inline literals in `system-llm-guard.test.ts`; `vision-support.test.ts` (~line 202); `core/src/api/__tests__/d5b7-route-enforcement.test.ts` (~line 793); `core/src/services/edit/__tests__/edit.test.ts` (~line 1091). Step 4's typecheck is the authority: fix every literal it names.
+Append the same four tests to `system-llm-guard.test.ts` with `new SystemLLMGuard({ inner, costTracker, globalMonthlyCostCap: 50.0, logger, …overrides })`, asserting `_appId: 'system'` (the default `attributionId`), and the cap test using `createMockCostTracker(0, 50.0)` (total cost at the global cap) and expecting `LLMCostCapError` with `scope: 'global'`; there is no rate limiter, so drop that assertion.
+
+Also add to `llm-guard.test.ts` (R1-5 at the guard boundary — the estimate must see tool-call history, not just content):
+
+```ts
+	it('reserves an estimate that grows with replayed tool-call arguments (R1-5: 100k chars of tool-call history)', async () => {
+		const inner = createMockInner();
+		const priceLookup = { priceFor: () => ({ inputUsdPer1k: 0.001, outputUsdPer1k: 0.002 }) };
+		const small = createMockHouseholdLimiter();
+		await makeGuard(inner, { householdLimiter: small, priceLookup }).chat(USER);
+		const big = createMockHouseholdLimiter();
+		const history: ChatMessage[] = [
+			...USER,
+			{ role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 't', arguments: { blob: 'x'.repeat(100_000) } }] },
+			{ role: 'tool', content: 'ok', toolCallId: 'call_1' },
+		];
+		await makeGuard(inner, { householdLimiter: big, priceLookup }).chat(history);
+		const estSmall = (small.reserveEstimated as ReturnType<typeof vi.fn>).mock.calls[0]?.[3] as number;
+		const estBig = (big.reserveEstimated as ReturnType<typeof vi.fn>).mock.calls[0]?.[3] as number;
+		// 100k chars ≈ 25k tokens at $0.001/1k ≈ $0.025 more than the two-word prompt.
+		expect(estBig - estSmall).toBeGreaterThan(0.02);
+	});
+```
+
+**Mock inventory (R1-10).** `LLMService` and `LLMProviderClient` gain required members, so every *uncast* object literal typed as one of them must gain them too. The plan's earlier "8 sites" was wrong: at HEAD `056abdf` the enumeration below returns ≈62 sites across `core/src` (router, GUI, alerts, reports, conversation, data-query, daily-diff, n8n, edit, llm tests; `core/src/testing/mock-services.ts`; `core/src/services/router/__tests__/test-helpers.ts`) and `apps/food/src` (`shadow-classifier.test.ts` ×5 factories, `shadow-classifier.persona.test.ts`, `proactive-bridge.persona.test.ts`), plus the two `LLMProviderClient` factories (`provider-registry.test.ts:8`, `llm-service.test.ts:12`). Literals cast through `as unknown as LLMService` need nothing. Enumerate at execution time (the list drifts):
+
+```bash
+grep -rnE "\): LLMService \{|: LLMService = \{|satisfies LLMService|\): LLMProviderClient \{|: LLMProviderClient = \{" core/src apps/*/src --include='*.ts' | grep -v node_modules
+```
+
+Add the three members to each hit (plain `vi.fn()`s where the test never calls them; see the `mock-services.ts` snippet below). `core/tsconfig.json` excludes tests and the test-inclusive baseline carries ~950 pre-existing errors, so neither a plain `tsc` nor its exit code can prove the inventory complete — the Step 4 gate filters the typecheck output for exactly the errors a missed site produces.
 
 Append to `estimate-guard-cost.test.ts`:
 
@@ -2867,18 +3357,45 @@ Use `requireProvider` in `completeWithMeta` too (same message as today, so no te
 		supportsVision: vi.fn().mockResolvedValue(true),
 ```
 
-Every other `LLMService` object literal listed in Step 1 gets the same three members (plain `vi.fn()`s; those tests never call them).
+Every other `LLMService` object literal the Step 1 grep enumerates gets the same three members (plain `vi.fn()`s; those tests never call them); the two `LLMProviderClient` factories get `supportsVision: false`, `chatWithUsage`, `supportsTools`, `supportsVisionModel` as in the `llm-service.test.ts` snippet.
 
-- [ ] **Step 4: Typecheck and run**
+Create `core/tsconfig.tests.json` (the regression workspace already has this shape in `regression/tsconfig.test.json`):
 
-Run: `pnpm --filter @pas/core typecheck && npx vitest run --project core core/src/services/llm core/src/testing core/src/api/__tests__/d5b7-route-enforcement.test.ts core/src/services/edit/__tests__/edit.test.ts`
-Expected: typecheck exits 0 (this is the first point since Task 0 where it can); all listed tests PASS.
+```json
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"composite": false,
+		"declaration": false,
+		"declarationMap": false,
+		"rootDir": "."
+	},
+	"include": ["src/**/*.ts", "../apps/*/src/**/*.ts"],
+	"exclude": ["node_modules", "dist", "src/cli/templates/**", "src/typecheck/**"]
+}
+```
+
+- [ ] **Step 4: Typecheck (both gates) and run**
+
+Run:
+
+```bash
+pnpm --filter @pas/core typecheck \
+&& pnpm --filter @pas/regression typecheck \
+&& (cd core && ! (npx tsc --noEmit -p tsconfig.tests.json 2>&1 \
+    | grep -E "TS27(39|41).*'(chat|supportsTools|supportsVision|chatWithUsage|supportsVisionModel)'|chat-messages.test.ts.*TS2305")) \
+&& npx vitest run --project core core/src/services/llm core/src/testing core/src/api/__tests__/d5b7-route-enforcement.test.ts core/src/services/edit/__tests__/edit.test.ts \
+&& npx vitest run --project apps/food apps/food/src/routing apps/food/src/__tests__/proactive-bridge.persona.test.ts
+```
+
+Expected: the two standard typechecks exit 0 (the regression one compiles `router/__tests__/test-helpers.ts` and `mock-services.ts`); **the filtered test-inclusive typecheck prints nothing** — any line it prints names a mock site still missing a member (TS2739/TS2741) or a chat type missing from the barrel (TS2305); the full test-inclusive output itself is not expected to be clean (≈950 pre-existing errors in unrelated files). All listed tests PASS. Record the filtered-gate output (empty) in the acceptance row for R1-10/R1-11.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add core/src/services/llm/index.ts core/src/services/llm/llm-guard.ts core/src/services/llm/system-llm-guard.ts core/src/services/llm/estimate-guard-cost.ts core/src/testing/mock-services.ts core/src/api/__tests__/d5b7-route-enforcement.test.ts core/src/services/llm/__tests__/ core/src/services/edit/__tests__/edit.test.ts
-git commit -m "feat(llm): LLMService.chat/supportsTools/supportsVision on the service and both guards (P1 Task 6)"
+git add core/tsconfig.tests.json core/src/services/llm/index.ts core/src/services/llm/llm-guard.ts core/src/services/llm/system-llm-guard.ts core/src/services/llm/estimate-guard-cost.ts core/src/testing/mock-services.ts $(grep -rlE "\): LLMService \{|: LLMService = \{|satisfies LLMService|\): LLMProviderClient \{|: LLMProviderClient = \{" core/src apps/*/src --include='*.ts') core/src/services/llm/__tests__/
+git commit -m "feat(llm): LLMService.chat/supportsTools/supportsVision on the service and both guards; mocks + test-inclusive typecheck gate (P1 Task 6)"
 ```
 
 ---
@@ -2943,7 +3460,7 @@ git commit -m "feat(llm): LLMService.chat/supportsTools/supportsVision on the se
 			});
 		});
 
-		it('sanitizes invalid values that bypass the schema back to the defaults', async () => {
+		it('the loader rejects type-invalid agent values loudly (schema layer)', async () => {
 			const envPath = join(tempDir, '.env');
 			const yamlPath = join(tempDir, 'pas.yaml');
 			await writeEnvFile(envPath, requiredEnvVars);
@@ -2952,19 +3469,23 @@ git commit -m "feat(llm): LLMService.chat/supportsTools/supportsVision on the se
 				'agent:\n  model: "just-a-string"\n  thinking: banana\n  context_window: -5\n  keep_alive: 7\n',
 				'utf-8',
 			);
-			let config: Awaited<ReturnType<typeof loadSystemConfig>> | undefined;
-			try {
-				config = await loadSystemConfig({ envPath, configPath: yamlPath });
-			} catch {
-				// The schema rejects this loudly in strict mode; the sanitizer path is
-				// exercised through the transitional loader below.
-			}
-			if (config) {
-				expect(config.agent?.model).toEqual({ provider: 'ollama', model: 'qwen3.8:27b-mlx' });
-				expect(config.agent?.thinking).toBe('off');
-				expect(config.agent?.contextWindow).toBe(32768);
-				expect(config.agent?.keepAlive).toBe('30m');
-			}
+			await expect(loadSystemConfig({ envPath, configPath: yamlPath })).rejects.toThrow(
+				/Invalid pas.yaml configuration/,
+			);
+		});
+
+		it('buildAgentConfig sanitizes values that bypass the schema back to the defaults (R1-12: asserted directly, not behind a swallowed throw)', () => {
+			const agent = buildAgentConfig(
+				{ model: 'just-a-string', vision_model: { provider: 'anthropic' }, thinking: 'banana', context_window: -5, keep_alive: 7 },
+				{ providers: {}, tiers: { fast: { provider: 'ollama', model: 'x' }, standard: { provider: 'ollama', model: 'y' } }, safeguards: {} } as never,
+			);
+			expect(agent).toEqual({
+				model: { provider: 'ollama', model: 'qwen3.8:27b-mlx' },
+				visionModel: undefined,
+				thinking: 'off',
+				contextWindow: 32768,
+				keepAlive: '30m',
+			});
 		});
 
 		it("YAML 1.2: `thinking: off` is the string 'off', not boolean false", async () => {
@@ -2985,7 +3506,7 @@ git commit -m "feat(llm): LLMService.chat/supportsTools/supportsVision on the se
 	});
 ```
 
-(Mirror the `multi_intent_split` sanitizer test's try/catch shape exactly — that file documents why.) Append to `pas-yaml-schema.test.ts`:
+(Import `buildAgentConfig` from `../index.js`. The `multi_intent_split` tests in that file use a try/catch-and-return shape; R1-12 showed it can pass with zero assertions, so the agent tests assert the schema rejection and the sanitizer separately — do not copy the try/catch shape.) Append to `pas-yaml-schema.test.ts`:
 
 ```ts
 describe('agent block — schema validation (REQ-LLM-052)', () => {
@@ -3081,9 +3602,10 @@ to `YamlProviderConfig`: `supports_tools?: boolean;` and in the custom-provider 
  * Build `agent` settings. Same sanitizer rule as `routing.multi_intent_split`:
  * the schema rejects type-invalid input loudly; anything that still reaches
  * the loader falls back to the production default rather than to a value
- * that would silently change behaviour.
+ * that would silently change behaviour. Exported so the sanitizer is tested
+ * directly (R1-12).
  */
-function buildAgentConfig(raw: YamlConfig['agent'], llmConfig: LLMConfig): AgentConfig {
+export function buildAgentConfig(raw: YamlConfig['agent'], llmConfig: LLMConfig): AgentConfig {
 	return {
 		model: sanitizeModelRef(raw?.model) ?? { ...DEFAULT_AGENT_MODEL },
 		visionModel: sanitizeModelRef(raw?.vision_model) ?? pickDefaultVisionModel(llmConfig),
@@ -3229,7 +3751,7 @@ git commit -m "fix(regression): trial worker tracks chatWithUsage so chat-path p
 - Create: `scripts/llm-chat-smoke.ts`
 - Modify: `package.json` (add `"llm-chat-smoke": "tsx scripts/llm-chat-smoke.ts"` beside the other `tsx scripts/...` entries)
 
-The script talks to real providers through the real `createProvider` → `LLMServiceImpl` path (not a mock, per the P0 lesson), prints one line per step, and **exits non-zero on any FAIL** (a smoke that can fail soft is not a smoke). Paid steps run only with `--anthropic`, use `claude-haiku-4-5` (the configured fast-tier Claude model if that is one; else the literal), `maxTokens: 64`, and make at most **2** calls.
+The script talks to real providers through the real `createProvider` → `LLMServiceImpl` path (not a mock, per the P0 lesson), prints one line per step, and **exits non-zero on any FAIL** (a smoke that can fail soft is not a smoke). Every PASS predicate checks the thing the step advertises (R1-9): step 1 needs tools **and** vision; step 3 needs the "not found" error **and** `< 5 s`; the round-trip steps all make both calls and check the answer. Paid rules (R1-8): the paid step runs only with `--anthropic`, on a dedicated `anthropic-smoke` provider pinned to the literal `claude-haiku-4-5-20251001` (priced in `MODEL_PRICING`; never the configured tier), built with `sdkMaxRetries: 0` so the SDK adds no hidden HTTP attempts, `maxTokens: 64`, exactly 2 facade calls, and the step **FAILs if the measured spend exceeds $0.01**. Worst case with `BaseProvider`'s own retries (2) is 6 HTTP attempts ≈ 6 × (700 × $0.8/M + 64 × $4/M) ≈ $0.005, still under the cap. The local steps refuse to run when `agent.model` resolves to a non-local provider type (so a paid `agent.model` cannot spend without `--anthropic`). The OpenAI-compatible path gets a **mandatory** free live run through Ollama's `/v1` endpoint (step 8); llama.cpp stays optional (step 9).
 
 - [ ] **Step 1: Write `scripts/llm-chat-smoke.ts`**
 
@@ -3238,17 +3760,21 @@ The script talks to real providers through the real `createProvider` → `LLMSer
 /**
  * Agent Runtime P1 live smoke: LLMService.chat() against real providers.
  *
- *   pnpm llm-chat-smoke                       # local Ollama only (qwen3.8:27b-mlx)
- *   pnpm llm-chat-smoke -- --anthropic        # + 2 tiny paid Claude calls (haiku, maxTokens 64)
+ *   pnpm llm-chat-smoke                       # local Ollama (qwen3.8:27b-mlx) incl. the OpenAI-compatible path via Ollama /v1
+ *   pnpm llm-chat-smoke -- --anthropic        # + 2 tiny paid Claude calls (claude-haiku-4-5-20251001, maxTokens 64, spend cap $0.01)
  *   pnpm llm-chat-smoke -- --llama-cpp http://localhost:8080   # + llama-server (needs --jinja)
  *
  * Prints `STEP n <name>: PASS|FAIL|SKIP — <detail>` per step and exits 1 on any FAIL.
  * Reads config/pas.yaml + .env like the app does. Never writes to data/.
+ * Refuses to run (exit 2) when agent.model is not served by a local provider type,
+ * so a paid agent model cannot spend through the "local" steps.
  */
 import { loadSystemConfig } from '../core/src/services/config/index.js';
 import { LLMServiceImpl } from '../core/src/services/llm/index.js';
 import { CostTracker } from '../core/src/services/llm/cost-tracker.js';
 import { ModelSelector } from '../core/src/services/llm/model-selector.js';
+import { isLocalProvider } from '../core/src/services/llm/model-pricing.js';
+import { AnthropicProvider } from '../core/src/services/llm/providers/anthropic-provider.js';
 import { createProvider } from '../core/src/services/llm/providers/provider-factory.js';
 import { ProviderRegistry } from '../core/src/services/llm/providers/provider-registry.js';
 import { LLMToolsUnsupportedError } from '../core/src/services/llm/errors.js';
@@ -3263,6 +3789,13 @@ const args = process.argv.slice(2);
 const withAnthropic = args.includes('--anthropic');
 const llamaIdx = args.indexOf('--llama-cpp');
 const llamaUrl = llamaIdx >= 0 ? args[llamaIdx + 1] : undefined;
+
+/** Pinned: priced in MODEL_PRICING, never the configured tier (R1-8). */
+const HAIKU = 'claude-haiku-4-5-20251001';
+/** Hard ceiling on the paid step's measured spend, USD. */
+const PAID_SPEND_CAP_USD = 0.01;
+/** Ollama's OpenAI-compatible endpoint gives the openai-compatible provider a free, mandatory live run (R1-9). */
+const OLLAMA_V1_KEY_ENV = 'PAS_SMOKE_OLLAMA_V1_KEY';
 
 const LOOKUP_TOOL: ChatToolSpec = {
 	name: 'lookup_receipt_total',
@@ -3303,18 +3836,42 @@ async function main(): Promise<void> {
 		const p = createProvider('llama-cpp-smoke', { type: 'llama-cpp', name: 'llama.cpp (smoke)', apiKeyEnvVar: '', baseUrl: llamaUrl, defaultModel: 'local-model', supportsTools: true }, logger, costTracker);
 		if (p) registry.register(p);
 	}
-	const modelSelector = new ModelSelector({ dataDir: scratch, defaultStandard: config.llm?.tiers.standard ?? { provider: 'anthropic', model: 'claude-sonnet-5-5' }, defaultFast: config.llm?.tiers.fast ?? { provider: 'anthropic', model: 'claude-haiku-4-5' }, defaultReasoning: config.llm?.tiers.reasoning, logger });
+
+	const agentModel: ModelRef = config.agent?.model ?? { provider: 'ollama', model: 'qwen3.8:27b-mlx' };
+	const agentProviderType = config.llm?.providers[agentModel.provider]?.type;
+	if (!isLocalProvider(agentProviderType)) {
+		// R1-8: the "local" steps must never spend. A paid agent.model needs an explicit opt-in that does not exist.
+		console.error(`agent.model ${agentModel.provider}/${agentModel.model} is served by provider type '${agentProviderType ?? 'unknown'}', not a local one; refusing to run the local steps against a paid model.`);
+		process.exit(2);
+	}
+
+	// OpenAI-compatible path through Ollama's /v1 endpoint — same model, free, mandatory (R1-9).
+	const ollamaBaseUrl = config.llm?.providers[agentModel.provider]?.baseUrl ?? 'http://localhost:11434';
+	process.env[OLLAMA_V1_KEY_ENV] = 'ollama'; // the endpoint ignores the key; the provider needs a non-empty one
+	const ollamaV1 = createProvider('ollama-v1-smoke', { type: 'openai-compatible', name: 'Ollama /v1 (smoke)', apiKeyEnvVar: OLLAMA_V1_KEY_ENV, baseUrl: `${ollamaBaseUrl.replace(/\/$/, '')}/v1`, defaultModel: agentModel.model, supportsTools: true }, logger, costTracker);
+	if (ollamaV1) registry.register(ollamaV1);
+
+	// Paid provider: pinned model, SDK retries off, separate id so nothing else routes to it (R1-8).
+	if (withAnthropic) {
+		const apiKey = process.env.ANTHROPIC_API_KEY;
+		if (!apiKey) {
+			console.error('--anthropic given but ANTHROPIC_API_KEY is not set');
+			process.exit(2);
+		}
+		registry.register(new AnthropicProvider({ providerId: 'anthropic-smoke', apiKey, defaultModel: HAIKU, logger, costTracker, sdkMaxRetries: 0 }));
+	}
+
+	const modelSelector = new ModelSelector({ dataDir: scratch, defaultStandard: config.llm?.tiers.standard ?? agentModel, defaultFast: config.llm?.tiers.fast ?? agentModel, defaultReasoning: config.llm?.tiers.reasoning, logger });
 	await modelSelector.load();
 	const llm = new LLMServiceImpl({ registry, modelSelector, costTracker, logger });
 
-	const agentModel: ModelRef = config.agent?.model ?? { provider: 'ollama', model: 'qwen3.8:27b-mlx' };
-	console.log(`agent.model = ${agentModel.provider}/${agentModel.model}; agent.thinking = ${config.agent?.thinking}; providers = ${registry.getProviderIds().join(', ')}`);
+	console.log(`agent.model = ${agentModel.provider}/${agentModel.model} (${agentProviderType}); agent.thinking = ${config.agent?.thinking}; providers = ${registry.getProviderIds().join(', ')}`);
 
-	// STEP 1 — capability detection
+	// STEP 1 — capability detection: the agent model must report BOTH tools and vision (qwen3.8 does).
 	try {
 		const tools = await llm.supportsTools(agentModel);
 		const vision = await llm.supportsVision(agentModel);
-		report(1, 'ollama capabilities', tools ? 'PASS' : 'FAIL', `supportsTools=${tools} supportsVision=${vision}`);
+		report(1, 'ollama capabilities', tools && vision ? 'PASS' : 'FAIL', `supportsTools=${tools} supportsVision=${vision}`);
 	} catch (err) {
 		report(1, 'ollama capabilities', 'FAIL', `probe threw: ${(err as Error).message}`);
 	}
@@ -3340,14 +3897,18 @@ async function main(): Promise<void> {
 		report(2, 'ollama tool round-trip', 'FAIL', `threw: ${(err as Error).message}`);
 	}
 
-	// STEP 3 — negative: unreachable model
+	// STEP 3 — negative: unreachable model. Must fail with "not found" AND within 5 s:
+	// the Ollama retry schedule is 2 retries (500 ms + 1000 ms); anything longer means
+	// the retry predicate is wrong or the SDK is retrying underneath us.
 	const tNeg = Date.now();
 	try {
 		await llm.chat([QUESTION], { modelRef: { provider: agentModel.provider, model: 'does-not-exist:1b' }, maxTokens: 10 });
 		report(3, 'negative: unreachable model', 'FAIL', 'resolved instead of throwing');
 	} catch (err) {
+		const elapsed = Date.now() - tNeg;
 		const msg = (err as Error).message;
-		report(3, 'negative: unreachable model', /not found|does-not-exist/i.test(msg) ? 'PASS' : 'FAIL', `${Date.now() - tNeg} ms; ${msg.slice(0, 160)}`);
+		const okMsg = /not found|does-not-exist/i.test(msg);
+		report(3, 'negative: unreachable model', okMsg && elapsed < 5000 ? 'PASS' : 'FAIL', `${elapsed} ms (limit 5000); ${msg.slice(0, 160)}`);
 	}
 
 	// STEP 4 — negative: pre-aborted signal makes no network call
@@ -3387,37 +3948,37 @@ async function main(): Promise<void> {
 		report(6, 'tools refused on non-tool model', err instanceof LLMToolsUnsupportedError ? 'PASS' : 'FAIL', (err as Error).message.slice(0, 160));
 	}
 
-	// STEP 7 — Anthropic, tiny and capped (2 calls, maxTokens 64)
-	if (!withAnthropic) report(7, 'anthropic tool round-trip', 'SKIP', 'pass --anthropic to run (≈ $0.003)');
-	else {
-		const haiku: ModelRef = { provider: 'anthropic', model: config.llm?.tiers.fast?.provider === 'anthropic' ? config.llm.tiers.fast.model : 'claude-haiku-4-5' };
+	/** One full tool round-trip (two chat calls) against `ref`; PASS needs the call AND the answer. */
+	async function roundTrip(n: number, name: string, ref: ModelRef, maxTokens: number, spendCap?: number): Promise<void> {
 		const before = costTracker.getMonthlyTotalCost();
 		try {
-			const first = await llm.chat([SYSTEM, QUESTION], { modelRef: haiku, tools: [LOOKUP_TOOL], maxTokens: 64 });
+			const first = await llm.chat([SYSTEM, QUESTION], { modelRef: ref, tools: [LOOKUP_TOOL], maxTokens });
 			const call = first.message.toolCalls?.[0];
 			if (first.finishReason !== 'tool_calls' || call?.name !== 'lookup_receipt_total') {
-				report(7, 'anthropic tool round-trip', 'FAIL', `expected tool_calls, got ${first.finishReason} ${JSON.stringify(first.message).slice(0, 160)}`);
-			} else {
-				const second = await llm.chat([SYSTEM, QUESTION, first.message, { role: 'tool', content: TOOL_RESULT, toolCallId: call.id }], { modelRef: haiku, tools: [LOOKUP_TOOL], maxTokens: 64 });
-				const ok = /113\.42/.test(second.message.content);
-				report(7, 'anthropic tool round-trip', ok ? 'PASS' : 'FAIL', `answer="${second.message.content.trim().slice(0, 120)}"; usage1=${JSON.stringify(first.usage)} usage2=${JSON.stringify(second.usage)}; spend=$${(costTracker.getMonthlyTotalCost() - before).toFixed(4)}`);
+				report(n, name, 'FAIL', `expected tool_calls lookup_receipt_total, got ${first.finishReason} ${JSON.stringify(first.message).slice(0, 160)}`);
+				return;
 			}
+			const second = await llm.chat([SYSTEM, QUESTION, first.message, { role: 'tool', content: TOOL_RESULT, toolCallId: call.id, toolName: call.name }], { modelRef: ref, tools: [LOOKUP_TOOL], maxTokens });
+			const spend = costTracker.getMonthlyTotalCost() - before;
+			const answered = /113\.42/.test(second.message.content);
+			const underCap = spendCap === undefined || spend <= spendCap;
+			report(n, name, answered && underCap ? 'PASS' : 'FAIL', `answer="${second.message.content.trim().slice(0, 120)}"; usage1=${JSON.stringify(first.usage)} usage2=${JSON.stringify(second.usage)}; spend=$${spend.toFixed(4)}${spendCap !== undefined ? ` (cap $${spendCap})` : ''}`);
 		} catch (err) {
-			report(7, 'anthropic tool round-trip', 'FAIL', (err as Error).message.slice(0, 200));
+			report(n, name, 'FAIL', (err as Error).message.slice(0, 200));
 		}
 	}
 
-	// STEP 8 — llama.cpp, optional
-	if (!llamaUrl) report(8, 'llama.cpp tool round-trip', 'SKIP', 'pass --llama-cpp <url> (llama-server must run with --jinja)');
-	else {
-		try {
-			const ref: ModelRef = { provider: 'llama-cpp-smoke', model: 'local-model' };
-			const first = await llm.chat([SYSTEM, QUESTION], { modelRef: ref, tools: [LOOKUP_TOOL], maxTokens: 200 });
-			report(8, 'llama.cpp tool round-trip', first.finishReason === 'tool_calls' ? 'PASS' : 'FAIL', `finishReason=${first.finishReason} toolCalls=${JSON.stringify(first.message.toolCalls)}`);
-		} catch (err) {
-			report(8, 'llama.cpp tool round-trip', 'FAIL', (err as Error).message.slice(0, 200));
-		}
-	}
+	// STEP 7 — Anthropic: pinned haiku, SDK retries off, exactly 2 facade calls, maxTokens 64, spend cap enforced (R1-8)
+	if (!withAnthropic) report(7, 'anthropic tool round-trip', 'SKIP', `pass --anthropic to run (${HAIKU}, ≈ $0.003, cap $${PAID_SPEND_CAP_USD})`);
+	else await roundTrip(7, 'anthropic tool round-trip', { provider: 'anthropic-smoke', model: HAIKU }, 64, PAID_SPEND_CAP_USD);
+
+	// STEP 8 — OpenAI-compatible path, mandatory, via Ollama /v1 on the same local model (R1-9)
+	if (!ollamaV1) report(8, 'openai-compatible (ollama /v1) tool round-trip', 'FAIL', 'provider was not constructed');
+	else await roundTrip(8, 'openai-compatible (ollama /v1) tool round-trip', { provider: 'ollama-v1-smoke', model: agentModel.model }, 400);
+
+	// STEP 9 — llama.cpp, optional, full round-trip
+	if (!llamaUrl) report(9, 'llama.cpp tool round-trip', 'SKIP', 'pass --llama-cpp <url> (llama-server must run with --jinja)');
+	else await roundTrip(9, 'llama.cpp tool round-trip', { provider: 'llama-cpp-smoke', model: 'local-model' }, 200);
 
 	await costTracker.flush();
 	console.log(failures === 0 ? 'SMOKE PASS' : `SMOKE FAIL (${failures} step(s))`);
@@ -3462,21 +4023,22 @@ Expected output (values vary where marked):
 agent.model = ollama/qwen3.8:27b-mlx; agent.thinking = off; providers = anthropic, ollama[, …]
 STEP 1 ollama capabilities: PASS — supportsTools=true supportsVision=true
 STEP 2 ollama tool round-trip: PASS — <5000–40000> ms; step1 usage={"inputTokens":<~300–600>,"outputTokens":<~20–60>} step2 usage={…}; thinking=absent; answer="… $113.42 … September 9, 2026 …"
-STEP 3 negative: unreachable model: PASS — <~1500–4000> ms; model 'does-not-exist:1b' not found…
+STEP 3 negative: unreachable model: PASS — <~1500–4000> ms (limit 5000); model 'does-not-exist:1b' not found…
 STEP 4 negative: pre-aborted signal: PASS — AbortError: This operation was aborted
 STEP 5 in-flight abort: PASS — AbortError after <300–2000> ms…
 STEP 6 tools refused on non-tool model: PASS — Model 'gemma4:e4b' (provider 'ollama') does not support native tool calling…   (or SKIP if gemma4:e4b reports tools / is absent)
-STEP 7 anthropic tool round-trip: SKIP — pass --anthropic to run (≈ $0.003)
-STEP 8 llama.cpp tool round-trip: SKIP — pass --llama-cpp <url> …
+STEP 7 anthropic tool round-trip: SKIP — pass --anthropic to run (claude-haiku-4-5-20251001, ≈ $0.003, cap $0.01)
+STEP 8 openai-compatible (ollama /v1) tool round-trip: PASS — answer="… 113.42 …"; usage1={…} usage2={…}; spend=$0.0000
+STEP 9 llama.cpp tool round-trip: SKIP — pass --llama-cpp <url> …
 SMOKE PASS
 ```
 
-Exit code 0. **Step 3's elapsed time must be under 5 s** — it proves the 404 goes through at most the 2-retry schedule (500 ms + 1000 ms) and no more; if it is longer, the retry predicate is wrong. **Step 2's `thinking=absent`** proves `think: false` reached the wire (qwen3.8 emits a `thinking` field whenever thinking is on — see the comparison doc, "mean thinking chars" 401–508 for low/on vs 0 for off).
+Exit code 0. Step 3 enforces its own `< 5000 ms` predicate (the script FAILs it otherwise) — it proves the 404 goes through at most the 2-retry schedule (500 ms + 1000 ms) and no more. **Step 2's `thinking=absent`** proves `think: false` reached the wire (qwen3.8 emits a `thinking` field whenever thinking is on — see the comparison doc, "mean thinking chars" 401–508 for low/on vs 0 for off). **Step 8 is mandatory**: it is the only live run of `OpenAICompatibleProvider.doChat` (R1-9); if Ollama's `/v1` endpoint rejects the `tool` role or `tools` for this model, that is a real finding — record it, do not downgrade the step to SKIP.
 
 - [ ] **Step 2: Run the paid step**
 
 Run: `pnpm llm-chat-smoke -- --anthropic 2>&1 | tee "$HOME/Projects/pas-q4-review-evidence/smoke-anthropic-$(git rev-parse --short HEAD).txt"`
-Expected: STEP 7 `PASS — answer="… $113.42 …"; usage1={"inputTokens":<~400–700>,"outputTokens":<~40–64>} usage2={…}; spend=$0.00<2–6>`. **Cap:** 2 calls, `maxTokens: 64` each; spend under $0.01. If STEP 7 FAILs on the first attempt, do not loop — read the error, fix, re-run once.
+Expected: STEP 7 `PASS — answer="… $113.42 …"; usage1={"inputTokens":<~400–700>,"outputTokens":<~40–64>} usage2={…}; spend=$0.00<2–6> (cap $0.01)`. The script itself enforces: pinned `claude-haiku-4-5-20251001` on the `anthropic-smoke` provider, `sdkMaxRetries: 0`, 2 facade calls, `maxTokens: 64`, FAIL when spend > $0.01. If STEP 7 FAILs on the first attempt, do not loop — read the error, fix, re-run once (each attempt is bounded by the same cap).
 
 - [ ] **Step 3: Negative evidence for the cost fix (no model needed)** — the usage-on-failure path has no live trigger on Ollama (free) and is proven by the Task 2/4 tests; record that the live smoke does not cover it and that the unit tests are the evidence (acceptance row for the carried item).
 
@@ -3506,17 +4068,17 @@ git commit -m "docs(agent-runtime-p1): live chat smoke results"
 
 | ID | Requirement |
 |---|---|
-| REQ-LLM-045 | `LLMService.chat(messages, options)` MUST exist on the service and both guards, resolve the model as `completeWithMeta` does (modelRef → tier → fast), validate the message shape before any network call, estimate the guard reservation from message text plus the tool list, and record usage with provider type and app id |
-| REQ-LLM-046 | Ollama chat MUST use `/api/chat`, always send `num_ctx` (default 32768) and `keep_alive` (default 30m), send `think: false` unless thinking is requested (levels map to Ollama's strings), pass user images, return tool calls with ids (synthesized `call_<8 hex>` when absent), report `tool_calls` whenever calls are present, pass `thinking` back and forth within a turn, gate vision per model, and raise `LLMEmptyOutputError` (with usage) on empty output at the cap |
-| REQ-LLM-047 | OpenAI-compatible and llama.cpp chat MUST send `tools` + `parallel_tool_calls` (only when tools are given), map tool-call arguments from JSON (keeping unparseable strings raw), pass the AbortSignal as a request option, and take tool support from `supports_tools` (default true for openai-compatible, false for llama-cpp) |
-| REQ-LLM-048 | Anthropic chat MUST send tools with `cache_control` on the last tool and on the last system block, `tool_choice: auto` (with `disable_parallel_tool_use` when parallel calls are off), fold tool results into a user message whose first blocks are `tool_result` (with `is_error`), skip empty assistant text blocks, count cache creation/read tokens as input, and map `refusal` → error |
-| REQ-LLM-049 | Capability detection MUST be per model: Ollama probes `/api/show` once per model (cached; failures reject and are not cached; a legacy server without `capabilities` is treated as capable), Anthropic is always capable, Google never; `chat()` with tools on an incapable model MUST throw `LLMToolsUnsupportedError` before any network call, classified `tools-unsupported`, non-retryable |
-| REQ-LLM-050 | On the chat path a pre-aborted signal MUST fail before any work with the signal's reason, the signal MUST reach every SDK call (Anthropic/OpenAI request options; Ollama per-call fetch), and an aborted call MUST never be retried; abort errors classify as `aborted`, non-retryable |
+| REQ-LLM-045 | `LLMService.chat(messages, options)` MUST exist on the service and both guards, resolve the model as `completeWithMeta` does (modelRef → tier → fast), validate the message shape before any network call (system prefix included; every tool call answered exactly once before the next non-tool message and before the history ends; a user turn carries text or images), estimate the guard reservation from message text **plus replayed thinking, tool-call arguments and the tool list**, record usage with provider type and app id, and export every chat type from `core/src/types/index.ts` |
+| REQ-LLM-046 | Ollama chat MUST use `/api/chat`, always send `num_ctx` (default 32768) and `keep_alive` (default 30m), send `think: false` unless thinking is requested (levels map to Ollama's strings), pass user images, return tool calls with ids (synthesized `call_<8 hex>` when absent), report `tool_calls` whenever calls are present, pass `thinking` back and forth within a turn, gate vision per model **on the chat path only** (`supportsVision`, the `complete()` gate, stays `false`), apply the 120 s HTTP timeout to per-call clients, and raise `LLMEmptyOutputError` (with usage) on empty output at the cap |
+| REQ-LLM-047 | OpenAI-compatible and llama.cpp chat MUST send `tools` + `parallel_tool_calls` (only when tools are given), send the output limit as `max_completion_tokens` for o-series / gpt-5 ids and `max_tokens` otherwise (on `complete()` too), map tool-call arguments from JSON (keeping unparseable strings raw), pass the AbortSignal as a request option, and take tool support from `supports_tools` (default true for openai-compatible, false for llama-cpp) |
+| REQ-LLM-048 | Anthropic chat MUST send tools with `input_schema` in the order given and **no `cache_control`**, `tool_choice: auto` (with `disable_parallel_tool_use` when parallel calls are off), fold tool results into a user message whose first blocks are `tool_result` (with `is_error`; empty content omitted), emit text blocks only for non-empty text (assistant and user — a captionless photo is image blocks alone), report `inputTokens` as the uncached `input_tokens` with cache creation/read counts carried separately and never priced at the input rate (warned when non-zero), and map `refusal` → error |
+| REQ-LLM-049 | Capability detection MUST be per model: Ollama probes `/api/show` once per model (cached; failures reject and are not cached; a legacy server without `capabilities` is treated as capable), Anthropic is always capable, Google never; `chat()` with tools on an incapable model MUST throw `LLMToolsUnsupportedError` before any inference call (`/api/show` may run; `/api/chat` never does), classified `tools-unsupported`, non-retryable |
+| REQ-LLM-050 | On the chat path a pre-aborted signal MUST fail before any work with the signal's reason, the signal MUST reach every SDK call (Anthropic/OpenAI request options; Ollama per-call fetch) **and end the wait on a pending capability probe**, and an aborted call MUST never be retried; abort errors classify as `aborted`, non-retryable |
 | REQ-LLM-051 | A provider call that fails after the provider billed it MUST still be charged: `LLMEmptyOutputError` carries usage and `BaseProvider` records it on both the completion and chat paths; errors without usage record nothing |
 | REQ-LLM-052 | `agent.model` (default ollama/qwen3.8:27b-mlx), `agent.vision_model` (default the Claude reasoning tier, else the Claude standard tier, else undefined), `agent.thinking` (default off), `agent.context_window` (default 32768), `agent.keep_alive` (default 30m) and `llm.providers.<id>.supports_tools` MUST load from pas.yaml with schema validation and sanitizers that fall back to the defaults |
 | REQ-REG-AGENT-005 | The per-trial worker's provider wrapper MUST track `chatWithUsage` as well as `completeWithUsage`, so a provider error on the chat path forces the trial to `error` |
 
-Add one traceability-matrix row per ID (REQ-LLM-045..052 after the REQ-LLM-044 row; REQ-REG-AGENT-005 after REQ-REG-AGENT-004) with test files, standard count, edge count, `Implemented`. Recount from the test files (`grep -c "it("`), then update the **Totals** row (files / std / edge / total) by recount, not arithmetic (`pas-urs-workflow` skill).
+Add one traceability-matrix row per ID (REQ-LLM-045..052 after the REQ-LLM-044 row; REQ-REG-AGENT-005 after REQ-REG-AGENT-004) with test files, standard count, edge count, `Implemented`. **Recount by executing, not by grepping** (R1-14: `grep -c "it("` misses `it.each` expansions): `npx vitest run --project core <the P1 test files> --reporter=json --outputFile="$HOME/Projects/pas-q4-review-evidence/p1-tests-<sha>.json"` then `jq -r '.testResults[] | "\(.name) \(.assertionResults | length)"' <that file>` gives the executed count per file (the regression file via `cd regression && npx vitest run src/__tests__/provider-call-tracker.test.ts --reporter=json …`). Update the **Totals** row (files / std / edge / total) by recount, not arithmetic (`pas-urs-workflow` skill).
 
 - [ ] **Step 2: `docs/implementation-phases.md`** — add a dated section `## Agent Runtime P1 — LLMService.chat() with Native Tools (2026-10-06)` after the Q3b section with Goal / Approach / Tasks 0–11 table / "Decisions made in the plan" (copy the list below, noting any the reviewer changed) / Plan review rounds / Code review ledger (filled during the loop) / Tests (counts from the final run) / Smoke headline (link the findings doc). Per the CLAUDE.md anti-bloat rule, **no CLAUDE.md status bullet** — that lands at P5.
 
@@ -3524,8 +4086,9 @@ Add one traceability-matrix row per ID (REQ-LLM-045..052 after the REQ-LLM-044 r
   - Unfinished Corrections: strike the "Failed paid calls can drop their usage from cost tracking" entry: `~~…~~ ✓ Closed (2026-10-06, Agent Runtime P1) — LLMEmptyOutputError carries usage; BaseProvider records it before rethrowing on both completeWithUsage and chatWithUsage (REQ-LLM-051).`
   - Confirmed Phases, "Hermes P8b carry-forward — Plumb `AbortSignal` into `LLMService.complete`": append `*(Partially resolved 2026-10-06, Agent Runtime P1: the chat path — `LLMService.chat` → every provider SDK call — honours `ChatOptions.signal` and never retries an aborted call (REQ-LLM-050). The `complete()` path is still open.)*`
   - Confirmed Phases, Agent Runtime entry: append `**P1 complete (2026-10-06, branch `claude/q4-agent-runtime-p1`); smoke: `docs/superpowers/plans/findings/2026-10-06-p1-chat-smoke.md`.**`
-  - "Per-Model Tool-Call Support Matrix" section: replace the TBV table's preamble with "Confirmed by the P1 live smoke (2026-10-06):" and fill the rows actually observed — Ollama `qwen3.8:27b-mlx` supportsTools ✓ (via `/api/show`), vision ✓; Anthropic `claude-haiku-4-5` supportsTools ✓ (if the paid step ran); Ollama `gemma4:e4b` per the Step 6 observation. Delete the `ai-sdk-ollama` / `ollama-ai-provider-v2` line (design §2 non-goal: no Vercel AI SDK) and the `experiments/tool-call-spike/` reference (never built). Keep rows not observed as "not probed".
-  - Deferred Infrastructure Work, "Agent Runtime deferrals" item (1): append "`GoogleProvider.supportsTools` returns false and `chatWithUsage` throws not-implemented since P1 (REQ-LLM-049)."
+  - "Per-Model Tool-Call Support Matrix" section: replace the TBV table's preamble with "Confirmed by the P1 live smoke (2026-10-06):" and fill the rows actually observed — Ollama `qwen3.8:27b-mlx` supportsTools ✓ (via `/api/show`), vision ✓; OpenAI-compatible via Ollama `/v1` on `qwen3.8:27b-mlx` supportsTools ✓ (smoke step 8); Anthropic `claude-haiku-4-5-20251001` supportsTools ✓ (if the paid step ran); Ollama `gemma4:e4b` per the Step 6 observation. Delete the `ai-sdk-ollama` / `ollama-ai-provider-v2` line (design §2 non-goal: no Vercel AI SDK) and the `experiments/tool-call-spike/` reference (never built). Keep rows not observed as "not probed".
+  - Deferred Infrastructure Work, "Agent Runtime deferrals" item (1): append "`GoogleProvider.supportsTools` returns false and `chatWithUsage` throws not-implemented since P1 (REQ-LLM-049)." Item (9) (added at plan review R1-1, already present): append "P1 ships `ChatUsage.cacheCreationTokens` / `cacheReadTokens` as separate, unbilled fields and `AnthropicProvider` warns if they are ever non-zero."
+  - Accepted Risks, "Vendor-SDK retries compound with `BaseProvider` retries" (added at plan review R1-8, already present): confirm the entry still matches the shipped `sdkMaxRetries` semantics; no new entry.
   - Proposals: add "**Expose `agent.*` settings in the GUI settings page** (2026-10-06, Agent Runtime P1) — P1 loads `agent.model` / `vision_model` / `thinking` / `context_window` / `keep_alive` from pas.yaml only (`settings-metadata.ts` has no rows for them). Trigger: an operator changes the agent model more than once by editing pas.yaml, or P5's docs pass finds the GUI the natural home."
 
 - [ ] **Step 4: `docs/priority-queue.md`** — the conductor sets Q4's Status to `Done (2026-10-06, <merge commit>)` at merge; this task adds nothing new to *Carried items* unless the review loop defers something (then: a bullet under the right phase **and** an open-items entry).
@@ -3537,9 +4100,10 @@ Add one traceability-matrix row per ID (REQ-LLM-045..052 after the REQ-LLM-044 r
 
 - `LLMService.chat(messages, options)` is the messages+tools API; `complete()` stays for single-shot uses. Both guards wrap it.
 - Providers implement `doChat()`; `BaseProvider.chatWithUsage()` owns validation, capability/vision gates, retry (never on abort), temperature self-heal, and cost recording. Google has no chat.
-- Capability gating is per model: `llm.supportsTools(ref)` / `llm.supportsVision(ref)`. Ollama probes `/api/show` (cached); openai-compatible/llama-cpp read `supports_tools`; Anthropic is always capable. Tools on an incapable model throw `LLMToolsUnsupportedError` before any network call.
-- Ollama chat always sends `num_ctx` (32768 default) and `keep_alive` (30m default), and `think: false` unless asked. Chat sends no default temperature (the Modelfile's card defaults apply) — unlike `complete()`.
-- `ChatOptions.signal` reaches every SDK call. A failed call that the provider billed is still charged (`LLMEmptyOutputError.usage`).
+- Capability gating is per model: `llm.supportsTools(ref)` / `llm.supportsVision(ref)`. Ollama probes `/api/show` (cached); openai-compatible/llama-cpp read `supports_tools`; Anthropic is always capable. Tools on an incapable model throw `LLMToolsUnsupportedError` before any inference call. Vision on chat is per model; `complete()` keeps the provider-wide `supportsVision` gate (Ollama: false).
+- Ollama chat always sends `num_ctx` (32768 default) and `keep_alive` (30m default), and `think: false` unless asked. Chat sends no default temperature (the Modelfile's card defaults apply) — unlike `complete()`. OpenAI-compatible requests send `max_completion_tokens` for o-series / gpt-5 ids and `max_tokens` otherwise (`openAIOutputLimitField`).
+- `ChatOptions.signal` reaches every SDK call and ends the wait on a pending capability probe. A failed call that the provider billed is still charged (`LLMEmptyOutputError.usage`).
+- No Anthropic prompt caching yet: `cache_control` waits for cache-aware pricing (P2). `ChatUsage.cacheCreationTokens` / `cacheReadTokens` are carried separately and are not billed.
 - Settings: `agent.model` (default `ollama/qwen3.8:27b-mlx`), `agent.vision_model` (paid; default the Claude reasoning/standard tier), `agent.thinking` (default `off`), `agent.context_window`, `agent.keep_alive` — `core/src/services/llm/chat-defaults.ts` is the single home for the defaults.
 ```
 
@@ -3563,22 +4127,22 @@ git commit -m "docs(agent-runtime-p1): URS, phase record, open items, LLM skill"
 
 The plan→execution contract (`docs/review-protocol.md` §3). Code review adjudicates each item as delivered, missing, or downgraded, with `file:line` or command evidence. A silent narrowing is critical.
 
-- [ ] **D1** — `LLMService.chat(messages, options)` exists on `LLMServiceImpl`, `LLMGuard`, and `SystemLLMGuard`; routes modelRef → tier → fast; both guards apply the same rate/cost gates as `complete` (rate slot committed, cost cap refused, reservation estimated from message text + tool JSON, `_appId` injected). `GuardMethod` accepts `'chat'` with a 1024-token default output. (Tasks 0, 6)
-- [ ] **D2** — A malformed history (non-leading system, orphan tool result, tool result without `toolCallId`, duplicate call ids, images on a non-user message) is rejected with `ChatMessageShapeError` before any SDK call, on every provider. (Tasks 0, 2)
+- [ ] **D1** — `LLMService.chat(messages, options)` exists on `LLMServiceImpl`, `LLMGuard`, and `SystemLLMGuard`; routes modelRef → tier → fast; both guards apply the same rate/cost gates as `complete` (rate slot committed, cost cap refused, reservation estimated from message text **+ replayed thinking + assistant tool-call JSON + tool JSON** — a 100k-character tool-call history raises the estimate accordingly, `_appId` injected). `GuardMethod` accepts `'chat'` with a 1024-token default output. Every chat type is exported from `core/src/types/index.ts`. (Tasks 0, 6)
+- [ ] **D2** — A malformed history (non-leading system, images on a non-user message **including the system prefix**, orphan tool result, tool result without `toolCallId`, **a tool result for an id already answered, a user/assistant turn or end of history while a tool call is unanswered, a user turn with neither text nor images**, duplicate call ids) is rejected with `ChatMessageShapeError` before any SDK call, on every provider. (Tasks 0, 2)
 - [ ] **D3** — Ollama chat uses `client.chat` (never `generate`), sends `tools` in the `{type:'function', function:{name, description, parameters}}` wrapper, `tool` messages with `tool_name`, assistant `tool_calls` and `thinking` on replay, user `images` as base64; returns tool calls with the provider id or a synthesized `call_<8 hex>` id, `finishReason: 'tool_calls'` whenever calls are present, string arguments parsed as JSON or kept raw. (Task 3)
 - [ ] **D4** — Ollama chat **always** sends `options.num_ctx` (default 32768) and `keep_alive` (default `'30m'`), and `think` unconditionally — `false` by default, `true` for `thinking: true`, `'low' | 'medium' | 'high'` for levels. No default temperature is sent on chat. (Task 3)
-- [ ] **D5** — Ollama capability detection: `supportsTools(model)` / `supportsVisionModel(model)` read `/api/show` `capabilities`, one probe per model cached for the provider lifetime, concurrent probes share one request, probe failures reject and are not cached, a server without `capabilities` is treated as capable with one warning. `OllamaProvider.supportsVision` is `true`; the per-model probe gates images, so a vision-capable Ollama model accepts photos on the chat path. (Task 3)
-- [ ] **D6** — OpenAI-compatible/llama.cpp chat sends `tools` as function tools and `parallel_tool_calls` (default `true`; omitted when there are no tools), maps `tool_calls` with JSON-parsed arguments (raw string kept when unparseable), passes `signal` as the request option, keeps `reasoning_content` out of the answer. `supportsTools` comes from `supports_tools` with defaults true (openai-compatible) / false (llama-cpp). (Task 4)
-- [ ] **D7** — Anthropic chat sends tools with `input_schema` and `cache_control` on the last tool; leading system messages as a `system` block array with `cache_control` on the last block; `tool_choice: {type:'auto'}` (+ `disable_parallel_tool_use: true` when `parallelToolCalls === false`); assistant `tool_use` blocks (empty text omitted; non-object arguments replayed as `{}`); tool results folded into one user message whose first blocks are `tool_result` with `is_error`; user images as image blocks; returns `tool_use` as `toolCalls`; usage `inputTokens` = input + cache creation + cache read, `cacheReadTokens` reported; `refusal` → `error`, `pause_turn` → `other`. (Task 5)
-- [ ] **D8** — `chat()` with a non-empty `tools` array on a model whose provider reports no tool support throws `LLMToolsUnsupportedError` **before any network call**; `classifyLLMError` maps it to `tools-unsupported`, non-retryable, with a user message; an empty `tools` array is "no tools". Google: `supportsTools` false, `chatWithUsage` throws a clear not-implemented error. (Tasks 1, 2)
-- [ ] **D9** — `AbortSignal` on chat: a pre-aborted signal throws its reason before validation or network; the signal reaches `messages.create(…, {signal})`, `chat.completions.create(…, {signal})`, and the Ollama per-call fetch (`AbortSignal.any` with the 120 s timeout); an `AbortError`/`APIUserAbortError` is never retried; `classifyLLMError` → `aborted`, non-retryable. (Tasks 1–5)
+- [ ] **D5** — Ollama capability detection: `supportsTools(model)` / `supportsVisionModel(model)` read `/api/show` `capabilities`, one probe per model cached for the provider lifetime, concurrent probes share one request, probe failures reject and are not cached, a server without `capabilities` is treated as capable with one warning. **`OllamaProvider.supportsVision` stays `false`** (it gates `complete()`, whose `generate` request carries no images — unchanged behaviour and message); the chat path gates images per model through `supportsVisionModel`, so a vision-capable Ollama model accepts photos on `chat()` and still rejects them on `complete()`. (Task 3)
+- [ ] **D6** — OpenAI-compatible/llama.cpp chat sends `tools` as function tools and `parallel_tool_calls` (default `true`; omitted when there are no tools), sends the output limit as `max_completion_tokens` for o-series / gpt-5 ids and `max_tokens` otherwise (`openAIOutputLimitField`; `complete()` uses the same helper), maps `tool_calls` with JSON-parsed arguments (raw string kept when unparseable), passes `signal` as the request option, keeps `reasoning_content` out of the answer. `supportsTools` comes from `supports_tools` with defaults true (openai-compatible) / false (llama-cpp). `sdkMaxRetries` reaches the SDK client as `maxRetries` only when set. (Task 4)
+- [ ] **D7** — Anthropic chat sends tools with `input_schema` in the order given and **no `cache_control` anywhere** (tools or system); leading system messages as a `system` block array; `tool_choice: {type:'auto'}` (+ `disable_parallel_tool_use: true` when `parallelToolCalls === false`); assistant `tool_use` blocks (empty text omitted; non-object arguments replayed as `{}`); tool results folded into one user message whose first blocks are `tool_result` with `is_error` (empty content omitted); user images as image blocks with the text block only when the text is non-empty (captionless photo = image blocks alone); returns `tool_use` as `toolCalls`; usage `inputTokens` = uncached `input_tokens`, `cacheCreationTokens` / `cacheReadTokens` carried separately, never folded into the billed count, warned when non-zero; `refusal` → `error`, `pause_turn` → `other`; `sdkMaxRetries` → `maxRetries` only when set. (Task 5)
+- [ ] **D8** — `chat()` with a non-empty `tools` array on a model whose provider reports no tool support throws `LLMToolsUnsupportedError` **before any inference call** (the cached `/api/show` probe may run; `/api/chat` never does); `classifyLLMError` maps it to `tools-unsupported`, non-retryable, with a user message; an empty `tools` array is "no tools". Google: `supportsTools` false, `chatWithUsage` throws a clear not-implemented error. (Tasks 1, 2)
+- [ ] **D9** — `AbortSignal` on chat: a pre-aborted signal throws its reason before validation or network; the signal reaches `messages.create(…, {signal})`, `chat.completions.create(…, {signal})`, and the Ollama per-call fetch (`AbortSignal.any` with the 120 s timeout, which the per-call client still enforces); **an abort while the capability probe is pending rejects at once** (the probe finishes in the background and fills the cache); an `AbortError`/`APIUserAbortError` is never retried; `classifyLLMError` → `aborted`, non-retryable. (Tasks 0–5)
 - [ ] **D10** — Failed paid calls keep their usage: `LLMEmptyOutputError` carries `usage`; `OpenAICompatibleProvider` (completion and chat) and `OllamaProvider` (chat) populate it; `BaseProvider` records that usage exactly once before rethrowing on both `completeWithUsage` and `chatWithUsage`; errors without usage record nothing. Closes the open-items entry "Failed paid calls can drop their usage". (Tasks 1, 2, 3, 4)
 - [ ] **D11** — Empty output on chat: empty content **and** no tool calls **and** `finishReason === 'length'` throws `LLMEmptyOutputError` (with usage and thinking length); empty content with tool calls is a normal `tool_calls` result. (Tasks 3, 4)
 - [ ] **D12** — `pas.yaml` `agent` block loads into `config.agent` with defaults `model: {ollama, qwen3.8:27b-mlx}`, `visionModel`: the Claude reasoning tier, else the Claude standard tier, else `undefined`; `thinking: 'off'`; `contextWindow: 32768`; `keepAlive: '30m'`; schema rejects out-of-set `thinking`, non-positive/non-integer `context_window`, partial `model`; sanitizers fall back to the defaults; `thinking: off` is the string `'off'`. `llm.providers.<id>.supports_tools` → `supportsTools`. `config/pas.yaml.example` documents both. (Task 7)
 - [ ] **D13** — The regression trial worker's `ProviderCallTracker.wrap()` tracks `chatWithUsage` when present (and tolerates providers without it), so a provider error on the chat path records an infrastructure error and forces the trial to `error`. (Task 8)
-- [ ] **D14** — Live smoke (`scripts/llm-chat-smoke.ts`, hard exit 1 on FAIL) run and recorded in `docs/superpowers/plans/findings/2026-10-06-p1-chat-smoke.md`: against local `qwen3.8:27b-mlx` — capabilities report tools+vision; one tool round-trip calls `lookup_receipt_total({store:"Costco"})` and answers with `113.42`, `thinking` absent; negative: `does-not-exist:1b` errors with "not found" in < 5 s; pre-aborted signal → `AbortError` with no network; in-flight abort → `AbortError` in < 2 s; tools on a non-tool model → `LLMToolsUnsupportedError` (or SKIP with the reason). Paid: `--anthropic` runs exactly 2 `claude-haiku-4-5` calls at `maxTokens: 64`, answers `113.42`, spend < $0.01, recorded. (Tasks 9, 10)
-- [ ] **D15** — Documentation footprint: REQ-LLM-045..052 + REQ-REG-AGENT-005 with traceability rows and recounted totals; `docs/implementation-phases.md` P1 section; `docs/open-items.md` — "Failed paid calls" closed, AbortSignal carry-forward annotated partial, Agent Runtime entry notes P1 complete, tool-call support matrix filled from the smoke, deferral (1) annotated; `pas-llm-architecture` skill section; **no CLAUDE.md bullet**; queue row set to Done at merge. (Task 11)
-- [ ] **D16** — Everything existing still holds: `complete()` behaviour is unchanged (Ollama `generate` still sends `think: false` and `temperature ?? 0.1`; the vision gate, retry schedule, temperature self-heal, and `LLMEmptyOutputError` semantics are the same); `pnpm lint` 0 errors; `pnpm test`, `pnpm --filter @pas/regression test`, and both typechecks green at the final SHA (`suite-<sha>.txt`).
+- [ ] **D14** — Live smoke (`scripts/llm-chat-smoke.ts`, hard exit 1 on FAIL; exit 2 when `agent.model` is not on a local provider type) run and recorded in `docs/superpowers/plans/findings/2026-10-06-p1-chat-smoke.md`: against local `qwen3.8:27b-mlx` — capabilities report tools **and** vision (both required for PASS); one tool round-trip calls `lookup_receipt_total({store:"Costco"})` and answers with `113.42`, `thinking` absent; negative: `does-not-exist:1b` errors with "not found" **in < 5 s (enforced by the script)**; pre-aborted signal → `AbortError` with no network; in-flight abort → `AbortError` in < 2 s; tools on a non-tool model → `LLMToolsUnsupportedError` (or SKIP with the reason); **mandatory OpenAI-compatible round-trip through Ollama `/v1` on the same model (both calls, answers `113.42`)**; optional llama.cpp full round-trip. Paid: `--anthropic` runs exactly 2 facade calls on a dedicated `anthropic-smoke` provider pinned to `claude-haiku-4-5-20251001` with `sdkMaxRetries: 0`, `maxTokens: 64`, answers `113.42`, **spend ≤ $0.01 enforced by the script**, recorded. (Tasks 9, 10)
+- [ ] **D15** — Documentation footprint: REQ-LLM-045..052 + REQ-REG-AGENT-005 with traceability rows and totals recounted from the JSON reporter; `docs/implementation-phases.md` P1 section; `docs/open-items.md` — "Failed paid calls" closed, AbortSignal carry-forward annotated partial, Agent Runtime entry notes P1 complete, tool-call support matrix filled from the smoke (incl. the Ollama `/v1` row), deferral (1) annotated, deferral (9) (prompt caching, added at plan review) annotated, SDK-retry-compounding accepted risk added; `pas-llm-architecture` skill section; **no CLAUDE.md bullet**; queue row set to Done at merge. (Task 11)
+- [ ] **D16** — Everything existing still holds: `complete()` behaviour is unchanged **except one deliberate fix** — OpenAI-compatible `doComplete` sends `max_completion_tokens` instead of `max_tokens` for o-series / gpt-5 ids (REQ-LLM-047; same helper as chat). Otherwise identical: Ollama `generate` still sends `think: false` and `temperature ?? 0.1` and no images; `OllamaProvider.supportsVision` is still `false`; the provider-wide vision gate and its message, the retry schedule (SDK `maxRetries` default untouched when `sdkMaxRetries` is unset), temperature self-heal, and `LLMEmptyOutputError` semantics are the same; `pnpm lint` 0 errors; `pnpm test`, `pnpm --filter @pas/regression test`, both standard typechecks, and the filtered test-inclusive gate green at the final SHA (`suite-<sha>.txt`).
 
 ## Decisions made in this plan
 
@@ -3586,18 +4150,18 @@ Points the design leaves open or ambiguous that P1 must settle. Each has a one-l
 
 1. **`ChatResult` gains `model` and `provider`** (design lists `message`, `finishReason`, `usage` only). Rationale: the trace (P2) and the regression report need to know which model served each step without re-resolving the tier; `LLMCompletionResult` already carries both.
 2. **`finishReason: 'tool_calls'` is derived from the presence of tool calls, overriding the provider's stop reason.** Rationale: Ollama reports `done_reason: 'stop'` with tool calls present, so trusting the provider would make the loop stop early; one rule for all providers keeps P2's loop provider-agnostic.
-3. **Tools on an incapable model throw `LLMToolsUnsupportedError` before any network call** rather than silently dropping the tools. Rationale: a tool-less agent call would hallucinate "I can't see your data" — the exact failure the design exists to remove; a typed error lets P2 say "this model cannot run the agent".
+3. **Tools on an incapable model throw `LLMToolsUnsupportedError` before any inference call** rather than silently dropping the tools (R1-13: "before any network call" was inaccurate — the Ollama probe is itself one `/api/show` request; the contract is that no `/api/chat` / inference request is made). Rationale: a tool-less agent call would hallucinate "I can't see your data" — the exact failure the design exists to remove; a typed error lets P2 say "this model cannot run the agent".
 4. **Capability probes that fail reject; they do not return `false`.** Rationale: "Ollama is down" and "this model lacks tools" need different user messages; caching only successes means a pulled-later model is picked up without a restart.
 5. **A server too old to report `capabilities` is treated as capable (one warning).** Rationale: the same permissive-unknown rule `supportsTemperature` uses; the call then either works or fails with the server's own error.
 6. **Ollama capability cache lives for the provider's lifetime, keyed by model id; no TTL, no invalidation API.** Rationale: a pinned tag's capabilities do not change; YAGNI until the GUI model switcher needs a refresh hook (then add `invalidate(model)`).
-7. **`OllamaProvider.supportsVision` becomes `true`; images are gated per model by `/api/show` `vision`.** Rationale: design §5.2 says vision becomes model-capability-driven and names today's "Provider ollama does not support vision" receipt errors as the bug; the provider-wide flag stays as the first gate for text-only providers (llama.cpp).
+7. **Vision is gated per path (revised at R1-2).** `OllamaProvider.supportsVision` stays `false` — it is the `complete()` gate, and `doComplete`'s `generate` request sends no `images`, so flipping it would make existing photo completions silently run text-only. The chat path consults only `supportsVisionModel(model)` (base default: the provider-wide flag; Ollama: the `/api/show` `vision` capability), so a vision-capable Ollama model accepts photos on `chat()`. Rationale: design §5.2 wants model-capability-driven vision for the agent (which uses `chat()`), and D16 wants `complete()` unchanged; implementing images on `generate` is out of scope because nothing in PAS will call `complete()` with images on Ollama once the agent exists. Accepted consequence: the "Provider ollama does not support vision" receipt error persists on `complete()` until a caller needs it.
 8. **`ChatOptions.keepAlive` and `ChatOptions.contextWindow` with provider defaults (`'30m'`, 32768) *and* `agent.keep_alive` / `agent.context_window` config (same defaults, same constants module).** Rationale: the provider must be correct when called without the agent (dark launch, smoke, tests), and P2's loop passes the operator's values; `chat-defaults.ts` is the single source so the two cannot drift. Keep-alive applies to chat only — `complete()` keeps Ollama's own default so classifier behaviour is unchanged.
 9. **No default temperature on chat** (`complete()` keeps `temperature ?? 0.1` for Ollama). Rationale: design §5.3 wants the model card's sampling defaults (qwen3.8 non-thinking 0.7 / top_p 0.8), which the Modelfile already carries; the thinking comparison ran without an explicit temperature. `top_p` is not plumbed (YAGNI).
 10. **`LLMCompletionOptions.thinking` is widened to `boolean | ThinkingLevel`; `'off'`/`false` are identical, `true` means the provider default.** Rationale: `ChatOptions` picks `thinking` from `LLMCompletionOptions` per the design, and `agent.thinking` is a level; keeping `boolean` avoids touching `complete()` callers.
 11. **Tool-call arguments that are not valid JSON are returned as the raw string; arguments replayed to Ollama/Anthropic that are not objects are sent as `{}`.** Rationale: P2's Ajv validation must see the malformed call to answer it with `isError`; the wire formats require an object on replay, and P2 never replays a rejected call's arguments as data.
-12. **Anthropic: consecutive tool results and a following user text fold into one user message; a tool result arriving after text in the same user message is a shape error.** Rationale: Anthropic requires alternating roles and `tool_result` blocks first; folding is the only legal encoding of the neutral history.
-13. **Anthropic usage `inputTokens` = `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`, plus `cacheReadTokens`.** Rationale: `CostTracker` has one input price per model, so counting every prompt token as input keeps budgets conservative; the separate field lets the trace show cache hits. Cache-aware pricing is not in scope.
-14. **`cache_control` goes on the last tool and the last system block; tools are serialized in the order given.** Rationale: one breakpoint after the stable prefix is the documented caching pattern; deterministic ordering is the registry's job (design §7, P2).
+12. **Anthropic: consecutive tool results and a following user text fold into one user message; a tool result arriving after text in the same user message is a shape error.** Rationale (corrected at R1): Anthropic requires every `tool_use` to be answered by `tool_result` blocks at the start of the very next message; it accepts consecutive same-role messages and merges them, so folding is the tidy encoding, not the only legal one. Text blocks are emitted only for non-empty text (the API rejects empty text blocks — R1-3).
+13. **No prompt caching in P1; cache tokens are carried separately and not billed (revised at R1-1).** The earlier rule — fold `cache_creation_input_tokens` and `cache_read_input_tokens` into `inputTokens` at the base rate — was not conservative: 5-minute-TTL cache writes bill **1.25×** input and reads **0.1×**, and `CostTracker.record` / `model-pricing.ts` have one input rate. Options were (a) carry both counts into `UsageEntry`, the usage log, `estimateCallCost` and the three estimators with the correct multipliers, or (b) send no `cache_control` and defer caching. **(b) is chosen**: it leaves accounting exactly right (with no breakpoints Anthropic reports 0 cache tokens), touches no persisted format, and costs only the cache savings on a path nothing calls until P2. `ChatUsage.inputTokens` is the uncached `input_tokens`; `cacheCreationTokens` / `cacheReadTokens` ride beside it for the trace, are never folded into the billed count, and trigger a warning if non-zero (which cannot happen without `cache_control`). Cache-aware pricing + `cache_control` are a P2 carried item (open-items "Agent Runtime deferrals" item 9).
+14. **Tools are serialized in the order given; no `cache_control` on tools or system in P1.** Rationale: decision 13; deterministic ordering is the registry's job (design §7, P2), which also makes the eventual cache prefix stable.
 15. **`parallel_tool_calls` is sent to OpenAI-compatible only when tools are present.** Rationale: the API rejects the field without tools.
 16. **`supports_tools` defaults: true for `openai-compatible`, false for `llama-cpp`.** Rationale: OpenAI/Groq/Together/Mistral/vLLM accept `tools`; `llama-server` only with `--jinja`, which pas.yaml cannot detect.
 17. **`agent.vision_model` default = the Claude reasoning tier if its provider is anthropic-typed, else the Claude standard tier, else `undefined`.** Rationale: §18.2 says "default the configured Claude standard/reasoning model"; when no Claude tier exists the design wants a plain explanation on photo turns (P3), which `undefined` triggers.
@@ -3606,17 +4170,22 @@ Points the design leaves open or ambiguous that P1 must settle. Each has a one-l
 20. **Aborted calls are never retried; a pre-aborted signal throws its `reason` (or an `AbortError`) before validation.** Rationale: retrying a cancelled request bills the user for work they cancelled — the open-items AbortSignal item's complaint.
 21. **Google: `supportsTools` false, `chatWithUsage` throws "does not implement chat()" from the base default.** Rationale: design §5.2 marks Google out of scope; a clear error beats a half-implementation.
 22. **`LLMService.supportsTools(ref)` / `supportsVision(ref)` return `false` for an unregistered provider** (and otherwise delegate, so they may reject). Rationale: an unregistered provider is a configuration state, not a transient failure.
-23. **The new `LLMService` members are required, not optional; the 8 mock sites are updated.** Rationale: an optional `chat` would let a guard forget to wrap it (silently bypassing cost caps); the churn is 8 object literals.
-24. **Guard estimate for chat = message text + `JSON.stringify(tools)`; images not counted; default output 1024 tokens.** Rationale: tool definitions are the dominant prompt cost on frontier models and must raise the reservation; images are not counted on `complete()` either; 1024 matches the Anthropic/OpenAI default cap this layer already uses.
-25. **The smoke's paid step is `claude-haiku-4-5`, 2 calls, `maxTokens: 64`.** Rationale: the protocol requires paid calls to be tiny and capped; a tool round-trip needs exactly two calls.
+23. **The new `LLMService` / `LLMProviderClient` members are required, not optional; every uncast mock literal is updated (≈62 sites, not 8 — corrected at R1-10), and a filtered test-inclusive typecheck proves none was missed.** Rationale: an optional `chat` would let a guard forget to wrap it (silently bypassing cost caps). The churn is mechanical (three `vi.fn()` lines per site). `core/tsconfig.json` excludes tests and the test-inclusive baseline has ~950 unrelated errors, so the gate greps that output for TS2739/TS2741 naming the new members (and TS2305 on the barrel) rather than requiring a clean exit — a complete inventory prints nothing. The regression typecheck already compiles `mock-services.ts` and `router/__tests__/test-helpers.ts`, so those two must be right for `pnpm --filter @pas/regression typecheck` to pass at all.
+24. **Guard estimate for chat = every message's content + replayed `thinking` + `JSON.stringify(toolCalls)` + `JSON.stringify(tools)`; images not counted; default output 1024 tokens (revised at R1-5).** Rationale: both provider mappings transmit assistant tool-call arguments and thinking, so a replayed history with 100k characters of arguments must reserve for them — otherwise `HouseholdLLMLimiter.checkCost` admits a paid replay past the budget; tool definitions are the dominant prompt cost on frontier models; images are not counted on `complete()` either (accepted limitation); 1024 matches the Anthropic/OpenAI default cap this layer already uses.
+25. **The smoke's paid step runs on a dedicated `anthropic-smoke` provider pinned to the literal `claude-haiku-4-5-20251001` with `sdkMaxRetries: 0`, 2 facade calls, `maxTokens: 64`, and FAILs when measured spend exceeds $0.01 (revised at R1-8).** Rationale: the protocol requires paid calls to be tiny and capped, and "capped" must be enforced, not printed; the dated id is the one priced in `MODEL_PRICING` (the bare alias would fall to the $3/$15 default rate); turning SDK retries off makes the attempt count a function of `BaseProvider` alone (worst case 6 HTTP attempts ≈ $0.005). The local steps refuse to run when `agent.model` is served by a non-local provider type, so a paid agent model cannot spend without `--anthropic`.
+26. **OpenAI-compatible output limit is model-aware: `max_completion_tokens` for ids matching `^o[1-9](-|$)` or `^gpt-5(-|$|.)`, `max_tokens` otherwise; applied to `chat()` and `complete()` (R1-4).** Rationale: openai 6.27 documents `max_tokens` as deprecated and incompatible with o-series, and the repo already prices `o3`/`o3-mini`/`o4-mini`; but many OpenAI-compatible servers (Groq, vLLM, llama-server, Ollama `/v1`) accept only `max_tokens`, so switching wholesale would break the local path. A regex on the id, not a probed table, because the rule is documented rather than observed; namespaced ids (`openai/o3-mini`) are served by routers that expect `max_tokens`.
+27. **An abort while a capability probe is pending ends the caller's wait (`abortable(probe, signal)`) but does not cancel the probe (R1-6).** Rationale: the probe is shared and cached per model; cancelling it would poison the cache for the next caller or force a second `/api/show`; letting it finish in the background costs one cheap request and keeps "one probe per model" true.
+28. **`BaseProviderOptions.sdkMaxRetries` is opt-in; production keeps the SDK default (2) on top of `BaseProvider`'s 2 (R1-8).** Rationale: D16 promises the retry schedule unchanged; the compounding (up to 9 HTTP attempts per failing paid call) is recorded as an accepted risk in open-items with a trigger, not fixed silently in a plan about chat.
+29. **A user message must carry non-whitespace text or images; the validator rejects the rest (R1-3).** Rationale: Anthropic rejects an empty text block with a 400, and a user turn with neither text nor images is meaningless on every provider; rejecting it once in `validateChatMessages` keeps the Anthropic mapper free of a "what if both are empty" branch.
+30. **The OpenAI-compatible provider gets a mandatory live run through Ollama's `/v1` endpoint on the same local model (R1-9).** Rationale: without it the only live coverage of `OpenAICompatibleProvider.doChat` was the optional llama.cpp step; Ollama's OpenAI-compatible endpoint is free, already running for the Ollama steps, and supports `tools` and the `tool` role, so it turns "optional" into "every smoke run".
 
 ## Interfaces P2 will consume (named here, built here, not extended here)
 
 - `LLMService.chat(messages, options)`, `LLMService.supportsTools(ref)`, `LLMService.supportsVision(ref)` — on `CoreServices.llm` through the guards.
-- Types: `ChatMessage`, `ChatRole`, `ToolCallRequest`, `ChatToolSpec`, `ChatOptions` (`tools`, `parallelToolCalls`, `signal`, `contextWindow`, `keepAlive`, `thinking`, `maxTokens`, `modelRef`/`tier`), `ChatResult` (`message`, `finishReason`, `usage` incl. `cacheReadTokens`, `model`, `provider`), `ChatFinishReason`, `ThinkingLevel`.
+- Types (all exported from `core/src/types/index.ts`): `ChatMessage`, `ChatRole`, `ToolCallRequest`, `ChatToolSpec`, `ChatOptions` (`tools`, `parallelToolCalls`, `signal`, `contextWindow`, `keepAlive`, `thinking`, `maxTokens`, `modelRef`/`tier`), `ChatResult` (`message`, `finishReason`, `usage` — `inputTokens`, `outputTokens`, and the unbilled `cacheCreationTokens` / `cacheReadTokens` — `model`, `provider`), `ChatUsage`, `ChatFinishReason`, `ThinkingLevel`.
 - Errors: `LLMToolsUnsupportedError` (render as "this model cannot run the agent"), `ChatMessageShapeError` (a loop bug, never user-facing), `LLMEmptyOutputError.usage`; `classifyLLMError` categories `tools-unsupported`, `aborted`.
 - Config: `SystemConfig.agent` (`model`, `visionModel?`, `thinking`, `contextWindow`, `keepAlive`).
-- Helpers: `synthesizeToolCallId()`, `TOOL_CALL_ID_RE`, `validateChatMessages()`, `serializeChatForEstimate()`, `chat-defaults.ts` constants.
+- Helpers: `synthesizeToolCallId()`, `TOOL_CALL_ID_RE`, `validateChatMessages()`, `serializeChatForEstimate()`, `abortable()`, `openAIOutputLimitField()`, `chat-defaults.ts` constants. `BaseProviderOptions.sdkMaxRetries` for callers that need a hard HTTP-attempt bound.
 - Test seam: `BaseProvider.doChat` is the single override point; P2 adds a scripted `doChat` to `core/src/testing/fixtures/stub-llm-provider.ts` for loop tests (not done here — nothing in P1 calls it).
 
 ## Review findings — acceptance checklist
@@ -3627,8 +4196,21 @@ Every finding from the plan review that was fixed in this plan's text must be **
 |---|---|---|
 | Carried: failed paid calls drop usage | Tasks 1, 2, 4 | [ ] `base-provider.test.ts` > BaseProvider records usage from a failed call (REQ-LLM-051) — all 4 tests green; mutation: comment out `recordUsageFromError` in `completeWithUsage` → the first test fails with `record … 0 times`; restore. [ ] `openai-compatible-provider.test.ts` > completeWithUsage: the existing empty-output throw now carries usage too — green |
 | Carried: trial worker tracks `chatWithUsage` | Task 8 | [ ] `provider-call-tracker.test.ts` > wrap(): also tracks chatWithUsage … — green; mutation: drop the `chatWithUsage` branch → fails with `errors` `[]`; restore. [ ] `pnpm --filter @pas/regression typecheck` exits 0 |
-| Carried: `agent.model` / `agent.vision_model` / `agent.thinking` | Task 7 | [ ] `config.test.ts` > agent settings (REQ-LLM-052, design §18) — all 7 tests green; `pas-yaml-schema.test.ts` > agent block — 6 green; mutation: change `DEFAULT_AGENT_THINKING` to `'low'` → `chat-messages.test.ts` pin test and the config defaults test both fail; restore |
-| *(plan review rounds add rows here)* | | |
+| Carried: `agent.model` / `agent.vision_model` / `agent.thinking` | Task 7 | [ ] `config.test.ts` > agent settings (REQ-LLM-052, design §18) — all 8 tests green; `pas-yaml-schema.test.ts` > agent block — 6 green; mutation: change `DEFAULT_AGENT_THINKING` to `'low'` → `chat-messages.test.ts` pin test and the config defaults test both fail; restore |
+| R1-1 cache tokens priced at the input rate | Task 5 (decision 13); Task 0 `ChatUsage` | [ ] `anthropic-provider.test.ts` > `sends tools … no cache_control anywhere` green (asserts `JSON.stringify(body)` lacks `cache_control`); `leading system messages … no cache_control` green. [ ] `usage: inputTokens is the uncached input_tokens …` and `usage: if the API ever reports cache tokens … not billed at the input rate` green (record called with `inputTokens: 10`, warn fired). Mutation: fold cache counts into `inputTokens` → the second test fails `1710` vs `10`; restore. [ ] `grep -rn cache_control core/src/services/llm/providers/anthropic-provider.ts` returns no hits |
+| R1-2 Ollama vision flag opened `complete()` | Tasks 2, 3 (decision 7) | [ ] `ollama-provider.test.ts` > `supportsVision (provider-wide, the complete() gate) stays false …` green (`generate` and `show` not called). [ ] `base-provider.test.ts` > `the chat gate is per model only: complete() keeps the provider-wide gate …` green. [ ] `refuses images for a model whose /api/show lacks vision …` and `sends user images as base64 strings` green. [ ] `vision-support.test.ts` passes without edits |
+| R1-3 empty user text block with images | Tasks 0, 5 (decision 29) | [ ] `anthropic-provider.test.ts` > `a captionless photo sends the image block only …` green; mutation: unconditional text push → fails; restore. [ ] `chat-messages.test.ts` > `rejects a user message with neither text nor images` and `accepts a captionless photo` green |
+| R1-4 `max_tokens` on o-series | Task 4 (decision 26) | [ ] `model-capabilities.test.ts` > `openAIOutputLimitField` — all 11 `it.each` rows green. [ ] `openai-compatible-provider.test.ts` > `o-series models get max_completion_tokens and no max_tokens on chat`, `non-o-series models keep max_tokens`, `complete() uses the same model-aware output-limit field` green; mutation: revert `doChat` to `max_tokens: maxTokens` → the first fails; restore |
+| R1-5 guard estimate ignores tool-call history | Tasks 0, 6 (decision 24) | [ ] `chat-messages.test.ts` > `counts assistant tool-call arguments: a 100k-character tool-call history estimates ≥ 100k characters` and `counts replayed assistant thinking …` green. [ ] `llm-guard.test.ts` > `reserves an estimate that grows with replayed tool-call arguments (R1-5 …)` green (`estBig - estSmall > 0.02`); mutation: serializer back to `messages.map(m => m.content)` → both the 100k test and the guard test fail; restore |
+| R1-6 abort during capability probe | Tasks 0, 2, 3 (decision 27) | [ ] `chat-messages.test.ts` > `abortable` — 3 green. [ ] `base-provider.test.ts` > `an abort while the capability probe is still pending rejects at once …` green. [ ] `ollama-provider.test.ts` > `an abort while /api/show is still pending rejects at once; the probe result is still cached …` green (`show` called once); mutation: replace `abortable(this.supportsTools(model), options.signal)` with the bare probe → both abort tests hang/fail on timeout; restore |
+| R1-7 validator gaps | Task 0 | [ ] `chat-messages.test.ts` > `rejects images on a leading system message too`, `rejects a second tool result for an id that was already answered`, `rejects a user turn while an assistant tool call is still unanswered`, `rejects a history that ends with an unanswered assistant tool call`, `accepts two tool calls answered in either order` — all green; mutation: delete `assertNoPending(messages.length)` → the end-of-history test fails; restore |
+| R1-8 smoke not pinned / cap not enforced / SDK retries | Tasks 4, 5, 9, 10 (decisions 25, 28) | [ ] `anthropic-provider.test.ts` > `sdkMaxRetries is forwarded … absent → not passed` green; same test in `openai-compatible-provider.test.ts` green. [ ] `scripts/llm-chat-smoke.ts` contains `HAIKU = 'claude-haiku-4-5-20251001'`, `PAID_SPEND_CAP_USD = 0.01`, `sdkMaxRetries: 0`, and the `isLocalProvider(agentProviderType)` refusal (`grep -n "HAIKU =\|PAID_SPEND_CAP_USD\|sdkMaxRetries: 0\|isLocalProvider(agentProviderType)" scripts/llm-chat-smoke.ts` → 4 hits). [ ] Recorded STEP 7 line shows `(cap $0.01)` and spend ≤ 0.01. [ ] Manual negative: set `agent.model` to `{provider: anthropic, model: …}` in a scratch `pas.yaml` and run the smoke → exits 2 before any step |
+| R1-9 smoke PASS predicates | Tasks 9, 10 (decision 30) | [ ] Recorded run: STEP 1 line shows `supportsTools=true supportsVision=true`; STEP 3 line shows `<n> ms (limit 5000)`; STEP 8 `openai-compatible (ollama /v1) tool round-trip: PASS` with both usages printed. [ ] `grep -n "tools && vision\|elapsed < 5000\|roundTrip(8" scripts/llm-chat-smoke.ts` → 3 hits |
+| R1-10 mock inventory + typecheck authority | Task 6 (decision 23) | [ ] The Step 1 grep output at execution time is pasted into the phase record with its count. [ ] Task 6 Step 4 filtered gate prints nothing (paste the empty output + the unfiltered error count for context). [ ] `pnpm --filter @pas/regression typecheck` exits 0 |
+| R1-11 barrel exports | Task 0 | [ ] `chat-messages.test.ts` imports its types from `../../../types/index.js` and the Task 6 filtered gate shows no `TS2305` for it. [ ] `grep -c "ChatMessage,\|ChatOptions,\|ChatResult,\|ChatUsage,\|ChatToolSpec,\|ToolCallRequest,\|ChatFinishReason,\|ThinkingLevel,\|ChatRole,\|LLMImage," core/src/types/index.ts` → 10 |
+| R1-12 sanitizer test with zero assertions | Task 7 | [ ] `config.test.ts` > `the loader rejects type-invalid agent values loudly` green (rejects `/Invalid pas.yaml configuration/`). [ ] `buildAgentConfig sanitizes values that bypass the schema …` green; mutation: make `sanitizeThinking` return the raw value → fails on `thinking: 'banana'`; restore |
+| R1-13 "before any network call" | Tasks 0, 1, 2, 11 | [ ] `grep -rn "before any network call" core/src/services/llm core/src/types docs/urs.md .claude/skills/pas-llm-architecture/SKILL.md` returns only the `validateChatMessages` doc comment (validation truly precedes every request). [ ] `ollama-provider.test.ts` > `refuses tools for a model whose /api/show lacks tools, before calling chat` green — asserts `show` ran and `chat` did not |
+| R1-14 120 s pin + recount method | Tasks 0, 3, 11 | [ ] `chat-messages.test.ts` pin test asserts `DEFAULT_OLLAMA_TIMEOUT_MS === 120_000`; `ollama-provider.test.ts` > `the per-call fetch still enforces the 120 s HTTP timeout …` green (fake timers: not aborted at 119 999 ms, aborted at 120 000 ms). [ ] `grep -n "120_000" core/src/services/llm/providers/ollama-provider.ts` → no hits (constant imported). [ ] URS totals recounted from `p1-tests-<sha>.json` (`jq` command in Task 11 Step 1); the JSON file is saved in the evidence dir |
 
 ## Implementation notes from review
 
@@ -3636,8 +4218,10 @@ Non-critical items to handle **during execution**: fix each one, or re-home it p
 
 - **N1 — live smoke re-run rule.** Any commit in the code-review loop that touches `core/src/services/llm/providers/**`, `core/src/services/llm/chat-messages.ts`, or `core/src/services/llm/index.ts` re-runs Task 10 Step 1 (and Step 2 when the Anthropic provider changed) and appends the run to the findings doc. Check: the findings doc lists one run per such commit. (P0 lesson R6-1.)
 - **N2 — `parseArguments` duplication.** Ollama and OpenAI-compatible providers each carry a six-line `parseArguments`; if both remain identical after the review loop, the simplify pass moves one copy to `chat-messages.ts`. Check: `grep -rn "function parseArguments" core/src/services/llm` returns one hit after simplify, or a note why two were kept.
-- **N3 — `vision-support.test.ts` assumptions.** If any existing test asserts `OllamaProvider.supportsVision === false`, update it to the model-driven behaviour and cite REQ-LLM-046 in the test name; do not weaken the provider-wide gate tests for llama.cpp.
+- **N3 — `vision-support.test.ts` must pass untouched.** `OllamaProvider.supportsVision` stays `false` (R1-2, decision 7); if any test in that file fails, the provider-wide flag was changed by mistake — fix the provider, not the test. Check: `npx vitest run --project core core/src/services/llm/__tests__/vision-support.test.ts` green with `git diff --quiet -- core/src/services/llm/__tests__/vision-support.test.ts`.
 - **N4 — absolutes in the diff.** Before the final review round, grep the diff for "always", "never", "every" and confirm each is backed by a test named in the URS entry or remove the word (protocol §7).
+- **N5 — re-run the mock-site enumeration at execution time.** The ≈62-site count is from HEAD `056abdf`; main may have moved. Run the Task 6 grep first, update every hit, then run the filtered gate. Check: the gate prints nothing; paste both outputs into the phase record.
+- **N6 — Ollama `/v1` tool support.** Smoke step 8 assumes Ollama's OpenAI-compatible endpoint accepts `tools` and the `tool` role for `qwen3.8:27b-mlx` (it does for Ollama ≥ 0.3). If the installed server rejects them, that is a finding to record in the smoke doc and raise at the gate — not a reason to make step 8 optional. Check: `curl -s localhost:11434/api/version` recorded in the findings doc.
 
 ## Plan review log
 
@@ -3645,4 +4229,19 @@ Disposition ledger for plan review rounds (`docs/review-protocol.md` §5). Ids a
 
 | Round | Reviewer | Finding | Disposition |
 |---|---|---|---|
-| | | | |
+| R1 | Codex `gpt-6.1-sol` medium (`/Users/mdittler/Projects/pas-q4-review-evidence/plan-review-r1.md`, against HEAD `056abdf`) | R1-1 (critical) cache tokens priced at the base input rate — confirmed (`cost-tracker.ts:392` one rate; `model-pricing.ts` input/output only; 1.25×/0.1× per Anthropic docs) | **fixed-in-plan** — no `cache_control` in P1; `ChatUsage.inputTokens` = uncached `input_tokens`, cache counts carried separately, unbilled, warned if non-zero (decision 13; Tasks 0, 5; D7). Caching itself → P2: open-items "Agent Runtime deferrals" item 9 + queue *Carried items — Q5 · P2* |
+| R1 | Codex | R1-2 (critical) `OllamaProvider.supportsVision = true` opens `complete()` whose `generate` sends no images — confirmed (`ollama-provider.ts:55`, `base-provider.ts:76`) | **fixed-in-plan** — vision gated per path: `supportsVision` stays `false`; chat uses `supportsVisionModel` only (decision 7; Tasks 2, 3; D5, D16); tests prove `complete()` unchanged |
+| R1 | Codex | R1-3 (critical) empty user text block beside image blocks → Anthropic 400 — confirmed (mapper pushed text unconditionally) | **fixed-in-plan** — text block only when non-empty; validator rejects a user turn with neither text nor images (decision 29; Tasks 0, 5; D2, D7) |
+| R1 | Codex | R1-4 (critical) unconditional `max_tokens` rejected by o-series — confirmed (openai 6.27 `completions.d.ts:1285`; `model-pricing.ts` lists `o3`, `o3-mini`, `o4-mini`) | **fixed-in-plan** — `openAIOutputLimitField` + typed `outputLimit()` spread on `doChat` and `doComplete` (decision 26; Task 4; D6, D16) |
+| R1 | Codex | R1-5 (critical) guard estimate omits tool-call arguments and thinking — confirmed (100,055-char history estimated as 5 chars) | **fixed-in-plan** — `serializeChatForEstimate` includes `thinking` and `JSON.stringify(toolCalls)`; 100k-char tests at helper and guard level (decision 24; Tasks 0, 6; D1) |
+| R1 | Codex | R1-6 (major) abort during a pending `/api/show` probe waits for the 120 s timeout — confirmed | **fixed-in-plan** — `abortable(probe, signal)` around both capability waits; probe finishes and caches in the background (decision 27; Tasks 0, 2, 3; D9) |
+| R1 | Codex | R1-7 (major) validator accepts system images, duplicate tool results, unanswered tool calls — confirmed | **fixed-in-plan** — validator rewritten: system prefix validated, ids consumed exactly once, pending calls asserted before the next non-tool message and at end of history (Task 0; D2) |
+| R1 | Codex | R1-8 (major) smoke doesn't pin Haiku, doesn't enforce the cap, SDK retries on, paid `agent.model` spends without `--anthropic` — confirmed (`anthropic-provider.ts:48` no `maxRetries`; SDK default 2) | **fixed-in-plan** — dedicated `anthropic-smoke` provider pinned to `claude-haiku-4-5-20251001`, `BaseProviderOptions.sdkMaxRetries` (0 in the smoke, unset in production), spend cap FAIL at $0.01, exit 2 on a non-local `agent.model` (decisions 25, 28; Tasks 4, 5, 9, 10; D14). SDK/BaseProvider retry compounding recorded as an Accepted Risk (Task 11) |
+| R1 | Codex | R1-9 (minor) smoke PASS predicates: step 1 ignores vision, step 3 ignores its 5 s limit, llama.cpp step makes one call, no mandatory OpenAI-compatible run — confirmed | **fixed-in-plan** — predicates enforce tools∧vision and `< 5000 ms`; shared `roundTrip()` makes both calls; mandatory step 8 via Ollama `/v1`; llama.cpp step 9 full round-trip (decision 30; Tasks 9, 10; D14) |
+| R1 | Codex | R1-10 (minor) mock inventory incomplete; fallback tsconfig excludes tests — confirmed, and understated: the grep finds ≈62 uncast literals (core + apps/food); the test-inclusive baseline has 948 errors | **fixed-in-plan** — grep-driven inventory, `core/tsconfig.tests.json`, filtered gate on TS2739/TS2741/TS2305 for the new members (decision 23; Task 6) |
+| R1 | Codex | R1-11 (minor) `core/src/types/index.ts` lacks the chat types — confirmed (`index.ts:73` block) | **fixed-in-plan** — barrel exports added in Task 0; `chat-messages.test.ts` imports through the barrel; gate greps TS2305 (Task 0; D1) |
+| R1 | Codex | R1-12 (minor) sanitizer test can pass with zero assertions — confirmed | **fixed-in-plan** — `buildAgentConfig` exported and asserted directly; the loader's schema rejection asserted separately (Task 7) |
+| R1 | Codex | R1-13 (minor) "before any network call" contradicts the `/api/show` probe — confirmed | **fixed-in-plan** — contract reworded to "before any inference call" in `LLMService`, `LLMToolsUnsupportedError`, `BaseProvider`, REQ-LLM-049, D8, decision 3, the skill text; `validateChatMessages`' own comment keeps "network" because validation precedes every request |
+| R1 | Codex | R1-14 (minor) no 120 s pin test; smoke step 3 only prints its time; `grep -c "it("` recount misses `it.each` — confirmed | **fixed-in-plan** — `DEFAULT_OLLAMA_TIMEOUT_MS` pinned in `chat-defaults.ts` + fake-timer test on the per-call fetch; step 3 enforces `< 5000 ms`; URS recount from the vitest JSON reporter (Tasks 0, 3, 9, 11) |
+| R1 | — | Side note from the review: decision 12's "only legal encoding" rationale was inaccurate (Anthropic merges consecutive same-role messages) | Rationale corrected in decision 12; folding kept |
+| R1 | — | **Outcome** | 14/14 findings fixed-in-plan (5 criticals, 3 majors, 6 minors), each with an acceptance-checklist row; one deferral (prompt caching → P2) with open-items + queue entries; nothing declined. Ready for a confirming round |
