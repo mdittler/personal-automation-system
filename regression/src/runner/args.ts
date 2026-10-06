@@ -46,6 +46,11 @@ export { SAFE_RUN_ID_RE as RUN_ID_RE };
 export interface CliOptions {
 	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall' | 'agent';
 	rerunIds?: Set<string>;
+	/**
+	 * Run only these case ids (after the bucket filter); unknown ids are rejected
+	 * by the orchestrator. CLI-only — the GUI spawn allowlist does not forward it.
+	 */
+	caseIds?: Set<string>;
 	dryRun: boolean;
 	json: boolean;
 	help: boolean;
@@ -54,6 +59,8 @@ export interface CliOptions {
 	noCache: boolean;
 	/** Move the cache to a dated archive and exit (REQ-REG-027). */
 	archiveCache: boolean;
+	/** Agent bucket: trials per task (1-10, default 3); the verdict is pass^repeats. */
+	repeats: number;
 	modelMatrix?: ModelMatrix;
 	judgeModel?: ModelRef;
 	/** Caller-supplied run UUID. When absent and `noManifest === false`,
@@ -77,6 +84,8 @@ Usage:
   pnpm test:regression -- --bucket=<b> Run only cases with bucket=<b> (routing|receipt|chatbot|recall|agent).
   pnpm test:regression -- --rerun <id> Force fresh dispatch for case <id> (repeatable).
   pnpm test:regression -- --rerun=<id> Same, in equals form (used by GUI subprocess).
+  pnpm test:regression -- --case=<id>  Run only case <id> (repeatable; combines with --bucket). Unknown ids are an error.
+  pnpm test:regression -- --repeats=<n> Agent bucket: trials per task (1-10, default 3); verdict is pass^n.
   pnpm test:regression -- --model-matrix=<list>
                                        Override tier model IDs. Forms:
                                          provider/model[,provider/model[,provider/model]]
@@ -116,6 +125,15 @@ function validateRerunId(v: string): string {
 	return v;
 }
 
+function validateCaseId(v: string): string {
+	if (!RERUN_ID_RE.test(v)) {
+		throw new Error(
+			`--case requires an id matching ${RERUN_ID_RE.source} (got: ${JSON.stringify(v)})`,
+		);
+	}
+	return v;
+}
+
 const MAX_MANIFEST_DIR_LEN = 1024;
 
 function validateManifestDirValue(v: string): string {
@@ -144,9 +162,11 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 		listOnly: false,
 		noCache: false,
 		archiveCache: false,
+		repeats: 3,
 		noManifest: false,
 	};
 	const rerunIds = new Set<string>();
+	const caseIds = new Set<string>();
 	let i = 0;
 	// pnpm's `--` separator is sometimes forwarded to the script depending on
 	// the pnpm version. Skip a single leading `--` so users don't have to
@@ -186,6 +206,16 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 			i++;
 			continue;
 		}
+		if (a.startsWith('--repeats=')) {
+			const v = a.slice('--repeats='.length);
+			const n = Number(v);
+			if (!/^\d+$/.test(v) || n < 1 || n > 10) {
+				throw new Error(`--repeats must be an integer from 1 to 10 (got: ${v})`);
+			}
+			opts.repeats = n;
+			i++;
+			continue;
+		}
 		if (a.startsWith('--bucket=')) {
 			const v = a.slice('--bucket='.length);
 			if (!isValidBucket(v)) {
@@ -217,6 +247,22 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 				throw new Error('--rerun requires an id (e.g. --rerun food-save-recipe)');
 			}
 			rerunIds.add(validateRerunId(v));
+			i += 2;
+			continue;
+		}
+		if (a.startsWith('--case=')) {
+			const v = a.slice('--case='.length);
+			if (!v) throw new Error('--case requires an id (e.g. --case=agent-grocery-list)');
+			caseIds.add(validateCaseId(v));
+			i++;
+			continue;
+		}
+		if (a === '--case') {
+			const v = argv[i + 1];
+			if (!v || v.startsWith('--')) {
+				throw new Error('--case requires an id (e.g. --case agent-grocery-list)');
+			}
+			caseIds.add(validateCaseId(v));
 			i += 2;
 			continue;
 		}
@@ -292,6 +338,7 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 		throw new Error(`unknown flag: ${a}`);
 	}
 	if (rerunIds.size > 0) opts.rerunIds = rerunIds;
+	if (caseIds.size > 0) opts.caseIds = caseIds;
 	return opts;
 }
 

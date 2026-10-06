@@ -28,6 +28,7 @@ import {
 	composeLLMService,
 	findRepoRoot,
 	resolveTierModelIds,
+	resolveTierRefs,
 } from '../runner/build-deps.js';
 
 let tempDir: string;
@@ -320,6 +321,38 @@ describe('resolveTierModelIds — transient override (Batch 0)', () => {
 		});
 		expect(ids.standard).toBe('override-standard');
 		expect(ids.fast).toBe('persisted-fast'); // non-overridden tier untouched
+	});
+});
+
+describe('resolveTierRefs — reconcile against available providers (review C13/C20)', () => {
+	it('a saved tier whose provider is unavailable reverts to the configured default', async () => {
+		const { writeYamlFile } = await import('@core/utils/yaml.js');
+		const logger = pino({ level: 'silent' });
+		const config = makeConfig();
+		await writeYamlFile(join(config.dataDir, 'system', 'model-selection.yaml'), {
+			standard: { provider: 'ghost', model: 'saved-standard' },
+			fast: { provider: 'stub', model: 'persisted-fast' },
+		});
+		const unreconciled = await resolveTierRefs(config, logger);
+		expect(unreconciled.standard).toEqual({ provider: 'ghost', model: 'saved-standard' });
+		const reconciled = await resolveTierRefs(config, logger, undefined, new Set(['stub']));
+		expect(reconciled.standard).toEqual({ provider: 'stub', model: 'stub-model' });
+		expect(reconciled.fast).toEqual({ provider: 'stub', model: 'persisted-fast' });
+	});
+});
+
+describe('build-deps — agent trial runner wiring (REQ-REG-AGENT-002)', () => {
+	it('dry-run deps stub the agent trial runner to throw if invoked', async () => {
+		const deps = buildDryRunDeps();
+		await expect(
+			deps.agentTrialRunner?.({
+				caseId: 'agent-x',
+				trial: 1,
+				repeats: 1,
+				payload: { turns: [{ text: 'q' }] },
+				expectation: { set: 'regression', category: 'no-tool' },
+			}),
+		).rejects.toThrow(/agent trials unavailable/);
 	});
 });
 

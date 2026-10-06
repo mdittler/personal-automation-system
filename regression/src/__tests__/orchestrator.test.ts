@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RubricJudgeLLM } from '../oracles/rubric.js';
+import type { AgentTrialRunner } from '../runner/case-runners/agent-runner.js';
 import type { RecallAdapter } from '../runner/dispatch.js';
 import { runCli, runSuite } from '../runner/index.js';
 import { VERDICT } from '../shared/types.js';
@@ -795,5 +796,183 @@ describe('runCli --archive-cache', () => {
 		expect(res.exitCode).toBe(0);
 		expect(out.join('')).toMatch(/Archived cache to /);
 		expect(opts.classifiers.foodShadow).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('runSuite — agent bucket', () => {
+	const agentCaseSrc = (id: string) => `
+		import type { PersonaCase } from '${TYPES_PATH.replace(/'/g, "\\'")}';
+		const c: PersonaCase = {
+			id: '${id}', description: '', bucket: 'agent', coverage: ['coverage.ts'],
+			inputs: [{ payload: { turns: [{ text: 'q' }] },
+				expected: { set: 'regression', category: 'single-fact', facts: [{ kind: 'number', value: 57.35, label: 'total' }] } }],
+			oracle: 'outcome', budgetUsd: 1,
+		};
+		export default c;
+	`;
+	const passTrial = vi.fn(async () => ({
+		verdict: 'pass' as const,
+		details: 'ok',
+		transcript: 'It was $57.35',
+		costUsd: 0,
+		tokenIn: 0,
+		tokenOut: 0,
+		durationMs: 1,
+	}));
+
+	it('dispatches agent cases through the trial runner with the configured repeats', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), agentCaseSrc('agent-a'));
+		passTrial.mockClear();
+		const outcome = await runSuite(baseOpts({ agentTrialRunner: passTrial, agentRepeats: 2 }));
+		expect(passTrial).toHaveBeenCalledTimes(2);
+		expect(outcome.results[0]!.verdict).toBe(VERDICT.pass);
+	});
+
+	it('a different repeats value is a different cache key', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), agentCaseSrc('agent-a'));
+		const one = await runSuite(baseOpts({ agentTrialRunner: passTrial, agentRepeats: 1 }));
+		const two = await runSuite(baseOpts({ agentTrialRunner: passTrial, agentRepeats: 2 }));
+		expect(one.results[0]!.cacheKey).not.toBe(two.results[0]!.cacheKey);
+		expect(two.results[0]!.source).toBe('fresh');
+	});
+
+	it('throws a clear error when an agent case is present without a trial runner', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), agentCaseSrc('agent-a'));
+		await expect(runSuite(baseOpts())).rejects.toThrow(/agentTrialRunner/);
+	});
+
+	it('relays every trial meter as a heartbeat with case id and trial number (review C25)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), agentCaseSrc('agent-a'));
+		const beats: unknown[] = [];
+		const metering: AgentTrialRunner = async (_req, hooks) => {
+			hooks?.onMeter?.({ costUsd: 0.01, tokenIn: 5, tokenOut: 2 });
+			return passTrial();
+		};
+		await runSuite(
+			baseOpts({
+				agentTrialRunner: metering,
+				agentRepeats: 2,
+				onHeartbeat: (h) => beats.push(h),
+			}),
+		);
+		expect(beats).toEqual([
+			{ caseId: 'agent-a', trial: 1, repeats: 2, costUsd: 0.01, tokenIn: 5, tokenOut: 2 },
+			{ caseId: 'agent-a', trial: 2, repeats: 2, costUsd: 0.01, tokenIn: 5, tokenOut: 2 },
+		]);
+	});
+
+	it('runCli --json writes heartbeat NDJSON lines before the case-result (review C25)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), agentCaseSrc('agent-a'));
+		const out: string[] = [];
+		const metering: AgentTrialRunner = async (_req, hooks) => {
+			hooks?.onMeter?.({ costUsd: 0.01, tokenIn: 5, tokenOut: 2 });
+			return passTrial();
+		};
+		await runCli(
+			['--json', '--bucket=agent', '--repeats=1'],
+			baseOpts({ agentTrialRunner: metering }),
+			{
+				stdout: (s) => out.push(s),
+			},
+		);
+		const types = out
+			.join('')
+			.trim()
+			.split('\n')
+			.map((l) => (JSON.parse(l) as { type: string }).type);
+		expect(types).toEqual(['heartbeat', 'case-result', 'summary']);
+		expect(JSON.parse(out[0]!)).toMatchObject({
+			type: 'heartbeat',
+			caseId: 'agent-a',
+			trial: 1,
+			repeats: 1,
+			costUsd: 0.01,
+		});
+	});
+
+	it('runCli without --json keeps heartbeats off stdout (stderr progress line instead)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), agentCaseSrc('agent-a'));
+		const out: string[] = [];
+		const err: string[] = [];
+		const metering: AgentTrialRunner = async (_req, hooks) => {
+			hooks?.onMeter?.({ costUsd: 0.01, tokenIn: 5, tokenOut: 2 });
+			return passTrial();
+		};
+		await runCli(['--bucket=agent', '--repeats=1'], baseOpts({ agentTrialRunner: metering }), {
+			stdout: (s) => out.push(s),
+			stderr: (s) => err.push(s),
+		});
+		expect(out.join('')).not.toContain('heartbeat');
+		expect(err.join('')).toMatch(/agent heartbeat: agent-a trial 1\/1 \$0\.0100/);
+	});
+
+	it('run-budget pre-check prices agent cases as per-turn estimate x turns x repeats (review C9)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), agentCaseSrc('agent-a'));
+		const never: AgentTrialRunner = vi.fn(async () => passTrial());
+		// 0.01 per turn x 1 turn x 3 repeats = 0.03 > 0.02 remaining → skipped without dispatch.
+		const outcome = await runSuite(
+			baseOpts({
+				agentTrialRunner: never,
+				agentRepeats: 3,
+				maxRunBudgetUsd: 0.02,
+				estimateUsd: () => 0.01,
+			}),
+		);
+		expect(outcome.results[0]!.verdict).toBe(VERDICT.budgetExceeded);
+		expect(never).not.toHaveBeenCalled();
+	});
+
+	it('runCli --dry-run prices agent cases through estimateAgentCaseUsd (review C9/C26)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), agentCaseSrc('agent-a'));
+		const out: string[] = [];
+		await runCli(
+			['--dry-run', '--bucket=agent', '--repeats=3'],
+			baseOpts({ estimateUsd: () => 0.01 }),
+			{ stdout: (s) => out.push(s) },
+		);
+		expect(out.join('')).toContain('| estimated cost upper-bound (USD) | 0.030000 |');
+	});
+
+	it('caps the case allowance at the run budget remaining (review C15)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), agentCaseSrc('agent-a'));
+		const spend: AgentTrialRunner = vi.fn(async () => ({
+			verdict: 'pass' as const,
+			details: 'ok',
+			transcript: '',
+			costUsd: 0.03,
+			tokenIn: 0,
+			tokenOut: 0,
+			durationMs: 1,
+		}));
+		// Case budget is $1, run budget leaves $0.05: trial 1 ($0.03) fits, trial 2 would not.
+		const outcome = await runSuite(
+			baseOpts({
+				agentTrialRunner: spend,
+				agentRepeats: 3,
+				maxRunBudgetUsd: 0.05,
+				estimateUsd: () => 0.001,
+			}),
+		);
+		expect(outcome.results[0]!.verdict).toBe(VERDICT.budgetExceeded);
+		expect(spend).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe('runSuite — caseFilter (review C23)', () => {
+	it('dispatches only the named cases and rejects unknown ids', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		await writeFile(join(casesDir, 'b.case.ts'), oneRoutingCase('b-id'));
+		const outcome = await runSuite(baseOpts({ caseFilter: new Set(['b-id']) }));
+		expect(outcome.results.map((r) => r.caseId)).toEqual(['b-id']);
+		await expect(runSuite(baseOpts({ caseFilter: new Set(['nope']) }))).rejects.toThrow(
+			/unknown case id\(s\): nope/,
+		);
+	});
+
+	it('runCli --case=<id> reaches runSuite as the case filter', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		await writeFile(join(casesDir, 'b.case.ts'), oneRoutingCase('b-id'));
+		const r = await runCli(['--case=a-id'], baseOpts(), { stdout: () => {} });
+		expect(r.outcome!.results.map((x) => x.caseId)).toEqual(['a-id']);
 	});
 });

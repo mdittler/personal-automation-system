@@ -29,10 +29,12 @@ import type { TierModelSnapshot } from '@core/types/regression.js';
 import { type Logger, pino } from 'pino';
 import { todayInTimezone } from '../shared/cache-key.js';
 import type { EstimateUsdFn } from '../shared/types.js';
+import { WORKER_TIMEOUT_MS, spawnAgentTrial } from './agent-trial-spawn.js';
 import type { CliOptions } from './args.js';
 import { createChatbotEnvironment } from './chatbot-environment.js';
 import { buildClassifierAdapters, buildRecallAdapter } from './dispatch.js';
 import type { RunCliDeps } from './index.js';
+import { createProviderRegistry } from './provider-registry.js';
 import type { TierOverride } from './seeded-runtime.js';
 
 const DEFAULT_MAX_RUN_BUDGET_USD = 5.0;
@@ -93,6 +95,7 @@ interface RepoPaths {
 	configPath: string;
 	chatbotSeedJsonPath: string;
 	chatbotSeedShaPath: string;
+	agentFixturesDir: string;
 }
 
 /**
@@ -125,6 +128,7 @@ function resolveRepoPaths(): RepoPaths {
 		configPath: resolve(repoRoot, 'config', 'pas.yaml'),
 		chatbotSeedJsonPath: resolve(repoRoot, 'regression', 'fixtures', 'chatbot', 'seed.json'),
 		chatbotSeedShaPath: resolve(repoRoot, 'regression', 'fixtures', 'chatbot', 'seed.sha256'),
+		agentFixturesDir: resolve(repoRoot, 'regression', 'fixtures', 'agent'),
 	};
 }
 
@@ -165,27 +169,21 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 
 	// Compose a shared ProviderRegistry once — the LLM service AND the chatbot
 	// environment both reuse it so CostTracker delta metering stays coherent.
-	const registry = new ProviderRegistry(logger.child({ service: 'provider-registry' }));
-	const llmConfig = config.llm;
-	if (llmConfig) {
-		for (const [id, providerConfig] of Object.entries(llmConfig.providers)) {
-			const provider = createProvider(
-				id,
-				providerConfig,
-				logger.child({ service: `provider-${id}` }),
-				costTracker,
-			);
-			if (provider) registry.register(provider);
-		}
-	}
+	const registry = createProviderRegistry(config, logger, costTracker);
 
 	// Compose LLM service + resolve tier refs in parallel — both read the same
 	// model-selection.yaml independently and have no other shared state.
 	const [llm, tierRefs] = await Promise.all([
 		composeLLMService(config, costTracker, logger, registry, opts?.tierOverride),
-		resolveTierRefs(config, logger, opts?.tierOverride),
+		resolveTierRefs(config, logger, opts?.tierOverride, new Set(registry.getProviderIds())),
 	]);
 	const modelIds = tierRefsToSnapshot(tierRefs);
+	// The models every seeded runtime must run — exactly the ones `modelIds` reports.
+	const resolvedTiers: TierOverride = {
+		...(tierRefs.fast ? { fast: tierRefs.fast } : {}),
+		...(tierRefs.standard ? { standard: tierRefs.standard } : {}),
+		...(tierRefs.reasoning ? { reasoning: tierRefs.reasoning } : {}),
+	};
 	// Provider type per tier, resolved through the SAME registry the LLM
 	// service dispatches through — mirrors `compose-runtime.ts`'s
 	// `guardPriceLookup`. This is what makes an all-local matrix estimate $0.
@@ -222,7 +220,7 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 			seedShaPath: paths.chatbotSeedShaPath,
 			productionConfigPath: paths.configPath,
 			providerRegistry: registry,
-			...(opts?.tierOverride ? { tierOverride: opts.tierOverride } : {}),
+			tierOverride: resolvedTiers,
 			logger,
 		});
 		const seed = JSON.parse(await readFile(paths.chatbotSeedJsonPath, 'utf8')) as {
@@ -264,6 +262,24 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 		classifiers,
 		recallAdapter,
 		chatbotEnvFactory,
+		agentTrialRunner: (trial, hooks) =>
+			spawnAgentTrial(
+				{
+					workerPath: fileURLToPath(new URL('./agent-trial-worker.ts', import.meta.url)),
+					cwd: paths.repoRoot,
+					tsconfigPath: resolve(paths.repoRoot, 'regression', 'tsconfig.json'),
+					timeoutMs: WORKER_TIMEOUT_MS,
+					// Live worker meters → orchestrator heartbeats (review C25).
+					...(hooks?.onMeter ? { onMeter: hooks.onMeter } : {}),
+				},
+				{
+					trial,
+					fixturesDir: paths.agentFixturesDir,
+					productionConfigPath: paths.configPath,
+					repoRoot: paths.repoRoot,
+					tierOverride: resolvedTiers,
+				},
+			),
 		judgeLlm: llm,
 		judgeModelRef: opts?.judgeModelRef,
 		// Receipt bucket uses the same production LLMService instance — the
@@ -400,6 +416,9 @@ export function buildDryRunDeps(): RunCliDeps {
 			recall: throwOnRecall,
 		},
 		chatbotEnvFactory: throwOnChatbotEnv,
+		agentTrialRunner: async () => {
+			throw new Error('agent trials unavailable in dry-run/list mode');
+		},
 		// Defense in depth: dry-run never reaches the receipt arm (the
 		// orchestrator short-circuits at `dryRun: true`), but stub throws
 		// in case a future change accidentally routes through here.
@@ -453,6 +472,9 @@ export async function buildMetadataDeps(options?: { configPath?: string }): Prom
 		modelIds,
 		maxRunBudgetUsd,
 		estimateUsd: () => 0,
+		agentTrialRunner: async () => {
+			throw new Error('agent trials unavailable in dry-run/list mode');
+		},
 		classifiers: {
 			foodShadow: async () => throwOnDispatch(),
 			sessionControl: async () => throwOnDispatch(),
@@ -494,6 +516,12 @@ export async function resolveTierRefs(
 	config: Awaited<ReturnType<typeof loadSystemConfig>>,
 	logger: Logger,
 	tierOverride?: TierOverride,
+	/**
+	 * When given, saved selections are reconciled against these provider ids
+	 * (as production composition does), so forwarded tiers name models that
+	 * would actually run (review C13/C20).
+	 */
+	availableProviders?: Set<string>,
 ): Promise<Readonly<Record<ModelTier, ModelRef | undefined>>> {
 	const llmConfig = config.llm;
 	const modelSelector = new ModelSelector({
@@ -511,6 +539,7 @@ export async function resolveTierRefs(
 	});
 	await modelSelector.load();
 	applyAllTransientOverrides(modelSelector, tierOverride);
+	if (availableProviders) modelSelector.reconcile(availableProviders);
 	return {
 		fast: modelSelector.getTierRef('fast'),
 		standard: modelSelector.getTierRef('standard'),
