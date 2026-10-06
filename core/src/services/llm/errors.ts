@@ -94,6 +94,8 @@ export interface LLMEmptyOutputErrorOptions {
 	maxTokens?: number;
 	/** Length in characters of the model's thinking block, when it reported one. */
 	thinkingChars?: number;
+	/** Usage the provider reported for the failed call, so it is still charged (REQ-LLM-051). */
+	usage?: { inputTokens: number; outputTokens: number };
 }
 
 /**
@@ -116,6 +118,7 @@ export class LLMEmptyOutputError extends Error {
 	readonly model: string;
 	readonly maxTokens?: number;
 	readonly thinkingChars?: number;
+	readonly usage?: { inputTokens: number; outputTokens: number };
 
 	constructor(opts: LLMEmptyOutputErrorOptions) {
 		const budget =
@@ -134,5 +137,34 @@ export class LLMEmptyOutputError extends Error {
 		this.model = opts.model;
 		this.maxTokens = opts.maxTokens;
 		this.thinkingChars = opts.thinkingChars;
+		this.usage = opts.usage;
+	}
+}
+
+export interface LLMToolsUnsupportedErrorOptions {
+	provider: string;
+	model: string;
+}
+
+/**
+ * Thrown by `chatWithUsage` **before any inference call** when the caller
+ * passed `tools` and the resolved model cannot accept native tool
+ * definitions (Ollama `/api/show` lacks `tools`; `supports_tools: false`;
+ * Google). The capability probe itself (one `/api/show` per model, cached)
+ * may run first; no `/api/chat` request is made. Deterministic and
+ * non-retryable. P2's loop renders this as "this model cannot run the agent"
+ * rather than as a provider outage.
+ */
+export class LLMToolsUnsupportedError extends Error {
+	readonly provider: string;
+	readonly model: string;
+
+	constructor(opts: LLMToolsUnsupportedErrorOptions) {
+		super(
+			`Model '${opts.model}' (provider '${opts.provider}') does not support native tool calling. Pick a tool-capable model (Ollama: \`ollama show <model>\` lists 'tools'; llama.cpp: start llama-server with --jinja and set supports_tools: true).`,
+		);
+		this.name = 'LLMToolsUnsupportedError';
+		this.provider = opts.provider;
+		this.model = opts.model;
 	}
 }

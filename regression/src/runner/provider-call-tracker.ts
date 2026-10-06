@@ -1,13 +1,14 @@
 /**
  * Provider-call tracking for the per-trial worker (REQ-REG-AGENT-002).
  *
- * Wraps every provider's `completeWithUsage` so that (a) provider-level
+ * Wraps every provider's `completeWithUsage` and `chatWithUsage` so that (a) provider-level
  * failures — which the app layer swallows into polite replies — are recorded
  * and force the trial to `error` instead of a cached `fail` (review C12), and
  * (b) calls the app started but did not await (Food's shadow classifier and
  * its repair call) can be drained before grading and before the worker exits,
- * so their spend and errors are measured (review C19). P1 extends `wrap` to
- * `chatWithUsage` when that method exists.
+ * so their spend and errors are measured (review C19). Both
+ * `completeWithUsage` and `chatWithUsage` are wrapped (P1), so the agent loop's
+ * provider errors force `error` and are never graded.
  */
 import type { LLMProviderClient } from '@core/types/llm.js';
 
@@ -21,7 +22,10 @@ export interface ProviderCallTracker {
 	readonly errors: readonly string[];
 	inFlight(): number;
 	track<T>(label: string, call: () => Promise<T>): Promise<T>;
-	wrap(provider: Pick<LLMProviderClient, 'providerId' | 'completeWithUsage'>): void;
+	wrap(
+		provider: Pick<LLMProviderClient, 'providerId' | 'completeWithUsage'> &
+			Partial<Pick<LLMProviderClient, 'chatWithUsage'>>,
+	): void;
 	drain(): Promise<void>;
 }
 
@@ -52,9 +56,14 @@ export function createProviderCallTracker(
 		inFlight: () => inFlight,
 		track,
 		wrap(provider) {
-			const original = provider.completeWithUsage.bind(provider);
+			const originalComplete = provider.completeWithUsage.bind(provider);
 			provider.completeWithUsage = (prompt, options) =>
-				track(provider.providerId, () => original(prompt, options));
+				track(provider.providerId, () => originalComplete(prompt, options));
+			if (typeof provider.chatWithUsage === 'function') {
+				const originalChat = provider.chatWithUsage.bind(provider);
+				provider.chatWithUsage = (messages, options) =>
+					track(provider.providerId, () => originalChat(messages, options));
+			}
 		},
 		/**
 		 * Resolve once provider calls have been quiet for a full settle window

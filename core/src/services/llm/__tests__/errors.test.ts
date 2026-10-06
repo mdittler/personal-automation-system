@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { LLMCostCapError, LLMRateLimitError } from '../errors.js';
+import {
+	LLMCostCapError,
+	LLMEmptyOutputError,
+	LLMRateLimitError,
+	LLMToolsUnsupportedError,
+} from '../errors.js';
 
 describe('LLMCostCapError', () => {
 	it('instanceof LLMCostCapError and Error', () => {
@@ -92,5 +97,34 @@ describe('LLMRateLimitError', () => {
 		const e = new LLMRateLimitError({ appId: 'chatbot', maxRequests: 60, windowSeconds: 3600 });
 		expect(e).toBeInstanceOf(Error);
 		expect(e).toBeInstanceOf(LLMRateLimitError);
+	});
+});
+
+describe('LLMEmptyOutputError.usage (REQ-LLM-051)', () => {
+	it('carries the provider-reported usage so BaseProvider can still charge it', () => {
+		const err = new LLMEmptyOutputError({
+			provider: 'openai',
+			model: 'gpt-4.1',
+			maxTokens: 64,
+			usage: { inputTokens: 120, outputTokens: 64 },
+		});
+		expect(err.usage).toEqual({ inputTokens: 120, outputTokens: 64 });
+	});
+
+	it('usage is optional (older call sites keep working)', () => {
+		const err = new LLMEmptyOutputError({ provider: 'ollama', model: 'x' });
+		expect(err.usage).toBeUndefined();
+	});
+});
+
+describe('LLMToolsUnsupportedError (REQ-LLM-049)', () => {
+	it('names the model and provider and says what to do', () => {
+		const err = new LLMToolsUnsupportedError({ provider: 'llama-cpp', model: 'local-model' });
+		expect(err.name).toBe('LLMToolsUnsupportedError');
+		expect(err.message).toContain("'local-model'");
+		expect(err.message).toContain("'llama-cpp'");
+		expect(err.message).toMatch(/does not support native tool calling/);
+		expect(err.provider).toBe('llama-cpp');
+		expect(err.model).toBe('local-model');
 	});
 });

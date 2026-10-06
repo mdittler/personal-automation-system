@@ -79,7 +79,7 @@ Rows are in execution order. **Depends on** names rows that must be `Done` first
 | Q2 | Food data fixes: Trader Joe's store-name re-quoting; "most recent receipt" sorts by scan time; recent-interaction paths in the old layout | Fix | Done (2026-10-05, merge of `claude/q2-food-data-fixes`; fixes 8bfb595, b5fb51c, 50fe1f4) | `docs/open-items.md` → Unfinished Corrections, "Food data bugs (found 2026-10-05)" | — |
 | Q3 | **Agent Runtime P0** — benchmark hygiene, agent bucket, baseline | Phase | Done (2026-10-06, merge of `claude/q3-agent-runtime-p0`; baseline `docs/superpowers/plans/findings/2026-10-05-agent-bucket-baseline.md`) | `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md` | Q2 (so the baseline doesn't penalise known data bugs) |
 | Q3b | Classifier accepts index answers: `parseClassifyResponse` rejects `"4"` / `"5. …"` category replies (Haiku, the default fast tier) and misroutes Food messages to the chatbot; plus Sonnet 5.5 pricing entry and PAS-relevance classifier `maxTokens: 10` truncation | Fix | Done (2026-10-06, merge of `claude/q3b-classifier-index-answers`; fix 86cc871) | `docs/open-items.md` → Unfinished Corrections, "Intent classifier rejects numbered category answers (found 2026-10-06)" | Q3 |
-| Q4 | **Agent Runtime P1** — `LLMService.chat()` with native tools; Ollama `/api/chat`, OpenAI-compatible/llama.cpp, Anthropic; capability detection; `num_ctx`, thinking (default off), keep-alive, vision; AbortSignal | Phase | Plan: needs writing | Design §5, §16 | Q3 |
+| Q4 | **Agent Runtime P1** — `LLMService.chat()` with native tools; Ollama `/api/chat`, OpenAI-compatible/llama.cpp, Anthropic; capability detection; `num_ctx`, thinking (default off), keep-alive, vision; AbortSignal | Phase | Done (2026-10-06, merge of `claude/q4-agent-runtime-p1`; smoke `docs/superpowers/plans/findings/2026-10-06-p1-chat-smoke.md`) | Design §5, §16 | Q3 |
 | Q5 | **Agent Runtime P2** — tool registry (validation, read-only facade, pinning, permission filter), `find_tools`, AgentLoop, confirmations + taint, integrity ledger, trace, ContextAssembler, core tools; `/agent` (admin, dark launch) | Phase | Plan: needs writing | Design §6–§9, §11.1, §14, §16 | Q4 |
 | Q6 | **Agent Runtime P3** — Food + Notes tools, cards, photo import via `agent.vision_model`, `PendingInputRegistry`, migration inventory | Phase | Plan: needs writing | Design §10.3, §11.2–§11.3, §16 | Q5 |
 | Q7 | **Agent Runtime P4** — cut-over: gate on the P0 baseline, origin rules, router simplification, deletions, prompt rebuild, model-journal removal, end sessions at deploy | Phase | Plan: needs writing | Design §10, §12, §13.3, §16 | Q6 |
@@ -101,6 +101,7 @@ Each item must appear in that phase's plan. Most came out of the 2026-10-05 desi
 - Agent-bucket confirmation tasks: assert nothing is written before ✅. They need P2's confirmation store and callback entry point.
 - Record outbound HTTP attempts during agent trials, and assert none on injection tasks.
 - Tool-call, step, and tool-error metrics in the agent report, sourced from the trace.
+- Anthropic prompt caching (`cache_control` on the last tool and last system block) with cache-aware cost accounting (1.25× writes, 0.1× reads) in `CostTracker`/`model-pricing.ts` and the guard estimators. P1 ships without `cache_control` and carries cache counts unbilled on `ChatUsage`. Tracked in open-items: Deferred Infrastructure Work, "Agent Runtime deferrals", item 9 (P1 plan review R1-1).
 
 **Q6 · P3**
 - Formal thinking comparison (off / low / on) on the agent bucket, scored as pass^3. The pre-P1 evidence is in `docs/superpowers/plans/findings/2026-10-05-qwen38-thinking-comparison.md`; revisit the default if thinking wins.
@@ -153,6 +154,7 @@ Commands, the brief template with the inlined severity rubric, ledger dispositio
 
 | Date | Change |
 |---|---|
+| 2026-10-06 | Q4 (Agent Runtime P1) Done; also fixed two pre-existing cost-guard gaps (modelRef pricing, image reservations) and stale Anthropic pricing. |
 | 2026-10-06 | Q1, Q2, Q3 Done. Q3b (classifier index-answer fix, found by the P0 frontier baseline) added before Q4. |
 | 2026-10-05 | Roles switched to Code Orchestrator's engine roles. Code review now runs on `gpt-6-luna` at medium (operator choice). Grok revises code instead of reviewing it. Plan review is `gpt-6.1-sol` at medium, and Fable plans. |
 | 2026-10-05 | Review & execution protocol adopted from Code Orchestrator (`docs/review-protocol.md`): finding ledger, deliverables contract, mechanical proof, votes. |

@@ -19,6 +19,16 @@ Use this when adding/changing LLM providers, modifying tier routing, plumbing LL
 
 Apps request `fast`, `standard`, or `reasoning` tier. Infrastructure maps the tier to a provider+model via `ModelSelector`. Apps never request a specific provider directly.
 
+## Chat with tools (Agent Runtime P1)
+
+- `LLMService.chat(messages, options)` is the messages+tools API; `complete()` stays for single-shot uses. Both guards wrap it. A chat reservation adds `IMAGE_INPUT_TOKEN_ALLOWANCE` (1600) input tokens per image (`estimateGuardCost` `imageCount`), and `complete()` / `completeWithMeta()` add the same allowance per `options.images` entry, priced at the serving model, so a photo call is not admitted on the output allowance alone.
+- Providers implement `doChat()`; `BaseProvider.chatWithUsage()` owns validation, capability/vision gates, retry (never on abort), temperature self-heal, and cost recording. Google has no chat.
+- Capability gating is per model: `llm.supportsTools(ref)` / `llm.supportsVision(ref)`. Ollama probes `/api/show` (cached); openai-compatible/llama-cpp read `supports_tools`; Anthropic is always capable. Tools on an incapable model throw `LLMToolsUnsupportedError` before any inference call. Vision on chat is per model; `complete()` keeps the provider-wide `supportsVision` gate (Ollama: false).
+- Ollama chat always sends `num_ctx` (32768 default) and `keep_alive` (30m default), and `think: false` unless asked. Chat sends no default temperature (the Modelfile's card defaults apply) — unlike `complete()`. OpenAI-compatible requests send `max_completion_tokens` for o-series / gpt-5 ids and `max_tokens` otherwise (`openAIOutputLimitField`).
+- `ChatOptions.signal` reaches every SDK call and ends the wait on a pending capability probe. A failed call that the provider billed is still charged (`LLMEmptyOutputError.usage`).
+- No Anthropic prompt caching yet: `cache_control` waits for cache-aware pricing (P2). `ChatUsage.cacheCreationTokens` / `cacheReadTokens` are carried separately and are not billed.
+- Settings: `agent.model` (default `ollama/qwen3.8:27b-mlx`), `agent.vision_model` (paid; default the Claude reasoning/standard tier), `agent.thinking` (default `off`), `agent.context_window`, `agent.keep_alive` — `core/src/services/llm/chat-defaults.ts` is the single home for the defaults.
+
 ## Security boundary — banned imports
 
 Apps must NOT import LLM SDKs directly. The static analyzer rejects installs that import any of:

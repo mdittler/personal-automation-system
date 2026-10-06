@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { classifyLLMError, isEmptyOutputError, isParameterRejectionError } from '../llm-errors.js';
+import {
+	classifyLLMError,
+	isAbortError,
+	isEmptyOutputError,
+	isParameterRejectionError,
+} from '../llm-errors.js';
 
 describe('classifyLLMError', () => {
 	describe('standard', () => {
@@ -242,5 +247,36 @@ describe('classifyLLMError', () => {
 			const info = classifyLLMError(undefined);
 			expect(info.category).toBe('unknown');
 		});
+	});
+});
+
+describe('classifyLLMError — tools-unsupported and aborted (REQ-LLM-049, REQ-LLM-050)', () => {
+	it('classifies LLMToolsUnsupportedError by name as tools-unsupported, non-retryable', () => {
+		const info = classifyLLMError({ name: 'LLMToolsUnsupportedError', message: 'x' });
+		expect(info.category).toBe('tools-unsupported');
+		expect(info.isRetryable).toBe(false);
+		expect(info.userMessage).toMatch(/does not support tools/i);
+	});
+
+	it('classifies an AbortError as aborted, non-retryable', () => {
+		const info = classifyLLMError(new DOMException('The operation was aborted', 'AbortError'));
+		expect(info.category).toBe('aborted');
+		expect(info.isRetryable).toBe(false);
+	});
+
+	it('isAbortError is true for an AbortError by name, false for other errors and non-errors', () => {
+		expect(isAbortError(new DOMException('x', 'AbortError'))).toBe(true);
+		expect(isAbortError(Object.assign(new Error('x'), { name: 'AbortError' }))).toBe(true);
+		expect(isAbortError(new Error('boom'))).toBe(false);
+		expect(isAbortError(null)).toBe(false);
+	});
+
+	it('isAbortError is true for ANY error once the caller signal has aborted (P2-4: the SDK abort classes are named "Error")', () => {
+		const controller = new AbortController();
+		const sdkShaped = new Error('Request was aborted.'); // what openai/@anthropic-ai/sdk APIUserAbortError looks like by name
+		expect(isAbortError(sdkShaped, controller.signal)).toBe(false);
+		controller.abort();
+		expect(isAbortError(sdkShaped, controller.signal)).toBe(true);
+		expect(isAbortError(new Error('ECONNRESET'), controller.signal)).toBe(true);
 	});
 });

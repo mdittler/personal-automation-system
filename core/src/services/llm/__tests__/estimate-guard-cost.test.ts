@@ -196,3 +196,74 @@ describe('approximateTokens', () => {
 		expect(() => approximateTokens(123 as any)).toThrow();
 	});
 });
+
+it("method 'chat' is accepted and defaults the output budget to 1024 tokens when maxOutputTokens is absent", () => {
+	const chatPrices = { priceFor: () => ({ inputUsdPer1k: 0.001, outputUsdPer1k: 0.002 }) };
+	const withCap = estimateGuardCost(
+		{ method: 'chat', tier: 'fast', prompt: 'abcd', maxOutputTokens: 1024 },
+		chatPrices,
+	);
+	const withoutCap = estimateGuardCost(
+		{ method: 'chat', tier: 'fast', prompt: 'abcd' },
+		chatPrices,
+	);
+	expect(withoutCap).toBe(withCap);
+});
+
+describe('modelRef takes precedence over tier (P2-1)', () => {
+	const localFastPaidRef: PriceLookup = {
+		priceFor: () => ({ inputUsdPer1k: 0, outputUsdPer1k: 0 }), // the configured fast tier is local
+		priceForRef: (ref) =>
+			ref.provider === 'anthropic' ? { inputUsdPer1k: 0.001, outputUsdPer1k: 0.005 } : undefined,
+	};
+
+	it('prices an explicit modelRef through priceForRef even when the tier is local', () => {
+		const viaTier = estimateGuardCost(
+			{ method: 'chat', tier: 'fast', prompt: 'x'.repeat(4000) },
+			localFastPaidRef,
+		);
+		const viaRef = estimateGuardCost(
+			{
+				method: 'chat',
+				tier: 'fast',
+				prompt: 'x'.repeat(4000),
+				modelRef: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+			},
+			localFastPaidRef,
+		);
+		expect(viaTier).toBe(0);
+		// 1000 input tokens × 0.001 + 1024 output × 0.005 /1k
+		expect(viaRef).toBeCloseTo(0.001 + 1.024 * 0.005, 6);
+	});
+
+	it('a modelRef the lookup cannot price never falls back to the tier price — it takes the default reservation (or $0 on an all-local install)', () => {
+		const warn = vi.fn();
+		const est = estimateGuardCost(
+			{ method: 'chat', tier: 'fast', prompt: 'hi', modelRef: { provider: 'ghost', model: 'm' } },
+			{ ...localFastPaidRef, hasBillableProvider: () => true },
+			{ warn },
+		);
+		expect(est).toBe(0.05);
+		expect(warn).toHaveBeenCalledTimes(1);
+		const allLocal = estimateGuardCost(
+			{ method: 'chat', tier: 'fast', prompt: 'hi', modelRef: { provider: 'ghost', model: 'm' } },
+			{ ...localFastPaidRef, hasBillableProvider: () => false },
+		);
+		expect(allLocal).toBe(0);
+	});
+
+	it('a lookup without priceForRef cannot price a modelRef at all → default reservation, not the tier', () => {
+		const tierOnly: PriceLookup = { priceFor: () => ({ inputUsdPer1k: 0, outputUsdPer1k: 0 }) };
+		expect(
+			estimateGuardCost(
+				{
+					method: 'complete',
+					tier: 'fast',
+					prompt: 'hi',
+					modelRef: { provider: 'anthropic', model: 'x' },
+				},
+				tierOnly,
+			),
+		).toBe(0.05);
+	});
+});

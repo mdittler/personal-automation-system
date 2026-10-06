@@ -45,9 +45,9 @@ describe('model-pricing', () => {
 		});
 
 		it('calculates correctly for Haiku', () => {
-			// Haiku: input=0.8, output=4.0 per million tokens
+			// Haiku 4.5: input=1.0, output=5.0 per million tokens
 			const cost = estimateCallCost('claude-haiku-4-5-20251001', 2000, 1000);
-			const expected = (2000 * 0.8 + 1000 * 4.0) / 1_000_000;
+			const expected = (2000 * 1.0 + 1000 * 5.0) / 1_000_000;
 			expect(cost).toBeCloseTo(expected, 10);
 		});
 
@@ -99,8 +99,8 @@ describe('model-pricing', () => {
 
 		it('rounds result to 6 decimal places (D5)', () => {
 			// Use values that would produce floating-point imprecision
-			// Haiku: input=0.8, output=4.0 per million tokens
-			// 333 input + 777 output → (333*0.8 + 777*4.0) / 1_000_000
+			// Haiku 4.5: input=1.0, output=5.0 per million tokens
+			// 333 input + 777 output → (333*1.0 + 777*5.0) / 1_000_000
 			const cost = estimateCallCost('claude-haiku-4-5-20251001', 333, 777);
 			const str = cost.toString();
 			const decimalPart = str.split('.')[1] ?? '';
@@ -184,5 +184,34 @@ describe('model-pricing', () => {
 			);
 			expect(openaiModels.length).toBeGreaterThan(0);
 		});
+	});
+});
+
+describe('Anthropic rows match the official price list (P2-2; https://platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-06)', () => {
+	it.each([
+		['claude-fable-5-1', 10.0, 50.0],
+		['claude-opus-5-5', 4.0, 20.0],
+		['claude-opus-4-6', 5.0, 25.0],
+		['claude-sonnet-5-5', 2.0, 10.0],
+		['claude-sonnet-4-6', 3.0, 15.0],
+		['claude-sonnet-4-20250514', 3.0, 15.0],
+		['claude-haiku-4-5-20251001', 1.0, 5.0],
+	] as const)('%s is %s in / %s out (USD per MTok)', (id, input, output) => {
+		expect(MODEL_PRICING[id]).toEqual({ input, output });
+	});
+
+	it('every Anthropic row is covered by the table above (adding a claude-* row without a price assertion fails here)', () => {
+		const anthropicIds = Object.keys(MODEL_PRICING).filter((id) => id.startsWith('claude-'));
+		expect(anthropicIds.sort()).toEqual(
+			[
+				'claude-fable-5-1',
+				'claude-opus-5-5',
+				'claude-opus-4-6',
+				'claude-sonnet-5-5',
+				'claude-sonnet-4-6',
+				'claude-sonnet-4-20250514',
+				'claude-haiku-4-5-20251001',
+			].sort(),
+		);
 	});
 });

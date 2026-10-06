@@ -68,5 +68,6 @@ describe('Food proactive-send guard (Strategy B)', () => {
 	it('real: no unbridged proactive sends reachable in apps/food/src (Strategy B sweep)', () => {
 		const flagged = scanFoodProactiveSends(SRC_DIR);
 		expect(flagged, formatMessage(flagged)).toEqual([]);
-	});
+		// Builds a TypeScript program; ~2.5 s alone but over the 5 s default under the full parallel suite.
+	}, 30_000);
 });

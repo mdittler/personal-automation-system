@@ -51,3 +51,5 @@ export const DEFAULT_ALWAYS_VERIFY_INTENTS: readonly string[] = Object.freeze([
  * be protected without operator action (Codex review feedback on Task 3.2).
  */
 export const DEFAULT_MULTI_INTENT_SPLIT = true;
+
+// Agent Runtime defaults (agent.model / thinking / context_window / keep_alive) live in ../llm/chat-defaults.ts — the single home.

@@ -30,13 +30,16 @@ function makeCostTracker() {
 	};
 }
 
-function makeProvider(overrides: Partial<{ defaultModel: string; baseUrl: string }> = {}) {
+function makeProvider(
+	overrides: Partial<{ defaultModel: string; baseUrl: string; supportsTools: boolean }> = {},
+) {
 	return new LlamaCppProvider({
 		providerId: 'llama-cpp',
 		defaultModel: overrides.defaultModel ?? 'local-model',
 		logger,
 		costTracker: makeCostTracker() as never,
 		baseUrl: overrides.baseUrl ?? 'http://localhost:8080',
+		...(overrides.supportsTools !== undefined ? { supportsTools: overrides.supportsTools } : {}),
 	});
 }
 
@@ -212,5 +215,21 @@ describe('LlamaCppProvider — listModels (REQ-LLM-LLAMA-CPP-005)', () => {
 			expect(model.pricing).toBeNull();
 			expect(model.providerType).toBe('llama-cpp');
 		}
+	});
+});
+
+describe('LlamaCppProvider — tools need --jinja and an explicit flag (REQ-LLM-047)', () => {
+	it('supportsTools defaults to false', async () => {
+		await expect(makeProvider().supportsTools('local-model')).resolves.toBe(false);
+	});
+
+	it('supportsTools: true in config enables chat with tools', async () => {
+		await expect(makeProvider({ supportsTools: true }).supportsTools('local-model')).resolves.toBe(
+			true,
+		);
+	});
+
+	it('supportsVisionModel stays false (no --mmproj flag exists in pas.yaml)', async () => {
+		await expect(makeProvider().supportsVisionModel('local-model')).resolves.toBe(false);
 	});
 });

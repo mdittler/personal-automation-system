@@ -6,7 +6,7 @@
  * config interface provided to apps.
  */
 
-import type { ModelRef, ModelTier, ProviderType } from './llm.js';
+import type { ModelRef, ModelTier, ProviderType, ThinkingLevel } from './llm.js';
 import type { RegisteredUser } from './users.js';
 import type { WebhookDefinition } from './webhooks.js';
 
@@ -26,6 +26,12 @@ export interface LLMProviderConfig {
 	baseUrl?: string;
 	/** Default model ID for this provider. */
 	defaultModel?: string;
+	/**
+	 * openai-compatible / llama-cpp: whether the served model accepts native
+	 * tool definitions. Defaults: true for openai-compatible, false for
+	 * llama-cpp (llama-server needs `--jinja`). Ignored by other types.
+	 */
+	supportsTools?: boolean;
 }
 
 /** Tier-to-model assignment: which provider+model to use for each tier. */
@@ -153,6 +159,9 @@ export interface SystemConfig {
 		/** Webhook URL for dispatching execution to n8n. Empty = internal execution (default). */
 		dispatchUrl: string;
 	};
+
+	/** Agent Runtime settings (optional in type for test compat — loader always populates with defaults). */
+	agent?: AgentConfig;
 
 	/** Routing configuration (optional in type for test compat — loader always populates with defaults). */
 	routing?: {
@@ -299,4 +308,22 @@ export interface AppConfigService {
 	 * Safe to call concurrently; serialised by a per-file lock.
 	 */
 	removeOverride(userId: string, key: string): Promise<void>;
+}
+
+/** Agent Runtime model settings (design §5.3, §18). Loader always populates with defaults. */
+export interface AgentConfig {
+	/** Model that runs text turns. Default ollama/qwen3.8:27b-mlx (§18.1). */
+	model: ModelRef;
+	/**
+	 * Paid vision model for photo turns (§18.2). Default: the configured Claude
+	 * reasoning tier, else the Claude standard tier; undefined when no Claude
+	 * tier exists — P3 then declines photo turns with a plain explanation.
+	 */
+	visionModel?: ModelRef;
+	/** Reasoning effort for the agent model. Default 'off' (§18.3, measured). */
+	thinking: ThinkingLevel;
+	/** Ollama num_ctx for agent turns. Default 32768. */
+	contextWindow: number;
+	/** Ollama keep_alive for agent turns. Default '30m'. */
+	keepAlive: string;
 }

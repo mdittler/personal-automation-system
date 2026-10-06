@@ -23,6 +23,7 @@
 		"uninstall-app": "tsx core/src/cli/uninstall-app.ts",
 		"migrate-frontmatter": "tsx scripts/migrate-frontmatter.ts",
 		"load-test": "tsx scripts/load-test.ts",
+		"llm-chat-smoke": "tsx scripts/llm-chat-smoke.ts",
 		"analyze-shadow-log": "tsx scripts/analyze-shadow-log.ts",
 		"analyze-session-control-log": "tsx scripts/analyze-session-control-log.ts",
 		"chat-index-rebuild": "tsx scripts/chat-index-rebuild.ts",

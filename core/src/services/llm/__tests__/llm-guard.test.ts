@@ -3,11 +3,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LLMCompletionOptions, LLMService } from '../../../types/llm.js';
+import type {
+	ChatMessage,
+	LLMCompletionOptions,
+	LLMService,
+	ModelRef,
+} from '../../../types/llm.js';
+import { DEFAULT_LLM_SAFEGUARDS } from '../../config/defaults.js';
 import { requestContext } from '../../context/request-context.js';
 import { CostTracker } from '../cost-tracker.js';
 import { LLMCostCapError, LLMRateLimitError } from '../errors.js';
-import { LLMGuard, type LLMGuardConfig } from '../llm-guard.js';
+import type { PriceLookup } from '../estimate-guard-cost.js';
+import { HouseholdLLMLimiter } from '../household-llm-limiter.js';
+import { LLMGuard, type LLMGuardConfig, type LLMGuardOptions } from '../llm-guard.js';
 import { createMockCostTracker } from './helpers/mock-cost-tracker.js';
 import {
 	PLATFORM_NOOP_RESERVATION,
@@ -20,8 +28,20 @@ function createMockInner(): LLMService {
 	return {
 		// Default response is valid JSON so extractStructured can parse it
 		complete: vi.fn().mockResolvedValue('{"category":"test","confidence":0.9}'),
+		completeWithMeta: vi.fn().mockResolvedValue({
+			text: '{"category":"test","confidence":0.9}',
+			finishReason: 'stop',
+		}),
 		classify: vi.fn().mockResolvedValue({ category: 'test', confidence: 0.9 }),
 		extractStructured: vi.fn().mockResolvedValue({ key: 'value' }),
+		chat: vi.fn().mockResolvedValue({
+			message: { role: 'assistant', content: 'ok' },
+			finishReason: 'stop',
+			model: 'm',
+			provider: 'p',
+		}),
+		supportsTools: vi.fn(),
+		supportsVision: vi.fn(),
 	};
 }
 
@@ -424,6 +444,9 @@ describe('LLMGuard + CostTracker — unknown-model cost cap integration (Gap 8)'
 		expect(realTracker.getMonthlyAppCost('unknown-app')).toBeGreaterThan(0);
 
 		const inner: LLMService = {
+			chat: vi.fn(),
+			supportsTools: vi.fn(),
+			supportsVision: vi.fn(),
 			complete: vi.fn().mockResolvedValue('ok'),
 			classify: vi.fn(),
 			extractStructured: vi.fn(),
@@ -576,5 +599,342 @@ describe('LLMGuard + HouseholdLLMLimiter integration', () => {
 		expect(err.scope).toBe('household');
 		expect(err.maxRequests).toBe(400);
 		expect(err.windowSeconds).toBe(1800);
+	});
+});
+
+describe('LLMGuard.chat (REQ-LLM-045)', () => {
+	const USER: ChatMessage[] = [{ role: 'user', content: 'hi' }];
+
+	function makeGuard(inner: LLMService, overrides: Partial<LLMGuardOptions> = {}) {
+		return new LLMGuard({
+			inner,
+			appId: 'test-app',
+			costTracker: createMockCostTracker(),
+			config: defaultConfig,
+			logger: pino({ level: 'silent' }),
+			...overrides,
+		});
+	}
+
+	it('runs chat through the guard: rate slot committed, _appId injected, result passed through', async () => {
+		const inner = createMockInner();
+		const guard = makeGuard(inner);
+		const result = await guard.chat(USER, { maxTokens: 10 });
+		expect(result.message.content).toBe('ok');
+		expect(inner.chat).toHaveBeenCalledWith(
+			USER,
+			expect.objectContaining({ maxTokens: 10, _appId: 'test-app' }),
+		);
+		expect(guard.rateLimiter.getRemainingAttempts('test-app')).toBe(defaultConfig.maxRequests - 1);
+		guard.dispose();
+	});
+
+	it('refuses chat when the app monthly cost cap is reached (same gate as complete), without calling inner', async () => {
+		const inner = createMockInner();
+		const guard = makeGuard(inner, {
+			costTracker: createMockCostTracker(defaultConfig.monthlyCostCap),
+		});
+		await expect(guard.chat(USER)).rejects.toBeInstanceOf(LLMCostCapError);
+		expect(inner.chat).not.toHaveBeenCalled();
+		guard.dispose();
+	});
+
+	it('reserves an estimate that grows with the tool list (message text + tool JSON)', async () => {
+		const inner = createMockInner();
+		const priceLookup = { priceFor: () => ({ inputUsdPer1k: 0.001, outputUsdPer1k: 0.002 }) };
+		const small = createMockHouseholdLimiter();
+		await makeGuard(inner, {
+			householdLimiter: small as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).chat(USER);
+		const big = createMockHouseholdLimiter();
+		const bigTool = { name: 't', description: 'x'.repeat(8000), inputSchema: { type: 'object' } };
+		await makeGuard(inner, {
+			householdLimiter: big as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).chat(USER, { tools: [bigTool] });
+		const estSmall = (small.reserveEstimated as ReturnType<typeof vi.fn>).mock
+			.calls[0]?.[3] as number;
+		const estBig = (big.reserveEstimated as ReturnType<typeof vi.fn>).mock.calls[0]?.[3] as number;
+		expect(estBig).toBeGreaterThan(estSmall);
+	});
+
+	it('supportsTools / supportsVision delegate to the inner service', async () => {
+		const inner = createMockInner();
+		(inner.supportsTools as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+		const guard = makeGuard(inner);
+		await expect(guard.supportsTools({ provider: 'p', model: 'm' })).resolves.toBe(true);
+		expect(inner.supportsTools).toHaveBeenCalledWith({ provider: 'p', model: 'm' });
+		guard.dispose();
+	});
+
+	// R1-5 at the guard boundary — the estimate must see tool-call history, not
+	// just content. Lives INSIDE this describe so `makeGuard` and `USER` are in
+	// scope (P2-3: an earlier draft placed it after the closing brace -> TS2304).
+	it('reserves an estimate that grows with replayed tool-call arguments (R1-5: 100k chars of tool-call history)', async () => {
+		const inner = createMockInner();
+		const priceLookup = { priceFor: () => ({ inputUsdPer1k: 0.001, outputUsdPer1k: 0.002 }) };
+		const small = createMockHouseholdLimiter();
+		await makeGuard(inner, {
+			householdLimiter: small as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).chat(USER);
+		const big = createMockHouseholdLimiter();
+		const history: ChatMessage[] = [
+			...USER,
+			{
+				role: 'assistant',
+				content: '',
+				toolCalls: [{ id: 'call_1', name: 't', arguments: { blob: 'x'.repeat(100_000) } }],
+			},
+			{ role: 'tool', content: 'ok', toolCallId: 'call_1' },
+		];
+		await makeGuard(inner, {
+			householdLimiter: big as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).chat(history);
+		const estSmall = (small.reserveEstimated as ReturnType<typeof vi.fn>).mock
+			.calls[0]?.[3] as number;
+		const estBig = (big.reserveEstimated as ReturnType<typeof vi.fn>).mock.calls[0]?.[3] as number;
+		// 100k chars ~ 25k tokens at $0.001/1k ~ $0.025 more than the two-word prompt.
+		expect(estBig - estSmall).toBeGreaterThan(0.02);
+	});
+
+	it('reserves at least N*1600 input tokens of cost more for a chat with N images than the same chat without images, at the serving model price (R1-1)', async () => {
+		const inner = createMockInner();
+		const N = 3;
+		// Serving model is gpt-4.1 ($2/MTok input). The fast-tier price is much
+		// higher so a tier-priced reservation cannot satisfy the exact delta.
+		const servingInputUsdPer1k = 0.002;
+		const priceLookup: PriceLookup = {
+			priceFor: () => ({ inputUsdPer1k: 0.05, outputUsdPer1k: 0.15 }),
+			priceForRef: () => ({ inputUsdPer1k: servingInputUsdPer1k, outputUsdPer1k: 0.008 }),
+		};
+		const modelRef: ModelRef = { provider: 'openai', model: 'gpt-4.1' };
+		const photo = { data: Buffer.alloc(1), mimeType: 'image/png' };
+		const plain: ChatMessage[] = [
+			{ role: 'user', content: 'look' },
+			{ role: 'assistant', content: 'ok' },
+			{ role: 'user', content: 'again' },
+		];
+		const withImages: ChatMessage[] = [
+			{ role: 'user', content: 'look', images: [photo, photo] },
+			{ role: 'assistant', content: 'ok' },
+			{ role: 'user', content: 'again', images: [photo] },
+		];
+		const plainLimiter = createMockHouseholdLimiter();
+		await makeGuard(inner, {
+			householdLimiter: plainLimiter as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).chat(plain, { modelRef });
+		const imageLimiter = createMockHouseholdLimiter();
+		await makeGuard(inner, {
+			householdLimiter: imageLimiter as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).chat(withImages, { modelRef });
+		const estPlain = (plainLimiter.reserveEstimated as ReturnType<typeof vi.fn>).mock
+			.calls[0]?.[3] as number;
+		const estImages = (imageLimiter.reserveEstimated as ReturnType<typeof vi.fn>).mock
+			.calls[0]?.[3] as number;
+		const imageTokenCost = ((N * 1600) / 1000) * servingInputUsdPer1k;
+		expect(estImages - estPlain).toBeCloseTo(imageTokenCost, 6);
+	});
+
+	it('reserves at least N*1600 input tokens of cost more for a completeWithMeta with N images than the same call without images, at the serving model price (R2-1)', async () => {
+		const inner = createMockInner();
+		const N = 3;
+		const servingInputUsdPer1k = 0.002;
+		const priceLookup: PriceLookup = {
+			priceFor: () => ({ inputUsdPer1k: 0.05, outputUsdPer1k: 0.15 }),
+			priceForRef: () => ({ inputUsdPer1k: servingInputUsdPer1k, outputUsdPer1k: 0.008 }),
+		};
+		const modelRef: ModelRef = { provider: 'openai', model: 'gpt-4.1' };
+		const photo = { data: Buffer.alloc(1), mimeType: 'image/png' };
+		const plainLimiter = createMockHouseholdLimiter();
+		await makeGuard(inner, {
+			householdLimiter: plainLimiter as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).completeWithMeta('look', { modelRef });
+		const imageLimiter = createMockHouseholdLimiter();
+		await makeGuard(inner, {
+			householdLimiter: imageLimiter as unknown as HouseholdLLMLimiter,
+			priceLookup,
+		}).completeWithMeta('look', { modelRef, images: [photo, photo, photo] });
+		const estPlain = (plainLimiter.reserveEstimated as ReturnType<typeof vi.fn>).mock
+			.calls[0]?.[3] as number;
+		const estImages = (imageLimiter.reserveEstimated as ReturnType<typeof vi.fn>).mock
+			.calls[0]?.[3] as number;
+		const imageTokenCost = ((N * 1600) / 1000) * servingInputUsdPer1k;
+		expect(estImages - estPlain).toBeCloseTo(imageTokenCost, 6);
+	});
+});
+
+describe('LLMGuard prices the model that serves the request, not the default tier (P2-1)', () => {
+	const USER: ChatMessage[] = [{ role: 'user', content: 'x'.repeat(40_000) }]; // ~10k tokens
+	const PROMPT = 'x'.repeat(40_000);
+	const HAIKU: ModelRef = { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' };
+	const HOUSEHOLD = 'h1';
+	/** Fast tier is local ($0); an explicit Claude ref is paid. Mirrors createGuardPriceLookup's contract. */
+	const localFastPaidClaude: PriceLookup = {
+		hasBillableProvider: () => true,
+		priceFor: (tier) =>
+			tier === 'fast'
+				? { inputUsdPer1k: 0, outputUsdPer1k: 0 }
+				: { inputUsdPer1k: 0.003, outputUsdPer1k: 0.015 },
+		priceForRef: (ref) =>
+			ref.provider === 'anthropic'
+				? { inputUsdPer1k: 0.001, outputUsdPer1k: 0.005 }
+				: { inputUsdPer1k: 0, outputUsdPer1k: 0 },
+	};
+
+	/** Real HouseholdLLMLimiter so checkCost's arithmetic is the production one; household already at $9.99 of a $10 cap. */
+	function makeGuardNearCap(inner: LLMService, priceLookup: PriceLookup = localFastPaidClaude) {
+		const costTracker = createMockCostTracker(0, 0, 9.99);
+		const householdLimiter = new HouseholdLLMLimiter({
+			costTracker,
+			config: { ...DEFAULT_LLM_SAFEGUARDS, defaultHouseholdMonthlyCostCap: 10 },
+			logger: pino({ level: 'silent' }),
+		});
+		return new LLMGuard({
+			inner,
+			appId: 'test-app',
+			costTracker,
+			config: defaultConfig,
+			logger: pino({ level: 'silent' }),
+			householdLimiter,
+			priceLookup,
+		});
+	}
+
+	it('household budget — chat: a paid explicit modelRef on a local fast tier is refused by HouseholdLLMLimiter.checkCost when the household is just under its cap (the fast-tier estimate would have been $0 and admitted it)', async () => {
+		const inner = createMockInner();
+		const guard = makeGuardNearCap(inner);
+		await requestContext.run({ userId: 'u1', householdId: HOUSEHOLD }, async () => {
+			// Control: no modelRef -> fast tier -> local -> $0 estimate -> admitted.
+			await expect(guard.chat(USER)).resolves.toBeDefined();
+			// The paid model: ~10k input tokens x $0.001/1k + 1024 x $0.005/1k ~ $0.015 -> 9.99 + 0.015 >= 10 -> refused.
+			await expect(guard.chat(USER, { modelRef: HAIKU })).rejects.toMatchObject({
+				scope: 'household',
+			});
+		});
+		expect(inner.chat).toHaveBeenCalledTimes(1);
+		guard.dispose();
+	});
+
+	it('household budget — complete(): the same bypass existed at HEAD on the completion path and is closed too', async () => {
+		const inner = createMockInner();
+		const guard = makeGuardNearCap(inner);
+		await requestContext.run({ userId: 'u1', householdId: HOUSEHOLD }, async () => {
+			await expect(guard.complete(PROMPT)).resolves.toBeDefined();
+			await expect(guard.complete(PROMPT, { modelRef: HAIKU })).rejects.toMatchObject({
+				scope: 'household',
+			});
+			await expect(guard.completeWithMeta(PROMPT, { modelRef: HAIKU })).rejects.toMatchObject({
+				scope: 'household',
+			});
+		});
+		expect(inner.complete).toHaveBeenCalledTimes(1);
+		guard.dispose();
+	});
+
+	it('household budget — captionless 3-photo chat on a paid vision modelRef is refused by HouseholdLLMLimiter.checkCost at $9.99 of $10 (R1-1)', async () => {
+		const inner = createMockInner();
+		// gpt-4.1 ($2/$8 per MTok) is vision-capable. The 1024-token output
+		// allowance alone is $0.008192, so a captionless chat with no images
+		// still fits under $0.01 of headroom. 3 × 1600 image tokens add $0.0096
+		// and the reservation ($0.017792) crosses the cap. Haiku's $1/$5 would
+		// leave the same 3-photo chat at $0.00992, still under the headroom.
+		const vision: ModelRef = { provider: 'openai', model: 'gpt-4.1' };
+		const visionPrice: PriceLookup = {
+			hasBillableProvider: () => true,
+			priceFor: () => ({ inputUsdPer1k: 0, outputUsdPer1k: 0 }),
+			priceForRef: (ref) =>
+				ref.model === vision.model ? { inputUsdPer1k: 0.002, outputUsdPer1k: 0.008 } : undefined,
+		};
+		const photo = { data: Buffer.alloc(1), mimeType: 'image/png' };
+		const captionless: ChatMessage[] = [{ role: 'user', content: '' }];
+		const photos: ChatMessage[] = [{ role: 'user', content: '', images: [photo, photo, photo] }];
+		const guard = makeGuardNearCap(inner, visionPrice);
+		await requestContext.run({ userId: 'u1', householdId: HOUSEHOLD }, async () => {
+			await expect(guard.chat(captionless, { modelRef: vision })).resolves.toBeDefined();
+			await expect(guard.chat(photos, { modelRef: vision })).rejects.toMatchObject({
+				scope: 'household',
+			});
+		});
+		expect(inner.chat).toHaveBeenCalledTimes(1);
+		guard.dispose();
+	});
+
+	it('household budget — 3-image completeWithMeta on a paid vision modelRef is refused by HouseholdLLMLimiter.checkCost at $9.99 of $10 and the no-image control is admitted (R2-1)', async () => {
+		const inner = createMockInner();
+		// gpt-4.1 ($2/$8 per MTok), same price as the captionless chat case.
+		// complete() defaults the output allowance to 4096 tokens ($0.032768),
+		// which already exceeds the $0.01 headroom, so maxTokens is pinned to
+		// the chat allowance (1024, $0.008192). Only the 3 × 1600 image tokens
+		// ($0.0096) push the reservation over the cap.
+		const vision: ModelRef = { provider: 'openai', model: 'gpt-4.1' };
+		const visionPrice: PriceLookup = {
+			hasBillableProvider: () => true,
+			priceFor: () => ({ inputUsdPer1k: 0, outputUsdPer1k: 0 }),
+			priceForRef: (ref) =>
+				ref.model === vision.model ? { inputUsdPer1k: 0.002, outputUsdPer1k: 0.008 } : undefined,
+		};
+		const photo = { data: Buffer.alloc(1), mimeType: 'image/png' };
+		const guard = makeGuardNearCap(inner, visionPrice);
+		await requestContext.run({ userId: 'u1', householdId: HOUSEHOLD }, async () => {
+			await expect(
+				guard.completeWithMeta('', { modelRef: vision, maxTokens: 1024 }),
+			).resolves.toBeDefined();
+			await expect(
+				guard.completeWithMeta('', {
+					modelRef: vision,
+					maxTokens: 1024,
+					images: [photo, photo, photo],
+				}),
+			).rejects.toMatchObject({ scope: 'household' });
+		});
+		expect(inner.completeWithMeta).toHaveBeenCalledTimes(1);
+		guard.dispose();
+	});
+
+	it("legacy `model: 'claude'` routes to the standard tier in LLMServiceImpl, so the guard prices it as standard, not fast", async () => {
+		const inner = createMockInner();
+		const hh = createMockHouseholdLimiter();
+		const guard = new LLMGuard({
+			inner,
+			appId: 'test-app',
+			costTracker: createMockCostTracker(),
+			config: defaultConfig,
+			logger: pino({ level: 'silent' }),
+			householdLimiter: hh as unknown as HouseholdLLMLimiter,
+			priceLookup: localFastPaidClaude,
+		});
+		await requestContext.run({ userId: 'u1', householdId: HOUSEHOLD }, () =>
+			guard.complete(PROMPT, { model: 'claude' }),
+		);
+		const est = (hh.reserveEstimated as ReturnType<typeof vi.fn>).mock.calls[0]?.[3] as number;
+		expect(est).toBeGreaterThan(0); // standard tier price, not the $0 local fast tier
+		guard.dispose();
+	});
+
+	it('an explicit modelRef the lookup cannot price falls back to the default reservation, never to the tier price', async () => {
+		const inner = createMockInner();
+		const hh = createMockHouseholdLimiter();
+		const cannotPriceRef: PriceLookup = { ...localFastPaidClaude, priceForRef: () => undefined };
+		const guard = new LLMGuard({
+			inner,
+			appId: 'test-app',
+			costTracker: createMockCostTracker(),
+			config: defaultConfig,
+			logger: pino({ level: 'silent' }),
+			householdLimiter: hh as unknown as HouseholdLLMLimiter,
+			priceLookup: cannotPriceRef,
+		});
+		await requestContext.run({ userId: 'u1', householdId: HOUSEHOLD }, () =>
+			guard.chat(USER, { modelRef: { provider: 'ghost', model: 'm' } }),
+		);
+		const est = (hh.reserveEstimated as ReturnType<typeof vi.fn>).mock.calls[0]?.[3] as number;
+		expect(est).toBe(DEFAULT_LLM_SAFEGUARDS.defaultReservationUsd);
+		guard.dispose();
 	});
 });

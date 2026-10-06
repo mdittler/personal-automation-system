@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
-import { loadSystemConfig } from '../index.js';
+import { buildAgentConfig, loadSystemConfig } from '../index.js';
 
 let tempDir: string;
 
@@ -738,6 +738,160 @@ describe('loadSystemConfig', () => {
 					routing: { verification: { always_verify_intents: [123, true, null] } },
 				}),
 			).rejects.toThrow(/always_verify_intents|Invalid pas.yaml/i);
+		});
+	});
+
+	describe('agent settings (REQ-LLM-052, design §18)', () => {
+		it('defaults: model ollama/qwen3.8:27b-mlx, thinking off, context_window 32768, keep_alive 30m, when the block is absent', async () => {
+			const config = await loadConfigFromYamlObj({});
+			expect(config.agent).toMatchObject({
+				model: { provider: 'ollama', model: 'qwen3.8:27b-mlx' },
+				thinking: 'off',
+				contextWindow: 32768,
+				keepAlive: '30m',
+			});
+		});
+
+		it('vision_model defaults to the configured Claude reasoning tier, else the Claude standard tier', async () => {
+			// HEAD's loader (config/index.ts:436–468) only reads `tiers.reasoning` when
+			// `tiers.fast` AND `tiers.standard` are also explicit; a reasoning-only
+			// block falls through to autoAssignTiers, which assigns no reasoning tier
+			// (index.ts:549–552). So the fixture pins all three (P2-3).
+			const withReasoning = await loadConfigFromYamlObj({
+				llm: {
+					tiers: {
+						fast: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+						standard: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+						reasoning: { provider: 'anthropic', model: 'claude-opus-5-5' },
+					},
+				},
+			});
+			expect(withReasoning.agent?.visionModel).toEqual({
+				provider: 'anthropic',
+				model: 'claude-opus-5-5',
+			});
+			const standardOnly = await loadConfigFromYamlObj({});
+			// requiredEnvVars sets ANTHROPIC_API_KEY, so the auto-assigned standard tier is Claude and no reasoning tier exists.
+			expect(standardOnly.llm?.tiers.reasoning).toBeUndefined();
+			expect(standardOnly.agent?.visionModel?.provider).toBe('anthropic');
+		});
+
+		it('a reasoning-only tiers block is ignored by the loader (HEAD rule), so vision_model falls back to the auto-assigned Claude standard tier', async () => {
+			const config = await loadConfigFromYamlObj({
+				llm: { tiers: { reasoning: { provider: 'anthropic', model: 'claude-opus-5-5' } } },
+			});
+			expect(config.llm?.tiers.reasoning).toBeUndefined();
+			expect(config.agent?.visionModel).toEqual(config.llm?.tiers.standard);
+		});
+
+		it('vision_model is undefined when no Claude tier is configured (photo turns then get a plain explanation — §18.2)', async () => {
+			const envPath = join(tempDir, '.env');
+			const yamlPath = join(tempDir, 'pas.yaml');
+			await writeEnvFile(envPath, {
+				...requiredEnvVars,
+				ANTHROPIC_API_KEY: '',
+				OLLAMA_URL: 'http://localhost:11434',
+			});
+			await writeFile(
+				yamlPath,
+				stringify({
+					llm: {
+						tiers: {
+							fast: { provider: 'ollama', model: 'gemma4:e4b' },
+							standard: { provider: 'ollama', model: 'gemma4:31b' },
+						},
+					},
+				}),
+				'utf-8',
+			);
+			const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+			expect(config.agent?.visionModel).toBeUndefined();
+		});
+
+		it('accepts explicit model, vision_model, thinking, context_window, keep_alive', async () => {
+			const config = await loadConfigFromYamlObj({
+				agent: {
+					model: { provider: 'llama-cpp', model: 'qwen3-30b' },
+					vision_model: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+					thinking: 'low',
+					context_window: 16384,
+					keep_alive: '1h',
+				},
+			});
+			expect(config.agent).toEqual({
+				model: { provider: 'llama-cpp', model: 'qwen3-30b' },
+				visionModel: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+				thinking: 'low',
+				contextWindow: 16384,
+				keepAlive: '1h',
+			});
+		});
+
+		it('the loader rejects type-invalid agent values loudly (schema layer)', async () => {
+			const envPath = join(tempDir, '.env');
+			const yamlPath = join(tempDir, 'pas.yaml');
+			await writeEnvFile(envPath, requiredEnvVars);
+			await writeFile(
+				yamlPath,
+				'agent:\n  model: "just-a-string"\n  thinking: banana\n  context_window: -5\n  keep_alive: 7\n',
+				'utf-8',
+			);
+			await expect(loadSystemConfig({ envPath, configPath: yamlPath })).rejects.toThrow(
+				/Invalid pas.yaml configuration/,
+			);
+		});
+
+		it('buildAgentConfig sanitizes values that bypass the schema back to the defaults (R1-12: asserted directly, not behind a swallowed throw)', () => {
+			const agent = buildAgentConfig(
+				{
+					model: 'just-a-string',
+					vision_model: { provider: 'anthropic' },
+					thinking: 'banana',
+					context_window: -5,
+					keep_alive: 7,
+				},
+				{
+					providers: {},
+					tiers: {
+						fast: { provider: 'ollama', model: 'x' },
+						standard: { provider: 'ollama', model: 'y' },
+					},
+					safeguards: {},
+				} as never,
+			);
+			expect(agent).toEqual({
+				model: { provider: 'ollama', model: 'qwen3.8:27b-mlx' },
+				visionModel: undefined,
+				thinking: 'off',
+				contextWindow: 32768,
+				keepAlive: '30m',
+			});
+		});
+
+		it("YAML 1.2: `thinking: off` is the string 'off', not boolean false", async () => {
+			const envPath = join(tempDir, '.env');
+			const yamlPath = join(tempDir, 'pas.yaml');
+			await writeEnvFile(envPath, requiredEnvVars);
+			await writeFile(yamlPath, 'agent:\n  thinking: off\n', 'utf-8');
+			const config = await loadSystemConfig({ envPath, configPath: yamlPath });
+			expect(config.agent?.thinking).toBe('off');
+		});
+
+		it('llm.providers.<id>.supports_tools maps to supportsTools', async () => {
+			const config = await loadConfigFromYamlObj({
+				llm: {
+					providers: {
+						'llama-cpp': {
+							type: 'llama-cpp',
+							name: 'llama',
+							base_url: 'http://localhost:8080',
+							default_model: 'm',
+							supports_tools: true,
+						},
+					},
+				},
+			});
+			expect(config.llm?.providers['llama-cpp']?.supportsTools).toBe(true);
 		});
 	});
 

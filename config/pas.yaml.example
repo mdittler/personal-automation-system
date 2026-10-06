@@ -78,6 +78,7 @@ defaults:
 #       name: "llama.cpp"
 #       base_url: http://localhost:8080
 #       default_model: local-model
+#       supports_tools: false   # true only when llama-server runs with --jinja
 #
 #   # Tier assignments (optional — auto-assigned based on available API keys)
 #   tiers:
@@ -108,6 +109,14 @@ defaults:
 #   # are split into independent segments and routed separately, instead of
 #   # silently dropping a question. Set to false to kill-switch the feature.
 #   multi_intent_split: true
+
+# Agent Runtime (design 2026-10-05, §18). Defaults IN CODE; uncomment to change.
+# agent:
+#   model: { provider: ollama, model: qwen3.8:27b-mlx }      # runs text turns; must support native tools
+#   vision_model: { provider: anthropic, model: claude-sonnet-5-5 }  # paid; photo turns. Default: your Claude reasoning/standard tier
+#   thinking: off          # off | low | medium | high — measured 2026-10-05: off is fastest at equal accuracy
+#   context_window: 32768  # Ollama num_ctx for agent turns
+#   keep_alive: 30m        # keeps the agent model loaded between turns
 
 # n8n integration (optional — dispatch execution to n8n instead of running internally)
 # When set, PAS cron triggers fire a webhook to n8n, which calls PAS API endpoints.

@@ -65,4 +65,27 @@ describe('provider-call tracker (REQ-REG-AGENT-002; review C12/C19)', () => {
 		expect(Date.now() - started).toBeLessThan(500);
 		expect(t.errors).toEqual(['drain: 1 provider call(s) still in flight after 50 ms']);
 	});
+
+	it('wrap(): also tracks chatWithUsage, so a provider error on the chat path forces error (REQ-REG-AGENT-005)', async () => {
+		const t = createProviderCallTracker({ settleMs: 5, drainTimeoutMs: 100 });
+		const provider = {
+			providerId: 'ollama',
+			completeWithUsage: vi.fn(async () => ({ text: 'ok' })),
+			chatWithUsage: vi.fn(async (_messages: unknown, _options?: unknown) => {
+				throw new Error("model 'does-not-exist:1b' not found");
+			}),
+		};
+		t.wrap(provider as never);
+		await expect(
+			provider.chatWithUsage([{ role: 'user', content: 'hi' }], undefined),
+		).rejects.toThrow(/not found/);
+		expect(t.errors).toEqual(["ollama: model 'does-not-exist:1b' not found"]);
+		expect(t.inFlight()).toBe(0);
+	});
+
+	it('wrap(): tolerates a provider without chatWithUsage (older test doubles)', () => {
+		const t = createProviderCallTracker({ settleMs: 5, drainTimeoutMs: 100 });
+		const provider = { providerId: 'p', completeWithUsage: vi.fn(async () => ({ text: 'ok' })) };
+		expect(() => t.wrap(provider as never)).not.toThrow();
+	});
 });

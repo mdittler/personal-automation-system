@@ -13,16 +13,24 @@ import { resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { cleanEnv, port, str } from 'envalid';
 import type {
+	AgentConfig,
 	HouseholdSafeguardOverride,
 	LLMConfig,
 	LLMProviderConfig,
 	SystemConfig,
 	TierAssignment,
 } from '../../types/config.js';
-import type { ModelRef } from '../../types/llm.js';
+import type { ModelRef, ThinkingLevel } from '../../types/llm.js';
 import type { RegisteredUser } from '../../types/users.js';
 import type { WebhookDefinition } from '../../types/webhooks.js';
 import { readYamlFileStrict } from '../../utils/yaml.js';
+import {
+	DEFAULT_AGENT_MODEL,
+	DEFAULT_AGENT_THINKING,
+	DEFAULT_CHAT_CONTEXT_WINDOW,
+	DEFAULT_OLLAMA_KEEP_ALIVE,
+	THINKING_LEVELS,
+} from '../llm/chat-defaults.js';
 import { isLocalProvider } from '../llm/model-pricing.js';
 import { DEFAULT_PROVIDERS } from './default-providers.js';
 import {
@@ -40,6 +48,7 @@ interface YamlProviderConfig {
 	api_key_env?: string;
 	base_url?: string;
 	default_model?: string;
+	supports_tools?: boolean;
 }
 
 /** Shape of the llm section in pas.yaml. */
@@ -88,6 +97,13 @@ interface PasYamlConfig {
 	webhooks?: YamlWebhookConfig[];
 	n8n?: {
 		dispatch_url?: string;
+	};
+	agent?: {
+		model?: unknown;
+		vision_model?: unknown;
+		thinking?: unknown;
+		context_window?: unknown;
+		keep_alive?: unknown;
 	};
 	routing?: {
 		verification?: {
@@ -258,6 +274,7 @@ export async function loadSystemConfig(options?: {
 			fastModel: env.CLAUDE_FAST_MODEL || undefined,
 		},
 		llm: llmConfig,
+		agent: buildAgentConfig(yamlConfig?.agent, llmConfig),
 		gui: {
 			authToken: env.GUI_AUTH_TOKEN,
 		},
@@ -368,6 +385,53 @@ function sanitizeMultiIntentSplit(value: unknown): boolean {
 }
 
 /**
+ * Build `agent` settings. Same sanitizer rule as `routing.multi_intent_split`:
+ * the schema rejects type-invalid input loudly; anything that still reaches
+ * the loader falls back to the production default rather than to a value
+ * that would silently change behaviour. Exported so the sanitizer is tested
+ * directly (R1-12).
+ */
+export function buildAgentConfig(raw: PasYamlConfig['agent'], llmConfig: LLMConfig): AgentConfig {
+	return {
+		model: sanitizeModelRef(raw?.model) ?? { ...DEFAULT_AGENT_MODEL },
+		visionModel: sanitizeModelRef(raw?.vision_model) ?? pickDefaultVisionModel(llmConfig),
+		thinking: sanitizeThinking(raw?.thinking),
+		contextWindow: sanitizePositiveInt(raw?.context_window) ?? DEFAULT_CHAT_CONTEXT_WINDOW,
+		keepAlive:
+			typeof raw?.keep_alive === 'string' && raw.keep_alive.length > 0
+				? raw.keep_alive
+				: DEFAULT_OLLAMA_KEEP_ALIVE,
+	};
+}
+
+function sanitizeModelRef(value: unknown): ModelRef | undefined {
+	if (typeof value !== 'object' || value === null) return undefined;
+	const { provider, model } = value as { provider?: unknown; model?: unknown };
+	if (typeof provider !== 'string' || !provider || typeof model !== 'string' || !model) {
+		return undefined;
+	}
+	return { provider, model };
+}
+
+function sanitizeThinking(value: unknown): ThinkingLevel {
+	return typeof value === 'string' && (THINKING_LEVELS as readonly string[]).includes(value)
+		? (value as ThinkingLevel)
+		: DEFAULT_AGENT_THINKING;
+}
+
+function sanitizePositiveInt(value: unknown): number | undefined {
+	return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/** §18.2: Claude reasoning tier first, then standard; only a tier served by an anthropic-type provider qualifies. */
+function pickDefaultVisionModel(llmConfig: LLMConfig): ModelRef | undefined {
+	for (const ref of [llmConfig.tiers.reasoning, llmConfig.tiers.standard]) {
+		if (ref && llmConfig.providers[ref.provider]?.type === 'anthropic') return { ...ref };
+	}
+	return undefined;
+}
+
+/**
  * Build the multi-provider LLM configuration.
  *
  * Merges built-in default providers with custom providers from pas.yaml.
@@ -403,6 +467,7 @@ function buildLLMConfig(env: Record<string, string>, yamlLLM?: YamlLLMConfig): L
 				apiKeyEnvVar: yamlProvider.api_key_env ?? '',
 				baseUrl: yamlProvider.base_url,
 				defaultModel: yamlProvider.default_model,
+				supportsTools: yamlProvider.supports_tools,
 			};
 		}
 	}

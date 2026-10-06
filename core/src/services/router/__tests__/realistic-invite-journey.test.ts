@@ -49,6 +49,9 @@ function createMockTelegram(): TelegramService {
 
 function createMockLLM(): LLMService {
 	return {
+		chat: vi.fn(),
+		supportsTools: vi.fn(),
+		supportsVision: vi.fn(),
 		complete: vi.fn(),
 		classify: vi.fn().mockResolvedValue({ category: 'unknown', confidence: 0.1 } as ClassifyResult),
 		extractStructured: vi.fn(),
