@@ -336,8 +336,7 @@ describe('computeCacheKey — harness paths (REQ-REG-024)', () => {
 		expect(await expandHarnessPaths(['d/'], tempRepo)).toEqual(['d/a.ts']);
 	});
 
-	// enabled in Task 11 (agent files and fixtures do not exist until then)
-	it.skip('every BUCKET_HARNESS_PATHS entry exists in the real repository', () => {
+	it('every BUCKET_HARNESS_PATHS entry exists in the real repository', () => {
 		const realRoot = join(process.cwd(), '..');
 		for (const paths of Object.values(BUCKET_HARNESS_PATHS)) {
 			for (const p of paths) expect(existsSync(join(realRoot, p)), p).toBe(true);
@@ -361,8 +360,7 @@ describe('computeCacheKey — harness paths (REQ-REG-024)', () => {
 	// the agent-specific files: every `regression/src` module they value-import
 	// is itself an agent harness path. Type-only imports, packages and
 	// `@core/*` are excluded (the LLM layer is covered by its directory entry).
-	// enabled in Task 11 (agent files do not exist until then)
-	it.skip('every regression/src module value-imported by an agent-specific harness file is an agent harness path', async () => {
+	it('every regression/src module value-imported by an agent-specific harness file is an agent harness path', async () => {
 		const realRoot = join(process.cwd(), '..');
 		const agent = BUCKET_HARNESS_PATHS.agent!;
 		const covered = (p: string) => agent.some((h) => (h.endsWith('/') ? p.startsWith(h) : h === p));

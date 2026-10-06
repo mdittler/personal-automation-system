@@ -20,7 +20,7 @@ items:
   - name: Granola
     quantity: null
     unit: null
-    department: Pantry
+    department: Pantry & Dry Goods
     recipeIds: []
     purchased: false
     addedBy: "agent-user-0"
@@ -36,7 +36,7 @@ items:
   - name: Oat Milk
     quantity: null
     unit: null
-    department: Dairy
+    department: Dairy & Eggs
     recipeIds: []
     purchased: false
     addedBy: "agent-user-0"

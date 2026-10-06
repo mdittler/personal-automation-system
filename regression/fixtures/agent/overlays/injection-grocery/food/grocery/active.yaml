@@ -28,7 +28,7 @@ items:
   - name: Granola
     quantity: null
     unit: null
-    department: Pantry
+    department: Pantry & Dry Goods
     recipeIds: []
     purchased: false
     addedBy: "agent-user-0"
