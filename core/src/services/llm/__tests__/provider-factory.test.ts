@@ -1,6 +1,8 @@
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LLMProviderConfig } from '../../../types/config.js';
+import { LlamaCppProvider } from '../providers/llama-cpp-provider.js';
+import { OpenAICompatibleProvider } from '../providers/openai-compatible-provider.js';
 import { createProvider } from '../providers/provider-factory.js';
 
 // Mock all provider constructors to avoid real SDK initialization
@@ -258,5 +260,74 @@ describe('createProvider', () => {
 		const provider = createProvider('unknown', config, logger, mockCostTracker);
 
 		expect(provider).toBeNull();
+	});
+});
+
+describe('createProvider — supports_tools flag (REQ-LLM-047)', () => {
+	// This file replaces every provider class with a vi.mock factory, so the
+	// objects it hands back have no real `supportsTools`. What the factory is
+	// responsible for — and all it can be tested for here — is forwarding the
+	// flag into the constructor options (P2-3). The real defaults are covered in
+	// openai-compatible-provider.test.ts and llama-cpp-provider.test.ts.
+	it('forwards supportsTools from config into the openai-compatible and llama-cpp constructor options', () => {
+		process.env.TEST_API_KEY = 'sk-test-key';
+		vi.mocked(OpenAICompatibleProvider).mockClear();
+		vi.mocked(LlamaCppProvider).mockClear();
+		expect(
+			createProvider(
+				'groq',
+				{
+					type: 'openai-compatible',
+					name: 'Groq',
+					apiKeyEnvVar: 'TEST_API_KEY',
+					baseUrl: 'http://x',
+					defaultModel: 'm',
+					supportsTools: false,
+				},
+				logger,
+				mockCostTracker as never,
+			),
+		).not.toBeNull();
+		expect(vi.mocked(OpenAICompatibleProvider)).toHaveBeenCalledWith(
+			expect.objectContaining({ providerId: 'groq', supportsTools: false }),
+		);
+		expect(
+			createProvider(
+				'llama-cpp',
+				{
+					type: 'llama-cpp',
+					name: 'llama',
+					apiKeyEnvVar: '',
+					baseUrl: 'http://localhost:8080',
+					defaultModel: 'local-model',
+					supportsTools: true,
+				},
+				logger,
+				mockCostTracker as never,
+			),
+		).not.toBeNull();
+		expect(vi.mocked(LlamaCppProvider)).toHaveBeenCalledWith(
+			expect.objectContaining({ providerId: 'llama-cpp', supportsTools: true }),
+		);
+	});
+
+	it('leaves supportsTools undefined when the config omits it (the provider default then applies)', () => {
+		process.env.TEST_API_KEY = 'sk-test-key';
+		vi.mocked(OpenAICompatibleProvider).mockClear();
+		createProvider(
+			'groq',
+			{
+				type: 'openai-compatible',
+				name: 'Groq',
+				apiKeyEnvVar: 'TEST_API_KEY',
+				baseUrl: 'http://x',
+				defaultModel: 'm',
+			},
+			logger,
+			mockCostTracker as never,
+		);
+		expect(vi.mocked(OpenAICompatibleProvider).mock.calls[0]?.[0]).toMatchObject({
+			supportsTools: undefined,
+		});
 	});
 });

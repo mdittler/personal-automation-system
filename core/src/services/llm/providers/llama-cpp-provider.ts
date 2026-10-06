@@ -30,4 +30,9 @@ export class LlamaCppProvider extends OpenAICompatibleProvider {
 			providerType: 'llama-cpp',
 		});
 	}
+
+	/** llama-server only accepts `tools` when started with `--jinja`; the operator opts in with `supports_tools: true`. */
+	protected override defaultSupportsTools(): boolean {
+		return false;
+	}
 }

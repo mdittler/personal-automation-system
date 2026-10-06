@@ -62,3 +62,17 @@ export function getModelCapabilities(modelId: string): ModelCapabilities | null 
 export function supportsTemperature(modelId: string): boolean {
 	return getModelCapabilities(modelId)?.supportsTemperature ?? true;
 }
+
+/**
+ * Which output-limit field an OpenAI-compatible chat request must carry.
+ * `max_tokens` is deprecated by OpenAI and rejected by o-series reasoning
+ * models (openai 6.27 `completions.d.ts`: "not compatible with o-series
+ * models"); `max_completion_tokens` is unknown to many OpenAI-compatible
+ * servers (Groq, vLLM, llama-server, Ollama /v1). So: reasoning-model ids
+ * (`o1`, `o3`, `o4-mini`, …, `gpt-5*`) get the new field; everything else keeps
+ * `max_tokens`. Namespaced ids (`openai/o3-mini`) are served by routers and
+ * keep `max_tokens`.
+ */
+export function openAIOutputLimitField(modelId: string): 'max_tokens' | 'max_completion_tokens' {
+	return /^(o[1-9](-|$)|gpt-5(-|$|\.))/.test(modelId) ? 'max_completion_tokens' : 'max_tokens';
+}

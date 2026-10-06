@@ -45,6 +45,20 @@ export interface BaseProviderOptions {
 	costTracker: CostTracker;
 	/** API base URL (for OpenAI-compatible and Ollama). */
 	baseUrl?: string;
+	/**
+	 * Whether this provider's models accept native tool definitions
+	 * (openai-compatible / llama-cpp only; from `supports_tools` in pas.yaml).
+	 * Undefined = the provider's own default.
+	 */
+	supportsTools?: boolean;
+	/**
+	 * Vendor-SDK retry count (`maxRetries` on the openai / @anthropic-ai/sdk
+	 * clients). Undefined = the SDK default (2), unchanged from today, so
+	 * production retry behaviour is untouched. The live smoke passes 0 so its
+	 * paid-call budget is a hard count of HTTP attempts (R1-8). Ollama/Google
+	 * ignore it.
+	 */
+	sdkMaxRetries?: number;
 }
 
 export abstract class BaseProvider implements LLMProviderClient {
@@ -56,6 +70,8 @@ export abstract class BaseProvider implements LLMProviderClient {
 	protected readonly logger: Logger;
 	protected readonly costTracker: CostTracker;
 	protected readonly baseUrl?: string;
+	protected readonly supportsToolsFlag?: boolean;
+	protected readonly sdkMaxRetries?: number;
 
 	constructor(options: BaseProviderOptions) {
 		this.providerId = options.providerId;
@@ -65,6 +81,8 @@ export abstract class BaseProvider implements LLMProviderClient {
 		this.logger = options.logger;
 		this.costTracker = options.costTracker;
 		this.baseUrl = options.baseUrl;
+		this.supportsToolsFlag = options.supportsTools;
+		this.sdkMaxRetries = options.sdkMaxRetries;
 	}
 
 	/**

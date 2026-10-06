@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	MODEL_CAPABILITIES,
 	getModelCapabilities,
+	openAIOutputLimitField,
 	supportsTemperature,
 } from '../model-capabilities.js';
 
@@ -53,5 +54,23 @@ describe('model-capabilities', () => {
 				expect(supportsTemperature(modelId), modelId).toBe(false);
 			}
 		});
+	});
+});
+
+describe('openAIOutputLimitField (REQ-LLM-047, R1-4)', () => {
+	it.each([
+		['o3', 'max_completion_tokens'],
+		['o3-mini', 'max_completion_tokens'],
+		['o4-mini', 'max_completion_tokens'],
+		['o1', 'max_completion_tokens'],
+		['gpt-5', 'max_completion_tokens'],
+		['gpt-5-mini', 'max_completion_tokens'],
+		['gpt-4o', 'max_tokens'],
+		['gpt-4.1-mini', 'max_tokens'],
+		['local-model', 'max_tokens'],
+		['qwen3.8:27b-mlx', 'max_tokens'],
+		['openai/o3-mini', 'max_tokens'], // namespaced ids are served by routers that expect max_tokens
+	] as const)('%s → %s', (model, field) => {
+		expect(openAIOutputLimitField(model)).toBe(field);
 	});
 });

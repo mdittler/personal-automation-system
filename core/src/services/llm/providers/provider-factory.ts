@@ -51,6 +51,7 @@ export function createProvider(
 		logger,
 		costTracker,
 		baseUrl: config.baseUrl,
+		supportsTools: config.supportsTools,
 	};
 
 	switch (config.type) {
@@ -75,6 +76,7 @@ export function createProvider(
 				logger,
 				costTracker,
 				baseUrl: config.baseUrl,
+				supportsTools: config.supportsTools,
 			});
 		}
 
@@ -102,6 +104,7 @@ export function createProvider(
 				logger,
 				costTracker,
 				baseUrl: config.baseUrl,
+				supportsTools: config.supportsTools,
 			});
 		}
 

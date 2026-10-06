@@ -26,6 +26,12 @@ export interface LLMProviderConfig {
 	baseUrl?: string;
 	/** Default model ID for this provider. */
 	defaultModel?: string;
+	/**
+	 * openai-compatible / llama-cpp: whether the served model accepts native
+	 * tool definitions. Defaults: true for openai-compatible, false for
+	 * llama-cpp (llama-server needs `--jinja`). Ignored by other types.
+	 */
+	supportsTools?: boolean;
 }
 
 /** Tier-to-model assignment: which provider+model to use for each tier. */

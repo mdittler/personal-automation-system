@@ -6,15 +6,21 @@
  * provider that exposes an OpenAI-compatible API.
  */
 
-import OpenAI from 'openai';
+import OpenAI, { APIUserAbortError } from 'openai';
 import type {
+	ChatFinishReason,
+	ChatMessage,
+	ChatOptions,
+	ChatResult,
 	LLMCompletionOptions,
 	LLMCompletionResult,
 	LLMFinishReason,
 	ProviderModel,
+	ToolCallRequest,
 } from '../../../types/llm.js';
+import { synthesizeToolCallId, toAbortError } from '../chat-messages.js';
 import { LLMEmptyOutputError } from '../errors.js';
-import { supportsTemperature } from '../model-capabilities.js';
+import { openAIOutputLimitField, supportsTemperature } from '../model-capabilities.js';
 import { getModelPricing, isLocalProvider } from '../model-pricing.js';
 import { BaseProvider, type BaseProviderOptions } from './base-provider.js';
 
@@ -55,6 +61,16 @@ function mapOpenAIFinishReason(finishReason: unknown): LLMFinishReason {
 	}
 }
 
+/** The one output-limit field this model accepts (a typed spread, not a computed key — TS would widen that to an index signature). */
+function outputLimit(
+	model: string,
+	maxTokens: number,
+): Pick<OpenAI.ChatCompletionCreateParams, 'max_tokens' | 'max_completion_tokens'> {
+	return openAIOutputLimitField(model) === 'max_completion_tokens'
+		? { max_completion_tokens: maxTokens }
+		: { max_tokens: maxTokens };
+}
+
 export class OpenAICompatibleProvider extends BaseProvider {
 	override readonly supportsVision: boolean = true;
 	private readonly client: OpenAI;
@@ -83,6 +99,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
 			apiKey,
 			baseURL: options.baseUrl,
 			timeout: 120_000, // 2 minute timeout
+			...(this.sdkMaxRetries !== undefined ? { maxRetries: this.sdkMaxRetries } : {}),
 		});
 	}
 
@@ -121,7 +138,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
 		const response = await this.client.chat.completions.create({
 			model,
 			messages,
-			max_tokens: maxTokens,
+			...outputLimit(model, maxTokens),
 			...(supportsTemperature(model) ? { temperature: options?.temperature } : {}),
 			...(options?.responseFormat === 'json'
 				? { response_format: { type: 'json_object' as const } }
@@ -166,6 +183,14 @@ export class OpenAICompatibleProvider extends BaseProvider {
 					model,
 					maxTokens,
 					...(reasoningChars !== undefined ? { thinkingChars: reasoningChars } : {}),
+					...(response.usage
+						? {
+								usage: {
+									inputTokens: response.usage.prompt_tokens ?? 0,
+									outputTokens: response.usage.completion_tokens ?? 0,
+								},
+							}
+						: {}),
 				});
 			}
 
@@ -191,6 +216,92 @@ export class OpenAICompatibleProvider extends BaseProvider {
 			model,
 			provider: this.providerId,
 			finishReason,
+		};
+	}
+
+	override async supportsTools(_modelId: string): Promise<boolean> {
+		// OpenAI, Groq, Together, Mistral, vLLM all accept `tools`; llama-server
+		// only with --jinja, so LlamaCppProvider defaults the other way.
+		return this.supportsToolsFlag ?? this.defaultSupportsTools();
+	}
+
+	/** Overridden by LlamaCppProvider. */
+	protected defaultSupportsTools(): boolean {
+		return true;
+	}
+
+	protected override async doChat(
+		messages: ChatMessage[],
+		options?: ChatOptions,
+	): Promise<ChatResult> {
+		const model = this.resolveModel(options);
+		const maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;
+		const tools = options?.tools?.length
+			? options.tools.map((t) => ({
+					type: 'function' as const,
+					function: {
+						name: t.name,
+						description: t.description,
+						parameters: t.inputSchema as Record<string, unknown>,
+					},
+				}))
+			: undefined;
+
+		const response = await this.client.chat.completions
+			.create(
+				{
+					model,
+					messages: messages.map(toOpenAIMessage),
+					// o-series / gpt-5 reject `max_tokens`; compatible servers reject the other (R1-4).
+					...outputLimit(model, maxTokens),
+					...(supportsTemperature(model) && options?.temperature !== undefined
+						? { temperature: options.temperature }
+						: {}),
+					...(tools ? { tools, parallel_tool_calls: options?.parallelToolCalls ?? true } : {}),
+				},
+				options?.signal ? { signal: options.signal } : undefined,
+			)
+			.catch((err: unknown) => {
+				// P2-4: the SDK's cancellation error is named 'Error', so classify it
+				// here, where the SDK may be imported, and hand back a recognisable
+				// abort (the caller's reason when there is one).
+				if (err instanceof APIUserAbortError) throw toAbortError(options?.signal, err);
+				throw err;
+			});
+
+		const choice = response.choices[0];
+		const content = choice?.message?.content ?? '';
+		const toolCalls = toToolCallRequests(choice?.message?.tool_calls);
+		const baseReason: ChatFinishReason = choice
+			? mapOpenAIFinishReason(choice.finish_reason)
+			: 'other';
+		const finishReason: ChatFinishReason = toolCalls.length > 0 ? 'tool_calls' : baseReason;
+		const usage = response.usage
+			? {
+					inputTokens: response.usage.prompt_tokens ?? 0,
+					outputTokens: response.usage.completion_tokens ?? 0,
+				}
+			: undefined;
+		const reasoning = (choice?.message as { reasoning_content?: unknown } | undefined)
+			?.reasoning_content;
+		const reasoningChars = typeof reasoning === 'string' ? reasoning.length : undefined;
+
+		if (content.trim() === '' && toolCalls.length === 0 && finishReason === 'length') {
+			throw new LLMEmptyOutputError({
+				provider: this.providerId,
+				model,
+				maxTokens,
+				...(reasoningChars !== undefined ? { thinkingChars: reasoningChars } : {}),
+				...(usage ? { usage } : {}),
+			});
+		}
+
+		return {
+			message: { role: 'assistant', content, ...(toolCalls.length > 0 ? { toolCalls } : {}) },
+			finishReason,
+			usage,
+			model,
+			provider: this.providerId,
 		};
 	}
 
@@ -223,5 +334,73 @@ export class OpenAICompatibleProvider extends BaseProvider {
 			);
 			return [];
 		}
+	}
+}
+
+function toOpenAIMessage(m: ChatMessage): OpenAI.ChatCompletionMessageParam {
+	switch (m.role) {
+		case 'system':
+			return { role: 'system', content: m.content };
+		case 'tool':
+			return { role: 'tool', tool_call_id: m.toolCallId ?? '', content: m.content };
+		case 'assistant':
+			return {
+				role: 'assistant',
+				content: m.content.length > 0 ? m.content : null,
+				...(m.toolCalls?.length
+					? {
+							tool_calls: m.toolCalls.map((c) => ({
+								id: c.id,
+								type: 'function' as const,
+								function: {
+									name: c.name,
+									arguments:
+										typeof c.arguments === 'string'
+											? c.arguments
+											: JSON.stringify(c.arguments ?? {}),
+								},
+							})),
+						}
+					: {}),
+			};
+		default: {
+			if (!m.images?.length) return { role: 'user', content: m.content };
+			const parts: OpenAI.ChatCompletionContentPart[] = m.images.map((img) => ({
+				type: 'image_url',
+				image_url: { url: `data:${img.mimeType};base64,${img.data.toString('base64')}` },
+			}));
+			parts.push({ type: 'text', text: m.content });
+			return { role: 'user', content: parts };
+		}
+	}
+}
+
+/** `mapOpenAIFinishReason` already maps 'tool_calls'/'function_call' → 'other'; the chat path overrides with the presence of calls. */
+function toToolCallRequests(raw: unknown): ToolCallRequest[] {
+	if (!Array.isArray(raw)) return [];
+	const out: ToolCallRequest[] = [];
+	for (const item of raw) {
+		const call = item as {
+			id?: unknown;
+			type?: unknown;
+			function?: { name?: unknown; arguments?: unknown };
+		};
+		if (call.type !== 'function' || !call.function || typeof call.function.name !== 'string')
+			continue;
+		out.push({
+			id: typeof call.id === 'string' && call.id ? call.id : synthesizeToolCallId(),
+			name: call.function.name,
+			arguments: parseArguments(call.function.arguments),
+		});
+	}
+	return out;
+}
+
+function parseArguments(args: unknown): unknown {
+	if (typeof args !== 'string') return args ?? {};
+	try {
+		return JSON.parse(args);
+	} catch {
+		return args;
 	}
 }
