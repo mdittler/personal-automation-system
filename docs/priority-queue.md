@@ -103,6 +103,7 @@ Each item must appear in that phase's plan. Most came out of the 2026-10-05 desi
 
 **Q6 · P3**
 - Formal thinking comparison (off / low / on) on the agent bucket, scored as pass^3. The pre-P1 evidence is in `docs/superpowers/plans/findings/2026-10-05-qwen38-thinking-comparison.md`; revisit the default if thinking wins.
+- Fix the Food grocery formatter dropping items whose department is not canonical (`formatGroceryMessage` / `DEPT_ORDER` in `apps/food`). Found by the P0 Task 11 live smoke: a list showed "4 items" but rendered 2. Tracked in open-items: Unfinished Corrections, "Food grocery formatter silently drops items with a non-canonical department".
 - Migration inventory: every Food `handleMessage` branch, command continuation, and typed-reply callback maps to a tool, a pending-input flow, or *dropped (operator-approved)*. It gates Q7.
 
 **Q7 · P4**

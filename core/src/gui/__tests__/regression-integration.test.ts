@@ -210,7 +210,7 @@ describe('real CLI --list smoke (no LLM dispatch)', () => {
 			for (const c of out.cases) {
 				expect(c.caseId).toMatch(/^[a-z][a-z0-9-]{0,127}$/);
 				expect(c.currentCacheKey).toMatch(/^[a-f0-9]{64}$/);
-				expect(['routing', 'receipt', 'chatbot', 'recall']).toContain(c.bucket);
+				expect(['routing', 'receipt', 'chatbot', 'recall', 'agent']).toContain(c.bucket);
 			}
 		} finally {
 			// Restore original env for other tests in the same Vitest process.

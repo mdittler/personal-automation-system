@@ -4272,6 +4272,46 @@ Round 3 (confirming, full scope) raised no new code defect. Round 4 reviewed the
 
 ---
 
+## Agent Runtime P0 — Benchmark Hygiene + Agent Bucket (2026-10-05)
+
+**Goal:** Make the regression harness trustworthy, then give it an `agent` bucket that grades outcomes only, so the current pipeline's baseline can gate Agent Runtime P4 (the cut-over). Plan: `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md`. Design: `docs/superpowers/specs/2026-10-05-agent-runtime-design.md`.
+
+**Approach:** First close the five harness defects the design review found (cached `error` verdicts, a cache key that ignored the case id and harness code, shared chatbot sessions, a judge blind to the seed, stale grades from the pre-`738f78a` judge override). Then add the bucket: a 20-file synthetic household seed with an integrity manifest, a deterministic outcome oracle (facts, forbidden phrases, file state, unchanged paths, no messages to other users), one worker process per trial, pass^k over `--repeats` trials, infrastructure-first verdicts, 46 tasks over 8 categories with ground truth derived from the seed, and a report section by set and category.
+
+**Tasks 0-13:**
+
+| Task | Outcome |
+|---|---|
+| 0 | `@pas/core` subpaths resolve to source for vitest, typecheck, and tsx, so the regression workspace is green from a stale `core/dist` |
+| 1 | `error` / `budget-exceeded` are never cached; legacy entries are misses (REQ-REG-023) |
+| 2 | Cache key binds the case id and `BUCKET_HARNESS_PATHS`; harness import rule is test-enforced (REQ-REG-024) |
+| 3 | `--archive-cache` (REQ-REG-027) |
+| 4 | Judge sees seed reference data and the reply block is named (REQ-REG-026) |
+| 5 | Fresh seeded runtime per chatbot case via the shared `seeded-runtime.ts` (REQ-REG-025) |
+| 6 | `agent` bucket + `outcome` oracle kind recognised by CLI, validator, GUI estimator and selectors |
+| 7 | Agent task types + deterministic outcome oracle (REQ-REG-AGENT-001) |
+| 8 | Synthetic seed (9 receipts, 8 hand-authored files, 3 overlay files) + per-trial environment |
+| 9 | Trial + case runner: pass^k, error > budget-exceeded > fail > pass, provider-call tracker with drain |
+| 10 | One worker per trial; heartbeat relay; signal teardown; `--case`; orchestrator/CLI/deps/report wiring (REQ-REG-AGENT-002, -004) |
+| 11 | 46 tasks, seed-derived ground truth pinned by a test (REQ-REG-AGENT-003); the live smoke also caught a seed bug (non-canonical grocery departments) fixed test-first, and a Food formatter defect carried to P3 |
+| 12 | Baseline on the pre-agent pipeline: local recorded, frontier pending |
+| 13 | Documentation footprint (this section, URS, open-items, README) |
+
+**Codex review rounds (plan):** six rounds, findings 9 → 7 → 4 → 2 → 3 → 6 (round 6 was the first to review the Deliverables, acceptance checklist, and live-smoke procedure end to end, hence the uptick). All were fixed in-plan with tests and acceptance rows. The end-of-phase code review (Task 13 Step 7) follows this commit.
+
+**Tests:** `pnpm --filter @pas/regression test` 787 passing (50 files); root `pnpm test` 12782 passing, 3 skipped, 1 todo, 0 failing (579 files); lint 0 errors; regression typecheck clean. One core test (`regression-integration.test.ts`, real CLI `--list` smoke) needed `agent` added to its allowed bucket list. 9 new URS entries (REQ-REG-023..027, REQ-REG-AGENT-001..004); matrix totals 442 files / 3152 std / 3066 edge / 6218 tests (the previous "449 files" figure did not match a recount of the matrix, which gave 434).
+
+**Baseline headline (pre-agent pipeline, `docs/superpowers/plans/findings/2026-10-05-agent-bucket-baseline.md`):**
+
+| model | capability pass^3 (tasks) | capability trial rate | regression pass^3 (tasks) | regression trial rate |
+|---|---|---|---|---|
+| qwen3.8:27b-mlx (local, 46 tasks x 3) | 9/25 | 33/75 | 12/21 | 37/63 |
+| frontier | pending (credits) | pending | pending | pending |
+
+Local run: 21 pass / 22 fail / 3 error. The 3 errors are the photo tasks ("not applicable - text-only provider", expected for a local text model). Multi-turn 0/3 and photo 0/3; write 1/8 and out-of-distribution 1/7 are the weakest categories; injection 3/3 and no-tool 4/4 are clean. Median 40.3 s per trial. FRONTIER-BASELINE-PENDING: the Anthropic account ran out of credits; complete the frontier run and the findings doc, then fill the pending cells (D13 stays open until then).
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.

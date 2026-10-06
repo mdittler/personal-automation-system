@@ -12992,6 +12992,207 @@ Local models run on the operator's own hardware and are always free; adding a ne
 
 ---
 
+### REQ-REG-023 — `error` and `budget-exceeded` verdicts MUST never be written to the regression cache, and legacy entries MUST read as misses
+
+**Phase:** Agent Runtime P0 (2026-10-05) | **Status:** Implemented
+
+Before P0 an `error` verdict (judge 400, truncation, vision-unsupported, budget) was cached and re-served on the next run, so infrastructure failures masqueraded as grades. `isCacheableVerdict` admits only `pass` and `fail`; `CacheStore.read` treats any legacy `error`/`budget-exceeded` entry already on disk as a miss.
+
+**Standard tests:**
+- `cache.test.ts` > isCacheableVerdict (REQ-REG-023) > caches only pass and fail
+
+**Edge case tests:**
+- `cache.test.ts` > CacheStore.read — legacy non-cacheable entries are misses (REQ-REG-023) > returns null for an on-disk entry whose verdict is error
+- `orchestrator.test.ts` > runSuite — cache lifecycle > does not cache an error verdict — the next run dispatches again (REQ-REG-023)
+
+---
+
+### REQ-REG-024 — The regression cache key MUST bind the case id and the bucket's harness sources
+
+**Phase:** Agent Runtime P0 (2026-10-05) | **Status:** Implemented
+
+The key previously omitted the case id (two cases in one file shared a key) and the runner, oracle, and LLM-layer sources (a harness fix did not invalidate old grades). `BUCKET_HARNESS_PATHS` lists the harness files per bucket; a missing harness file contributes a stable marker rather than throwing. Test-enforced rules: every listed path exists, and every `regression/src` module that an agent-specific harness file value-imports is itself an agent harness path.
+
+**Standard tests:**
+- `cache-key.test.ts` > computeCacheKey — caseId (REQ-REG-024) > two cases defined in the same file get different keys
+- `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > changing a harness file changes the key
+- `orchestrator.test.ts` > runSuite — cache lifecycle > cases sharing one definition file are cached independently (REQ-REG-024)
+
+**Edge case tests:**
+- `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > a missing harness file contributes a stable marker instead of throwing
+- `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > expandHarnessPaths lists files under a directory entry, excluding __tests__
+- `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > every BUCKET_HARNESS_PATHS entry exists in the real repository
+- `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > extracted modules are harness paths (review C24)
+- `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > every regression/src module value-imported by an agent-specific harness file is an agent harness path
+
+---
+
+### REQ-REG-025 — Each chatbot regression case MUST run in a freshly seeded runtime that is disposed afterwards
+
+**Phase:** Agent Runtime P0 (2026-10-05) | **Status:** Implemented
+
+All chatbot cases previously shared one user session, so transcripts bled between cases and results depended on order. The orchestrator now builds one environment per case via the shared seeded-runtime builder and disposes it after the case, including when routing throws.
+
+**Standard tests:**
+- `orchestrator.test.ts` > runSuite — chatbot bucket > builds a fresh environment per chatbot case and disposes each (REQ-REG-025)
+
+**Edge case tests:**
+- `orchestrator.test.ts` > runSuite — chatbot bucket > disposes each case environment even when routing throws (REQ-REG-025)
+
+---
+
+### REQ-REG-026 — The rubric judge MUST receive the seed's reference data as a fenced block and be told which block is the reply
+
+**Phase:** Agent Runtime P0 (2026-10-05) | **Status:** Implemented
+
+Rubrics referenced seed facts the judge never saw. The judge prompt now carries a fenced reference-data block (omitted when none is supplied) and names the reply block explicitly; the chatbot runner forwards the seed reference data.
+
+**Standard tests:**
+- `rubric-oracle.test.ts` > runRubricOracle — reference data + reply labelling (REQ-REG-026) > includes the reference data block and names the reply block
+- `chatbot-runner.test.ts` > token propagation > forwards referenceData to the judge prompt (REQ-REG-026)
+
+**Edge case tests:**
+- `rubric-oracle.test.ts` > runRubricOracle — reference data + reply labelling (REQ-REG-026) > omits the reference block when no reference data is given
+
+---
+
+### REQ-REG-027 — `--archive-cache` MUST move the regression cache to a dated archive directory and leave an empty cache
+
+**Phase:** Agent Runtime P0 (2026-10-05) | **Status:** Implemented
+
+Stale grades recorded under earlier harness defects must not be re-served, but history must not be deleted. `--archive-cache` moves the cache to `<cacheDir>-archive/<stamp>/`, leaves an empty cache directory, and exits 0 without dispatching any case.
+
+**Standard tests:**
+- `archive-cache.test.ts` > archiveCache (REQ-REG-027) > moves the cache dir under <cacheDir>-archive/<stamp> and leaves an empty cache dir
+- `orchestrator.test.ts` > runCli --archive-cache > --archive-cache moves the cache and exits 0 without dispatching (REQ-REG-027)
+
+---
+
+### REQ-REG-AGENT-001 — The `agent` bucket MUST grade outcomes only — facts in the reply, forbidden phrases, file state, and unchanged paths — never the tool path
+
+**Phase:** Agent Runtime P0 (2026-10-05) | **Status:** Implemented
+
+The outcome oracle checks: facts (number, text, any-text, date — rejecting an explicit wrong year), forbidden phrases, data state (items, contains, lineRegex, exists, wildcards), paths that must be unchanged (including newly created files), and that no message went to a user other than the requester. How the agent got there (which tools, in what order) is deliberately not graded, so the same tasks can score the old pipeline and the agent runtime.
+
+**Standard tests:**
+- `outcome-oracle.test.ts` > matchesNumber > matches dollar amounts, thousands separators and trailing zeros
+- `outcome-oracle.test.ts` > matchesDate > accepts 2026-09-09 for 2026-09-09
+- `outcome-oracle.test.ts` > matchesDate > accepts Sep 9 for 2026-09-09
+- `outcome-oracle.test.ts` > matchesDate > accepts Sept. 9th for 2026-09-09
+- `outcome-oracle.test.ts` > matchesDate > accepts September 9, 2026 for 2026-09-09
+- `outcome-oracle.test.ts` > matchesDate > accepts 9 September for 2026-09-09
+- `outcome-oracle.test.ts` > matchesDate > accepts the 9th of September for 2026-09-09
+- `outcome-oracle.test.ts` > matchesDate > accepts 9/9 for 2026-09-09
+- `outcome-oracle.test.ts` > matchesDate > accepts 09/09/2026 for 2026-09-09
+- `outcome-oracle.test.ts` > expandDatePlaceholders > expands relative dates across a month boundary
+- `outcome-oracle.test.ts` > evaluateOutcome > passes when every fact matches the last reply
+- `outcome-oracle.test.ts` > evaluateOutcome > checks YAML list items, wildcard contains, and line regexes
+- `outcome-oracle.test.ts` > evaluateOutcome data-state exists (REQ-REG-AGENT-001) > exists=true passes when the file is present and fails when absent
+- `outcome-oracle.test.ts` > evaluateOutcome data-state exists (REQ-REG-AGENT-001) > exists=false passes when the file is absent and fails when present
+
+**Edge case tests:**
+- `outcome-oracle.test.ts` > matchesNumber > does not match a different amount
+- `outcome-oracle.test.ts` > matchesDate > rejects another day
+- `outcome-oracle.test.ts` > matchesDate > rejects an explicitly wrong year but allows an omitted one
+- `outcome-oracle.test.ts` > evaluateOutcome > reports each missing fact and forbidden phrase
+- `outcome-oracle.test.ts` > evaluateOutcome > fails a data-state check with a readable reason
+- `outcome-oracle.test.ts` > evaluateOutcome > detects a change under an unchanged directory, including newly created files
+- `agent-trial.test.ts` > runAgentTrial (REQ-REG-AGENT-002) > fails noExternalMessages when the bot messages anyone other than the requester
+
+---
+
+### REQ-REG-AGENT-002 — Every agent trial MUST run in a fresh seeded runtime in its own worker process, and a task passes only if all k trials pass
+
+**Phase:** Agent Runtime P0 (2026-10-05) | **Status:** Implemented
+
+Each trial copies the integrity-checked synthetic seed (plus an optional overlay, with `{date:±N}` relative dates) into a temp tree and runs in a separate worker process, so no state, transcript, or hung provider call survives into the next trial. Each task runs k times (`--repeats`, default 3, range 1..10) and passes only if all k pass (pass^k); the repeat count is part of the cache key. Verdict precedence is error > budget-exceeded > fail > pass: provider errors (including from drained background calls) force `error`, spend from crashed or hung workers is charged, and an actual overrun stops the case. Every worker meter is relayed as a heartbeat (an NDJSON `heartbeat` line under `--json`, a stderr progress line otherwise) so a long trial never looks stalled; on SIGTERM/SIGINT/SIGHUP the CLI kills live workers, logs each one's last meter, and exits 128+signal.
+
+**Standard tests:**
+- `agent-environment.test.ts` > copySeedTree (REQ-REG-AGENT-002) > copies files recursively and expands {date:±N} in .yaml/.md only
+- `agent-environment.test.ts` > copySeedTree (REQ-REG-AGENT-002) > overlay files replace base files at the same path
+- `agent-environment.test.ts` > agent seed fixtures > match their integrity manifest
+- `agent-runner.test.ts` > runAgentCase (REQ-REG-AGENT-002) > passes only when all k trials pass, numbering trials 1..k
+- `agent-runner.test.ts` > runAgentCase (REQ-REG-AGENT-002) > forwards each trial meter to deps.onMeter with the trial number (heartbeat source; review C25)
+- `agent-trial.test.ts` > runAgentTrial (REQ-REG-AGENT-002) > grades the reply and disposes the environment
+- `agent-trial.test.ts` > runAgentTrial (REQ-REG-AGENT-002) > routes photo turns with the fixture bytes and checks data state
+- `agent-trial.test.ts` > runAgentTrial (REQ-REG-AGENT-002) > reports cumulative spend after each turn
+- `agent-trial-spawn.test.ts` > spawnAgentTrial (REQ-REG-AGENT-002) > sends the request on stdin and parses the trial-result line
+- `agent-trial-spawn.test.ts` > spawnAgentTrial (REQ-REG-AGENT-002) > forwards each meter line to onMeter as it arrives, before the result (heartbeat source; review C25)
+- `agent-trial-spawn.test.ts` > spawnAgentTrial (REQ-REG-AGENT-002) > parseMeterLine accepts only meter lines
+- `provider-call-tracker.test.ts` > provider-call tracker (REQ-REG-AGENT-002; review C12/C19) > track(): an error is recorded with its label and rethrown; success passes through untouched
+- `provider-call-tracker.test.ts` > provider-call tracker (REQ-REG-AGENT-002; review C12/C19) > wrap(): replaces completeWithUsage with a tracked version keyed by providerId
+- `args.test.ts` > --repeats (REQ-REG-AGENT-002) > defaults to 3 and accepts 1..10
+- `orchestrator.test.ts` > runSuite — agent bucket > dispatches agent cases through the trial runner with the configured repeats
+- `orchestrator.test.ts` > runSuite — agent bucket > a different repeats value is a different cache key
+- `orchestrator.test.ts` > runSuite — agent bucket > relays every trial meter as a heartbeat with case id and trial number (review C25)
+- `orchestrator.test.ts` > runSuite — agent bucket > runCli --json writes heartbeat NDJSON lines before the case-result (review C25)
+- `orchestrator.test.ts` > runSuite — agent bucket > runCli without --json keeps heartbeats off stdout (stderr progress line instead)
+
+**Edge case tests:**
+- `agent-environment.test.ts` > validateOverlayName > accepts kebab-case names and rejects traversal
+- `agent-environment.test.ts` > agent seed fixtures > the manifest pins exactly 20 seed files (9 receipts + 8 hand-authored + 3 overlay files)
+- `agent-runner.test.ts` > runAgentCase (REQ-REG-AGENT-002) > fails pass^k when any trial fails
+- `agent-runner.test.ts` > runAgentCase (REQ-REG-AGENT-002) > an infrastructure error outranks a graded failure (never cached as a grade)
+- `agent-runner.test.ts` > runAgentCase (REQ-REG-AGENT-002) > an actual overrun on the final trial is budget-exceeded, not pass
+- `agent-runner.test.ts` > runAgentCase (REQ-REG-AGENT-002) > stops dispatching once the case budget would be exceeded; budget-exceeded outranks fail
+- `agent-trial.test.ts` > runAgentTrial (REQ-REG-AGENT-002) > returns error with the message when routing throws, and still disposes
+- `agent-trial.test.ts` > runAgentTrial (REQ-REG-AGENT-002) > a provider error recorded during the trial forces error even when the reply grades as pass
+- `agent-trial.test.ts` > runAgentTrial (REQ-REG-AGENT-002) > drains background provider work before grading, so late errors are counted
+- `agent-trial-spawn.test.ts` > spawnAgentTrial (REQ-REG-AGENT-002) > maps a crashing worker to an error outcome carrying the stderr tail
+- `agent-trial-spawn.test.ts` > spawnAgentTrial (REQ-REG-AGENT-002) > charges the last reported meter when the worker crashes mid-trial
+- `agent-trial-spawn.test.ts` > spawnAgentTrial (REQ-REG-AGENT-002) > kills a hung worker after the timeout and reports error
+- `agent-trial-spawn.test.ts` > spawnAgentTrial (REQ-REG-AGENT-002) > installWorkerTeardown kills live workers on a parent signal, logs their last meter, and exits 128+signal
+- `agent-trial-spawn.test.ts` > spawnAgentTrial (REQ-REG-AGENT-002) > pins the production timers (review C27)
+- `provider-call-tracker.test.ts` > provider-call tracker (REQ-REG-AGENT-002; review C12/C19) > pins the production settle window and drain timeout (review C27)
+- `provider-call-tracker.test.ts` > provider-call tracker (REQ-REG-AGENT-002; review C12/C19) > drain(): waits through a follow-up call scheduled after the first completes
+- `provider-call-tracker.test.ts` > provider-call tracker (REQ-REG-AGENT-002; review C12/C19) > drain(): a call that never settles is recorded as an infrastructure error at the timeout
+- `orchestrator.test.ts` > runSuite — agent bucket > throws a clear error when an agent case is present without a trial runner
+- `orchestrator.test.ts` > runSuite — agent bucket > caps the case allowance at the run budget remaining (review C15)
+
+---
+
+### REQ-REG-AGENT-003 — The `agent` bucket MUST contain at least 40 tasks (46 at P0) over 8 categories and both sets, with seed-derived ground truth pinned by a test
+
+**Phase:** Agent Runtime P0 (2026-10-05) | **Status:** Implemented
+
+46 tasks across single-fact, aggregation, write, multi-turn, no-tool, out-of-distribution, photo, and injection categories, split into a capability set and a regression set, each budgeted at $0.75. Expected numbers and strings are derived from the seed via `seed-facts.ts`, whose values are pinned against the generated receipts so seed drift fails a test. Every injection task watches `notes/` and `context/` and forbids messages to other users. Seeded grocery lists must use Food's canonical department vocabulary.
+
+**Standard tests:**
+- `agent-cases.test.ts` > agent seed facts are pinned (REQ-REG-AGENT-003) > matches the generated receipts
+- `agent-cases.test.ts` > agent cases (REQ-REG-AGENT-003) > has exactly 46 tasks (REQ floor is 40), unique ids, all valid, each budgeted at $0.75
+- `agent-cases.test.ts` > agent cases (REQ-REG-AGENT-003) > covers exactly 8 categories, each at least 3 times, and both sets
+
+**Edge case tests:**
+- `agent-cases.test.ts` > agent cases (REQ-REG-AGENT-003) > every injection task watches notes/ and context/ and forbids messages to other users (review C5)
+- `agent-cases.test.ts` > agent cases (REQ-REG-AGENT-003) > every task asserts something and references existing overlays and photos
+- `agent-cases.test.ts` > agent seed grocery lists use the app's department vocabulary (smoke finding) > reads the canonical list from the app source
+- `agent-cases.test.ts` > agent seed grocery lists use the app's department vocabulary (smoke finding) > every seeded grocery item has a canonical department
+
+---
+
+### REQ-REG-AGENT-004 — The run report MUST show pass^k and per-trial pass rate by set and category; dry-run and the budget pre-check MUST price agent cases as turns x repeats; `--case <id>` MUST select tasks
+
+**Phase:** Agent Runtime P0 (2026-10-05) | **Status:** Implemented
+
+The Markdown report's Agent bucket section tabulates pass^k (tasks) and trial pass rate by set and by category. `estimateAgentCaseUsd` prices a case as per-turn estimate x turns x repeats and is used by both `--dry-run` and the run-budget pre-check. `--case <id>` (repeatable, `--case=<id>` form) selects cases by id after the bucket filter and rejects unknown ids; `--rerun` bypasses the cache but does not select. The pre-agent-pipeline baseline (qwen3.8:27b-mlx, 46 tasks x 3 repeats: capability pass^k 9/25, regression 12/21; frontier pending credits) is recorded in `docs/superpowers/plans/findings/2026-10-05-agent-bucket-baseline.md`.
+
+<!-- FRONTIER-BASELINE-PENDING: frontier-model baseline is not yet recorded; update this entry and the findings doc when it completes. -->
+
+**Standard tests:**
+- `markdown-report.test.ts` > formatAgentSection (REQ-REG-AGENT-004) > reports pass^k per set and category plus per-trial pass rate
+- `markdown-report.test.ts` > formatDryRunMarkdown — per-case estimate override (REQ-REG-AGENT-004) > uses the supplied per-result estimate when given
+- `agent-runner.test.ts` > estimateAgentCaseUsd (REQ-REG-AGENT-004; review C9) > prices a case as per-turn estimate × turns × repeats
+- `orchestrator.test.ts` > runSuite — agent bucket > runCli --dry-run prices agent cases through estimateAgentCaseUsd (review C9/C26)
+- `args.test.ts` > --case (REQ-REG-AGENT-004; review C23) > accumulates ids in both forms, is absent by default, and validates ids
+- `orchestrator.test.ts` > runSuite — caseFilter (review C23) > runCli --case=<id> reaches runSuite as the case filter
+
+**Edge case tests:**
+- `agent-runner.test.ts` > estimateAgentCaseUsd (REQ-REG-AGENT-004; review C9) > treats a payload with no turns as one turn
+- `orchestrator.test.ts` > runSuite — agent bucket > run-budget pre-check prices agent cases as per-turn estimate x turns x repeats (review C9)
+- `orchestrator.test.ts` > runSuite — caseFilter (review C23) > dispatches only the named cases and rejects unknown ids
+
+---
+
 ### REQ-SEC-013 — Model-id validation MUST accept namespaced ids and MUST be the same rule on every operator surface
 
 **Phase:** Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02) | **Status:** Implemented
@@ -13552,6 +13753,15 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-020 | receipt-runner.test.ts | 2 | 2 | Implemented |
 | REQ-REG-021 | local-model-estimate.test.ts, estimator.test.ts | 3 | 2 | Implemented |
 | REQ-REG-022 | orchestrator-receipt-dispatch.test.ts, receipt-runner.test.ts | 2 | 4 | Implemented |
+| REQ-REG-023 | cache.test.ts, orchestrator.test.ts | 1 | 2 | Implemented |
+| REQ-REG-024 | cache-key.test.ts, orchestrator.test.ts | 3 | 5 | Implemented |
+| REQ-REG-025 | orchestrator.test.ts | 1 | 1 | Implemented |
+| REQ-REG-026 | rubric-oracle.test.ts, chatbot-runner.test.ts | 2 | 1 | Implemented |
+| REQ-REG-027 | archive-cache.test.ts, orchestrator.test.ts | 2 | 0 | Implemented |
+| REQ-REG-AGENT-001 | outcome-oracle.test.ts, agent-trial.test.ts | 14 | 7 | Implemented |
+| REQ-REG-AGENT-002 | agent-environment.test.ts, agent-runner.test.ts, agent-trial.test.ts, agent-trial-spawn.test.ts, provider-call-tracker.test.ts, args.test.ts, orchestrator.test.ts | 19 | 19 | Implemented |
+| REQ-REG-AGENT-003 | agent-cases.test.ts | 3 | 4 | Implemented |
+| REQ-REG-AGENT-004 | markdown-report.test.ts, agent-runner.test.ts, args.test.ts, orchestrator.test.ts | 6 | 3 | Implemented |
 | REQ-REG-GUI-OV-001 | regression-routes-write.test.ts | 5 | 0 | Implemented |
 | REQ-REG-GUI-OV-002 | model-spec.test.ts | 7 | 14 | Implemented |
 | REQ-REG-GUI-OV-003 | regression-routes-write.test.ts | 4 | 6 | Implemented |
@@ -13686,4 +13896,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **449 test files** | **3101** | **3024** | **6125 tests** |
+| **Totals** | **442 test files** | **3152** | **3066** | **6218 tests** |

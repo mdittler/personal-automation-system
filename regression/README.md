@@ -24,9 +24,29 @@ pnpm test:regression -- --bucket=routing              # routing bucket only
 pnpm test:regression -- --bucket=receipt              # receipt bucket only (5 fixtures)
 pnpm test:regression -- --bucket=recall               # recall bucket only
 pnpm test:regression -- --bucket=chatbot              # chatbot bucket only
+pnpm test:regression -- --bucket=agent                # agent bucket only (46 outcome-graded tasks)
+pnpm test:regression -- --bucket=agent --repeats=3    # trials per agent task (default 3, range 1..10); a task passes only if all k pass
+pnpm test:regression -- --bucket=agent --case=agent-grocery-list --no-cache   # select tasks by id (repeatable; --case=<id> or --case <id>)
+pnpm test:regression -- --archive-cache               # move the cache to <cacheDir>-archive/<stamp>/ and exit; history preserved
 pnpm test:regression -- --rerun food-save-a-recipe    # force one fresh dispatch
 pnpm test:regression -- --json                        # line-delimited JSON events (used by GUI subprocess)
 ```
+
+`--rerun <id>` bypasses the cache for that case but does **not** select it:
+the rest of the run still executes. `--case <id>` selects: only the named cases
+are dispatched (after the `--bucket` filter), and an unknown id is an error.
+Combine them to force one fresh dispatch of one case.
+
+**Agent heartbeat.** Each agent trial runs in its own worker process and
+reports a cost/turn meter after every turn and every 2 s. The CLI relays every
+meter live so a 15-minute trial never looks stalled: under `--json` it is an
+NDJSON line `{"type":"heartbeat", ...}` on stdout (interleaved with
+`case-result` and `summary` lines; the GUI parser tolerates it and it re-arms
+the GUI's 10-minute stall watchdog), otherwise a progress line on stderr.
+When the CLI receives SIGTERM, SIGINT, or SIGHUP it SIGKILLs live workers,
+logs each one's last meter as a `worker-terminated` stderr line, and exits
+128+signal. Note that pnpm prints its own two-line banner on stdout before the
+CLI output; filter on lines starting with `{` when parsing.
 
 **Note on tokens:** the GUI displays per-case cost (authoritative, via
 `CostTracker` delta) but token counts are currently 0. `LLMService.complete()`
@@ -54,6 +74,12 @@ The Chunk B.2 GUI design surfaces cost prominently and renders tokens as "—".
 - **REQ-REG-011** — routing bucket: ≥ 0.95 accuracy across all food-shadow inputs (fail/error/budget-exceeded count against the gate).
 - **REQ-REG-012** — chatbot env per-run isolation (temp `data/` dir, disposed in `finally`).
 - **REQ-REG-014** — `oracle: 'judge'` is reserved; declaring it throws.
+- **REQ-REG-023** — `error` / `budget-exceeded` verdicts are never cached; legacy entries read as misses.
+- **REQ-REG-024** — cache key binds the case id and the bucket's harness sources (`BUCKET_HARNESS_PATHS`).
+- **REQ-REG-025** — each chatbot case runs in a freshly seeded runtime, disposed afterwards.
+- **REQ-REG-026** — the rubric judge sees the seed reference data and is told which block is the reply.
+- **REQ-REG-027** — `--archive-cache` archives the cache and leaves it empty.
+- **REQ-REG-AGENT-001..004** — agent bucket: outcome oracle, per-trial worker + pass^k, 46 seed-grounded tasks, report/dry-run/`--case`.
 
 ## Where things live
 
@@ -77,7 +103,12 @@ The Chunk B.2 GUI design surfaces cost prominently and renders tokens as "—".
 | `src/cases/recall/` | 25 recall classifier cases (13 true / 10 false / 2 observational; pinned `today`) |
 | `src/cases/chatbot/` | 10 rubric-graded chatbot cases (migrated from v0 corpus) |
 | `src/cases/receipt/` | 5 receipt-parser cases (4 real photos + 1 synthetic expired-90d) |
+| `src/cases/agent/` | 46 outcome-graded agent tasks (`index.ts`), task schema (`types.ts`), seed-derived expected values (`seed-facts.ts`) |
+| `src/oracles/outcome.ts` | Deterministic outcome oracle for the agent bucket (facts, forbidden phrases, file state, unchanged paths) |
+| `src/runner/agent-trial*.ts`, `case-runners/agent-runner.ts` | One worker process per trial, pass^k case runner, infrastructure-first verdicts |
+| `fixtures/agent/` | Synthetic household seed (`household/`), injection overlays (`overlays/`), `seed.sha256` integrity manifest |
 | `fixtures/receipts/` | Photos + `.expected.json` sidecars + `.sha256` manifests + `.true.md` transcriptions |
+| `scripts/generate-agent-seed.py` | Generates the synthetic agent-seed receipts |
 | `scripts/generate-expired-receipt.py` | Pillow-based synthetic fixture generator for `expired-90d.jpg` |
 | `src/__tests__/` | Unit + integration tests for the runner machinery |
 
@@ -109,14 +140,55 @@ the parser preserved `rawExtractedDate` for audit. The synthetic
 `expired-90d.jpg` is the canonical example — regenerate it with
 `python3 -m pip install --user Pillow && python3 scripts/generate-expired-receipt.py`.
 
+## Adding an agent task
+
+Edit `src/cases/agent/index.ts` and add one `TaskDef` to the task list.
+
+1. Pick a `category` (single-fact, aggregation, out-of-distribution, write,
+   no-tool, multi-turn, photo, injection) and a `set`: `regression` should stay
+   near 100%, `capability` starts low and measures progress.
+2. Take every expected number, string, or date from `seedFacts` (`F.latest(...)`,
+   `F.previous(...)`, ...) rather than typing it, so the ground truth is
+   derived from the seed and pinned by `agent-cases.test.ts`. Use explicit
+   years in questions so they never depend on "today".
+3. Grade outcomes only: `facts` in the reply, `forbidden` phrases, `dataState`
+   (files and list items), and `unchanged` paths. Never assert which tools ran.
+4. Injection tasks must set `noExternalMessages: true` and list `notes/` and
+   `context/` under `unchanged`; the test enforces it. Put attacker content in
+   an overlay directory under `fixtures/agent/overlays/`.
+5. Keep `budgetUsd` at the bucket default ($0.75) and the id prefixed `agent-`.
+6. If you change the task count, update the pinned count in
+   `src/__tests__/agent-cases.test.ts`. Run `pnpm --filter @pas/regression test`.
+
+## Changing the agent seed
+
+Edit the YAML/Markdown under `fixtures/agent/household/` (or an overlay), or
+`scripts/generate-agent-seed.py` for the receipts, then regenerate the
+integrity manifest and update the pin test:
+
+```sh
+cd regression/fixtures/agent && find household overlays -type f | LC_ALL=C sort | xargs shasum -a 256 > seed.sha256 && wc -l seed.sha256 && cd -
+```
+
+`agent-environment.test.ts` pins the number of files in the manifest (20 at
+P0); `agent-cases.test.ts` pins the derived facts against the receipts.
+Grocery items must use Food's canonical departments. Any seed change alters
+the cache keys of every agent case (the manifest is a harness path), so
+re-baseline afterwards.
+
 ## How the cache works
 
 The cache key is a SHA-256 over: case-file git blob hash, every `coverage[]`
 path's git blob hash, the active tier model IDs, and (for the `receipt` bucket
 only) a salt derived from today's date + the configured timezone. Touch any of
-those and the cache key changes; the case re-dispatches. Cached entries live at
+those and the cache key changes; the case re-dispatches. The key also binds the case id and the bucket's harness sources
+(`BUCKET_HARNESS_PATHS` in `src/shared/cache-key.ts`: runner, oracle, seed
+manifest, LLM layer), and the agent bucket's repeat count (REQ-REG-024).
+`error` and `budget-exceeded` verdicts are never written, and any such legacy
+entry on disk is a miss (REQ-REG-023). Cached entries live at
 `data/system/regression-cache/<case-id>/<cache-key>.json` and are never deleted
-(REQ-REG-010 — history retained).
+(REQ-REG-010 — history retained); `--archive-cache` moves them aside to a dated
+archive directory instead of deleting them (REQ-REG-027).
 
 The receipt-bucket date salt is what makes the synthetic `expired-90d` fixture
 re-exercise after a date rollover: the parser's `isValidReceiptDate` rejection

@@ -4848,7 +4848,7 @@ git commit -m "docs(regression): agent bucket baseline on the current pipeline"
 - Modify: `docs/open-items.md`
 - Modify: `regression/README.md`
 
-- [ ] **Step 1: URS entries** — add after REQ-REG-022 in `docs/urs.md`, following the existing entry format (title line, `**Phase:** Agent Runtime P0 (2026-10-XX) | **Status:** Implemented`, description, `**Standard tests:**`, `**Edge case tests:**` with `file > describe > it` lines from the tests written above):
+- [x] **Step 1: URS entries** — add after REQ-REG-022 in `docs/urs.md`, following the existing entry format (title line, `**Phase:** Agent Runtime P0 (2026-10-XX) | **Status:** Implemented`, description, `**Standard tests:**`, `**Edge case tests:**` with `file > describe > it` lines from the tests written above):
 
 | ID | Requirement |
 |---|---|
@@ -4864,23 +4864,25 @@ git commit -m "docs(regression): agent bucket baseline on the current pipeline"
 
 Add one traceability-matrix row per ID (test files, standard count, edge count, `Implemented`).
 
-- [ ] **Step 2: `docs/implementation-phases.md`** — add a dated section "Agent Runtime P0 — Benchmark Hygiene + Agent Bucket (2026-10-XX)" with Goal / Approach / Tasks 0–13 summary / Codex review rounds / Tests (counts) / Baseline headline numbers. Per the CLAUDE.md anti-bloat rule, **do not** add a CLAUDE.md status bullet yet — the single bullet lands when the whole Agent Runtime phase completes (P5).
+- [x] **Step 2: `docs/implementation-phases.md`** — add a dated section "Agent Runtime P0 — Benchmark Hygiene + Agent Bucket (2026-10-XX)" with Goal / Approach / Tasks 0–13 summary / Codex review rounds / Tests (counts) / Baseline headline numbers. Per the CLAUDE.md anti-bloat rule, **do not** add a CLAUDE.md status bullet yet — the single bullet lands when the whole Agent Runtime phase completes (P5).
 
-- [ ] **Step 3: `docs/open-items.md`** — mark the "Regression harness defects (found 2026-10-05)" Unfinished Corrections entry closed (`~~…~~ ✓ Closed (2026-10-XX, Agent Runtime P0)`) naming the requirement that closed each sub-item; in the Agent Runtime Confirmed Phases entry, note "P0 complete (2026-10-XX); baseline: <link>".
+- [x] **Step 3: `docs/open-items.md`** — mark the "Regression harness defects (found 2026-10-05)" Unfinished Corrections entry closed (`~~…~~ ✓ Closed (2026-10-XX, Agent Runtime P0)`) naming the requirement that closed each sub-item; in the Agent Runtime Confirmed Phases entry, note "P0 complete (2026-10-XX); baseline: <link>".
 
-- [ ] **Step 4: `regression/README.md`** — add "Adding an agent task" (edit `src/cases/agent/index.ts`; use `seedFacts` for numbers; pick a category and set; graded on outcomes only), "Changing the agent seed" (edit fixtures or `scripts/generate-agent-seed.py`, regenerate `seed.sha256` with the Task 8 Step 3 command, update the pin test), and the `--repeats`, `--case`, and `--archive-cache` flags in Quick start (note that `--rerun` bypasses the cache but does not select; `--case` selects).
+- [x] **Step 4: `regression/README.md`** — add "Adding an agent task" (edit `src/cases/agent/index.ts`; use `seedFacts` for numbers; pick a category and set; graded on outcomes only), "Changing the agent seed" (edit fixtures or `scripts/generate-agent-seed.py`, regenerate `seed.sha256` with the Task 8 Step 3 command, update the pin test), and the `--repeats`, `--case`, and `--archive-cache` flags in Quick start (note that `--rerun` bypasses the cache but does not select; `--case` selects).
 
-- [ ] **Step 5: Full verification**
+- [x] **Step 5: Full verification**
 
 Run: `pnpm lint && pnpm test && pnpm --filter @pas/regression test && pnpm --filter @pas/regression typecheck`
 Expected: zero lint errors; all suites green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/urs.md docs/implementation-phases.md docs/open-items.md regression/README.md
 git commit -m "docs(agent-runtime-p0): URS, phase record, open items, regression README"
 ```
+
+> Observed: URS REQ-REG-023..027 + REQ-REG-AGENT-001..004 added (matrix 442 files / 3152 / 3066 / 6218); phase section, open-items closure + new Food formatter entry, README updated; `pnpm lint` 0 errors, `pnpm test` 12782 passed (579 files), regression 787 passed (50 files), typecheck clean. Also added `'agent'` to the allowed buckets in `core/src/gui/__tests__/regression-integration.test.ts` (it failed once the bucket existed). FRONTIER-BASELINE-PENDING: docs reference the findings doc, which is written when the frontier baseline completes.
 
 - [ ] **Step 7: Phase review** — code-review loop per `docs/review-protocol.md` §2, §4–§6 (Codex `gpt-6-luna` medium reviews in a detached worktree at the phase SHA; Grok `grok-4.7-high` revises in the phase worktree; ≤5 iterations; then Sonnet simplify + confirming Luna review; the brief includes the Deliverables, the acceptance checklist, and the implementation notes). Every finding gets a disposition in the ledger; apply fixes with a change table in the implementation-phases section; save `suite-<sha>.txt` for the final SHA and re-check HEAD before merging.
 
@@ -4919,7 +4921,7 @@ The plan→execution contract (`docs/review-protocol.md` §2). Code review adjud
 - [x] **D12** — The report shows pass^k and the per-trial pass rate by set and by category. Dry-run and the run-budget pre-check both price agent cases through `estimateAgentCaseUsd` (per-turn estimate × turns × repeats, tested). (Tasks 9, 10) [observed: `markdown-report.test.ts` formatAgentSection + per-case override green; `orchestrator.test.ts` pre-check test (0.01 x 1 turn x 3 repeats > 0.02 budget → budget-exceeded, not dispatched) and `runCli --dry-run` test (`0.030000`) green; mutations: wrong trial-pass counting / any-pass pass^k fail the report test, override ignored fails the dry-run formatter test, per-input formula for agents fails the pre-check test, dry-run `return undefined` fails the dry-run test]
 - [ ] **D13** — Complete baselines for qwen3.8 and frontier on the pre-agent pipeline, meaning no `budget-exceeded` or `error` except local photo tasks. (Task 12)
 - [x] **D14** [observed after `pnpm build` at HEAD 8850dae + Task 11 working tree: `totalCases` 1; `agent-grocery-list pass`; two `pass` trials; `worker pid` count 2 (60644, 62332); heartbeats `1/2` x6 and `2/2` x4; stdout types `case-result`, `heartbeat`, `summary` only (pnpm's own 2-line banner precedes them on stdout; filter `^{`). Negative: `error`, details `trial 1/1: provider error(s) during trial: ollama: model 'does-not-exist:1b' not found | ... [worker pid 66312]`, cache dir listing identical before/after (2 files). Evidence: `/Users/mdittler/Projects/pas-q3-review-evidence/smoke-*`. First positive run ended `fail` (granola/oat milk missing) and exposed a seed bug, fixed test-first (see Task 11 note)] — Live smoke, selected with `--case=agent-grocery-list --no-cache --json`: `summary.totalCases` is 1; the case ends `pass` or `fail` (never `error`); both trials are graded and their details show two distinct `worker pid`s; a heartbeat line exists for each trial; stdout carries only `heartbeat`/`case-result`/`summary` lines. Negative case (unreachable model): verdict `error` with `provider error(s) during trial: ollama: …` in the trial details — not `fail` — and the cache directory is unchanged. (Task 11 Step 8)
-- [ ] **D15** — Documentation footprint complete. (Task 13)
+- [x] **D15** [partial: frontier baseline pending (credits), FRONTIER-BASELINE-PENDING] — Documentation footprint complete. (Task 13)
 
 ## Review findings — acceptance checklist
 
