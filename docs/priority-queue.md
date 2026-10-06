@@ -78,6 +78,7 @@ Rows are in execution order. **Depends on** names rows that must be `Done` first
 | Q1 | Admin-gate the three model-journal GUI routes | Fix (security) | Done (2026-10-05, merge of `claude/q1-model-journal-admin-gate`; fix 0007f13) | `docs/open-items.md` → Unfinished Corrections, "Model journal crosses household boundaries" (item 2) | — |
 | Q2 | Food data fixes: Trader Joe's store-name re-quoting; "most recent receipt" sorts by scan time; recent-interaction paths in the old layout | Fix | Done (2026-10-05, merge of `claude/q2-food-data-fixes`; fixes 8bfb595, b5fb51c, 50fe1f4) | `docs/open-items.md` → Unfinished Corrections, "Food data bugs (found 2026-10-05)" | — |
 | Q3 | **Agent Runtime P0** — benchmark hygiene, agent bucket, baseline | Phase | **Plan ready** (5 plan-review rounds done; one confirming round still needed — see Workflow step 2) | `docs/superpowers/plans/2026-10-05-agent-runtime-p0-benchmark.md` | Q2 (so the baseline doesn't penalise known data bugs) |
+| Q3b | Classifier accepts index answers: `parseClassifyResponse` rejects `"4"` / `"5. …"` category replies (Haiku, the default fast tier) and misroutes Food messages to the chatbot; plus Sonnet 5.5 pricing entry and PAS-relevance classifier `maxTokens: 10` truncation | Fix | Not started | `docs/open-items.md` → Unfinished Corrections, "Intent classifier rejects numbered category answers (found 2026-10-06)" | Q3 |
 | Q4 | **Agent Runtime P1** — `LLMService.chat()` with native tools; Ollama `/api/chat`, OpenAI-compatible/llama.cpp, Anthropic; capability detection; `num_ctx`, thinking (default off), keep-alive, vision; AbortSignal | Phase | Plan: needs writing | Design §5, §16 | Q3 |
 | Q5 | **Agent Runtime P2** — tool registry (validation, read-only facade, pinning, permission filter), `find_tools`, AgentLoop, confirmations + taint, integrity ledger, trace, ContextAssembler, core tools; `/agent` (admin, dark launch) | Phase | Plan: needs writing | Design §6–§9, §11.1, §14, §16 | Q4 |
 | Q6 | **Agent Runtime P3** — Food + Notes tools, cards, photo import via `agent.vision_model`, `PendingInputRegistry`, migration inventory | Phase | Plan: needs writing | Design §10.3, §11.2–§11.3, §16 | Q5 |
@@ -107,6 +108,7 @@ Each item must appear in that phase's plan. Most came out of the 2026-10-05 desi
 - Migration inventory: every Food `handleMessage` branch, command continuation, and typed-reply callback maps to a tool, a pending-input flow, or *dropped (operator-approved)*. It gates Q7.
 
 **Q7 · P4**
+- Re-record the frontier baseline after Q3b (classifier fix) before using it as the cut-over gate. The P0 frontier baseline was measured with the `parseClassifyResponse` numbered-answer defect (single-fact 2/10, injection 0/3); see `docs/superpowers/plans/findings/2026-10-05-agent-bucket-baseline.md`.
 - Agent-bucket tasks for `api` and `alert` origins. They need `MessageContext.origin`.
 - Retire the `chatbot` bucket, and the `routing` food-shadow and `recall` cases. Retire their URS entries; don't delete them.
 - Remove the model-journal prompt injection. This closes item 1 of the open-items entry "Model journal crosses household boundaries".

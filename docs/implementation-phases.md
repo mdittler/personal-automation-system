@@ -4294,7 +4294,7 @@ Round 3 (confirming, full scope) raised no new code defect. Round 4 reviewed the
 | 9 | Trial + case runner: pass^k, error > budget-exceeded > fail > pass, provider-call tracker with drain |
 | 10 | One worker per trial; heartbeat relay; signal teardown; `--case`; orchestrator/CLI/deps/report wiring (REQ-REG-AGENT-002, -004) |
 | 11 | 46 tasks, seed-derived ground truth pinned by a test (REQ-REG-AGENT-003); the live smoke also caught a seed bug (non-canonical grocery departments) fixed test-first, and a Food formatter defect carried to P3 |
-| 12 | Baseline on the pre-agent pipeline: local recorded, frontier pending |
+| 12 | Baselines recorded (local + frontier, --no-cache) |
 | 13 | Documentation footprint (this section, URS, open-items, README) |
 
 **Codex review rounds (plan):** six rounds, findings 9 → 7 → 4 → 2 → 3 → 6 (round 6 was the first to review the Deliverables, acceptance checklist, and live-smoke procedure end to end, hence the uptick). All were fixed in-plan with tests and acceptance rows. The end-of-phase code review is recorded below.
@@ -4331,11 +4331,10 @@ Round 5 (confirming, loop cap) raised only R5-a. Loop closed. Sonnet simplify pa
 
 | model | capability pass^3 (tasks) | capability trial rate | regression pass^3 (tasks) | regression trial rate |
 |---|---|---|---|---|
-| qwen3.8:27b-mlx (local, 46 tasks x 3) | 9/25 | 33/75 | 12/21 | 37/63 |
-| frontier | pending (credits) | pending | pending | pending |
+| qwen3.8:27b-mlx (local, 46 tasks x 3, `--no-cache`, 406668b) | 11/25 | 36/75 | 12/21 | 36/63 |
+| haiku-4-5 + sonnet-5-5 (frontier, 46 tasks x 3, `--no-cache`, 406668b) | 8/25 | 26/75 | 7/21 | 21/63 |
 
-Local run: 21 pass / 22 fail / 3 error. The 3 errors are the photo tasks ("not applicable - text-only provider", expected for a local text model). Multi-turn 0/3 and photo 0/3; write 1/8 and out-of-distribution 1/7 are the weakest categories; injection 3/3 and no-tool 4/4 are clean. Median 40.3 s per trial. FRONTIER-BASELINE-PENDING: the Anthropic account ran out of credits; complete the frontier run and the findings doc, then fill the pending cells (D13 stays open until then).
-
+Local run: 23 pass / 20 fail / 3 error ($0, median 31.2 s per trial); the 3 errors are the photo tasks ("not applicable - text-only provider"). Frontier run: 15 pass / 31 fail / 0 error ($2.38, median 8.5 s; photo 3/3). Multi-turn is 0/3 on both and write is 1/8 (local) and 2/8 (frontier); no-tool is 4/4 on both. The frontier pipeline scores below local on single-fact (2/10 vs 7/10) and injection (0/3 vs 3/3) because `parseClassifyResponse` rejects Haiku's numbered category answers and the message falls to the chatbot fallback (fix queued as Q3b), so the frontier baseline should be re-recorded after Q3b before P4. Superseded earlier runs (a062159 local, a credit-exhausted frontier attempt, a 9e1c128 hang) are listed in the findings doc.
 ---
 
 ## Deferred / Open Items

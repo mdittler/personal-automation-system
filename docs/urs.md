@@ -13189,9 +13189,8 @@ Each trial copies the integrity-checked synthetic seed (plus an optional overlay
 
 **Phase:** Agent Runtime P0 (2026-10-05) | **Status:** Implemented
 
-The Markdown report's Agent bucket section tabulates pass^k (tasks) and trial pass rate by set and by category. `estimateAgentCaseUsd` prices a case as per-turn estimate x turns x repeats and is used by both `--dry-run` and the run-budget pre-check. `--case <id>` (repeatable, `--case=<id>` form) selects cases by id after the bucket filter and rejects unknown ids; `--rerun` bypasses the cache but does not select. The pre-agent-pipeline baseline (qwen3.8:27b-mlx, 46 tasks x 3 repeats: capability pass^k 9/25, regression 12/21; frontier pending credits) is recorded in `docs/superpowers/plans/findings/2026-10-05-agent-bucket-baseline.md`.
+The Markdown report's Agent bucket section tabulates pass^k (tasks) and trial pass rate by set and by category. `estimateAgentCaseUsd` prices a case as per-turn estimate x turns x repeats and is used by both `--dry-run` and the run-budget pre-check. `--case <id>` (repeatable, `--case=<id>` form) selects cases by id after the bucket filter and rejects unknown ids; `--rerun` bypasses the cache but does not select. The pre-agent-pipeline baseline (46 tasks x 3 repeats, `--no-cache`, at 406668b; local qwen3.8:27b-mlx: capability pass^k 11/25, regression 12/21; frontier haiku-4-5 + sonnet-5-5: capability 8/25, regression 7/21, with the classifier numbered-answer defect queued as Q3b) is recorded in `docs/superpowers/plans/findings/2026-10-05-agent-bucket-baseline.md`.
 
-<!-- FRONTIER-BASELINE-PENDING: frontier-model baseline is not yet recorded; update this entry and the findings doc when it completes. -->
 
 **Standard tests:**
 - `markdown-report.test.ts` > formatAgentSection (REQ-REG-AGENT-004) > reports pass^k per set and category plus per-trial pass rate
