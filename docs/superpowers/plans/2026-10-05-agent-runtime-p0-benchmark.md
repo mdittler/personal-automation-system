@@ -156,7 +156,7 @@ Today `runSuite` writes every result (`regression/src/runner/index.ts`, after `r
 - Modify: `regression/src/runner/index.ts`
 - Test: `regression/src/__tests__/cache.test.ts`, `regression/src/__tests__/orchestrator.test.ts`
 
-- [ ] **Step 1: Write the failing cache-store tests** — append to `regression/src/__tests__/cache.test.ts`:
+- [x] **Step 1: Write the failing cache-store tests** — append to `regression/src/__tests__/cache.test.ts`:
 
 ```ts
 import { isCacheableVerdict } from '../runner/cache.js';
@@ -203,7 +203,7 @@ describe('CacheStore.read — legacy non-cacheable entries are misses (REQ-REG-0
 
 (Ensure the file imports `mkdtemp`, `mkdir`, `writeFile`, `rm` from `node:fs/promises`, `tmpdir` from `node:os`, `join` from `node:path`, and `CacheStore` — add any missing to the existing import lines.)
 
-- [ ] **Step 2: Write the failing orchestrator test** — add inside `describe('runSuite — cache lifecycle', …)` in `regression/src/__tests__/orchestrator.test.ts`:
+- [x] **Step 2: Write the failing orchestrator test** — add inside `describe('runSuite — cache lifecycle', …)` in `regression/src/__tests__/orchestrator.test.ts`:
 
 ```ts
 	it('does not cache an error verdict — the next run dispatches again (REQ-REG-023)', async () => {
@@ -219,12 +219,12 @@ describe('CacheStore.read — legacy non-cacheable entries are misses (REQ-REG-0
 	});
 ```
 
-- [ ] **Step 3: Run both to verify they fail**
+- [x] **Step 3: Run both to verify they fail**
 
 Run: `cd regression && npx vitest run src/__tests__/cache.test.ts src/__tests__/orchestrator.test.ts`
 Expected: FAIL — `isCacheableVerdict` is not exported; the orchestrator test sees `source: 'cached'` on the second run.
 
-- [ ] **Step 4: Implement** — in `regression/src/runner/cache.ts` add the import `type Verdict` to the existing `../shared/types.js` import and add, above `export class CacheStore`:
+- [x] **Step 4: Implement** — in `regression/src/runner/cache.ts` add the import `type Verdict` to the existing `../shared/types.js` import and add, above `export class CacheStore`:
 
 ```ts
 /**
@@ -251,12 +251,12 @@ In `regression/src/runner/index.ts`, import `isCacheableVerdict` alongside `Cach
 			if (isCacheableVerdict(result.verdict)) await cache.write(result);
 ```
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `cd regression && npx vitest run src/__tests__/cache.test.ts src/__tests__/orchestrator.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add regression/src/runner/cache.ts regression/src/runner/index.ts regression/src/__tests__/cache.test.ts regression/src/__tests__/orchestrator.test.ts

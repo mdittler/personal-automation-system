@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CacheStore } from '../runner/cache.js';
+import { CacheStore, isCacheableVerdict } from '../runner/cache.js';
 import type { RunResult } from '../shared/types.js';
 import { VERDICT } from '../shared/types.js';
 
@@ -234,5 +234,44 @@ describe('CacheStore — distinct modelIds produce distinct cache files for one 
 		expect(all).toHaveLength(2);
 		const fastModels = all.map((r) => r.modelIds.fast).sort();
 		expect(fastModels).toEqual(['gemma4:31b', 'gemma4:e4b']);
+	});
+});
+
+describe('isCacheableVerdict (REQ-REG-023)', () => {
+	it('caches only pass and fail', () => {
+		expect(isCacheableVerdict('pass')).toBe(true);
+		expect(isCacheableVerdict('fail')).toBe(true);
+		expect(isCacheableVerdict('error')).toBe(false);
+		expect(isCacheableVerdict('budget-exceeded')).toBe(false);
+	});
+});
+
+describe('CacheStore.read — legacy non-cacheable entries are misses (REQ-REG-023)', () => {
+	it('returns null for an on-disk entry whose verdict is error', async () => {
+		const root = await mkdtemp(join(tmpdir(), 'cache-err-'));
+		const store = new CacheStore(root);
+		const key = 'a'.repeat(64);
+		await mkdir(join(root, 'case-x'), { recursive: true });
+		await writeFile(
+			join(root, 'case-x', `${key}.json`),
+			JSON.stringify({
+				result: {
+					caseId: 'case-x',
+					cacheKey: key,
+					source: 'fresh',
+					verdict: 'error',
+					inputs: [],
+					actuals: [],
+					oracleVerdicts: [{ verdict: 'error', details: 'judge LLM threw: 400' }],
+					tokenCounts: { input: 0, output: 0 },
+					costUsd: 0,
+					modelIds: { fast: 'f', standard: 's', reasoning: null },
+					timestamp: new Date().toISOString(),
+					durationMs: 1,
+				},
+			}),
+		);
+		expect(await store.read('case-x', key)).toBeNull();
+		await rm(root, { recursive: true, force: true });
 	});
 });

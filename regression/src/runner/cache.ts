@@ -14,6 +14,7 @@ import {
 	type RunResult,
 	SAFE_CACHE_KEY_RE,
 	SAFE_CASE_ID_RE,
+	type Verdict,
 	isPlainObject,
 	looksLikeRunResult,
 } from '../shared/types.js';
@@ -24,6 +25,16 @@ function assertValidCaseId(id: string): void {
 }
 function assertValidCacheKey(key: string): void {
 	if (!SAFE_CACHE_KEY_RE.test(key)) throw new Error(`invalid cache key: ${key}`);
+}
+
+/**
+ * Only real grades are cacheable (REQ-REG-023). `error` (judge throws,
+ * truncation, provider outages, env failures) and `budget-exceeded` describe
+ * the run, not the model — re-serving them would report an infrastructure
+ * accident as the model's result until the coverage hash happens to change.
+ */
+export function isCacheableVerdict(verdict: Verdict): boolean {
+	return verdict === 'pass' || verdict === 'fail';
 }
 
 export class CacheStore {
@@ -61,6 +72,7 @@ export class CacheStore {
 			console.warn(`[regression] cache shape invalid (RunResult schema mismatch) ${path}`);
 			return null;
 		}
+		if (!isCacheableVerdict(inner.verdict)) return null;
 		return inner;
 	}
 

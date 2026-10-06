@@ -37,7 +37,7 @@ import { bucketCacheSalt, computeCacheKey } from '../shared/cache-key.js';
 import type { EstimateCall, EstimateUsdFn } from '../shared/types.js';
 import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
 import { RunBudget } from './budget.js';
-import { CacheStore } from './cache.js';
+import { CacheStore, isCacheableVerdict } from './cache.js';
 import { loadCases } from './case-loader.js';
 import { CHATBOT_ESTIMATE_TOKENS, runChatbotCase } from './case-runners/chatbot-runner.js';
 import { runRecallCase } from './case-runners/recall-runner.js';
@@ -371,7 +371,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 			}
 
 			runBudget.add(result.costUsd);
-			await cache.write(result);
+			if (isCacheableVerdict(result.verdict)) await cache.write(result);
 			results.push(result);
 			opts.onResult?.(result);
 		}

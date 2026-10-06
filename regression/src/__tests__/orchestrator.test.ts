@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -109,6 +109,21 @@ describe('runSuite — empty case dir', () => {
 });
 
 describe('runSuite — cache lifecycle', () => {
+	it('does not cache an error verdict — the next run dispatches again (REQ-REG-023)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		const adapter = makeAdapter();
+		adapter.foodShadow.mockRejectedValue(new Error('provider exploded'));
+		const opts = baseOpts({ classifiers: adapter });
+		const first = await runSuite(opts);
+		expect(first.results[0]!.verdict).toBe(VERDICT.error);
+		// The write guard on its own: nothing was persisted for the error result.
+		const persisted = await readdir(join(cacheDir, 'a-id')).catch(() => []);
+		expect(persisted).toEqual([]);
+		const second = await runSuite(opts);
+		expect(adapter.foodShadow).toHaveBeenCalledTimes(2);
+		expect(second.results[0]!.source).toBe('fresh');
+	});
+
 	it('first run is fresh; second run is cached; LLM called once', async () => {
 		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
 		const opts = baseOpts();
