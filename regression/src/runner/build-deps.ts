@@ -30,9 +30,10 @@ import { type Logger, pino } from 'pino';
 import { todayInTimezone } from '../shared/cache-key.js';
 import type { EstimateUsdFn } from '../shared/types.js';
 import type { CliOptions } from './args.js';
-import { type TierOverride, createChatbotEnvironment } from './chatbot-environment.js';
+import { createChatbotEnvironment } from './chatbot-environment.js';
 import { buildClassifierAdapters, buildRecallAdapter } from './dispatch.js';
 import type { RunCliDeps } from './index.js';
+import type { TierOverride } from './seeded-runtime.js';
 
 const DEFAULT_MAX_RUN_BUDGET_USD = 5.0;
 

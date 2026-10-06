@@ -914,7 +914,7 @@ All chatbot cases share one runtime and one session today (`endActiveSession` is
 - Modify: `regression/src/runner/index.ts`
 - Test: `regression/src/__tests__/chatbot-environment.test.ts` (existing, must stay green), `regression/src/__tests__/orchestrator.test.ts`
 
-- [ ] **Step 1: Write the failing orchestrator tests** — in `describe('runSuite — chatbot bucket', …)`, **replace** the test `'builds the chatbot environment once and reuses it across chatbot cases'` with:
+- [x] **Step 1: Write the failing orchestrator tests** — in `describe('runSuite — chatbot bucket', …)`, **replace** the test `'builds the chatbot environment once and reuses it across chatbot cases'` with:
 
 ```ts
 	it('builds a fresh environment per chatbot case and disposes each (REQ-REG-025)', async () => {
@@ -969,12 +969,12 @@ and **replace** `'disposes the env after the last chatbot case (try/finally)'` w
 
 Delete the now-redundant `'disposes the env even when a case throws mid-loop'` test (covered above). Keep `'on env-factory failure marks ALL remaining chatbot cases as error without retrying the factory (Codex I3)'` unchanged — the behaviour is preserved.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd regression && npx vitest run src/__tests__/orchestrator.test.ts -t "chatbot"`
 Expected: FAIL — factory called once.
 
-- [ ] **Step 3: Extract `seeded-runtime.ts`** — create `regression/src/runner/seeded-runtime.ts` containing the household/runtime construction now inside `createChatbotEnvironment`, parameterised by a seed writer:
+- [x] **Step 3: Extract `seeded-runtime.ts`** — create `regression/src/runner/seeded-runtime.ts` containing the household/runtime construction now inside `createChatbotEnvironment`, parameterised by a seed writer:
 
 ```ts
 /**
@@ -1226,7 +1226,7 @@ Update `build-deps.ts` imports: `TierOverride` now comes from `./seeded-runtime.
 
 **Known limitation (chatbot bucket only):** a fresh runtime per case fixes transcript bleed, but app modules are imported once per process, so Food's module-level state (pending flows, caches) can still carry between chatbot cases. The agent bucket avoids this with a worker process per trial (Task 10); the chatbot bucket is retired in P4, so it is not reworked here.
 
-- [ ] **Step 4: Per-case environment in the orchestrator** — in `regression/src/runner/index.ts` chatbot arm, replace the "build once, reuse" logic: remove the outer `let chatbotEnv … = null;` reuse and the `finally { if (chatbotEnv) … }` disposal; keep `chatbotEnvFailure`. The arm becomes:
+- [x] **Step 4: Per-case environment in the orchestrator** — in `regression/src/runner/index.ts` chatbot arm, replace the "build once, reuse" logic: remove the outer `let chatbotEnv … = null;` reuse and the `finally { if (chatbotEnv) … }` disposal; keep `chatbotEnvFailure`. The arm becomes:
 
 ```ts
 				let env: Awaited<ReturnType<NonNullable<typeof opts.chatbotEnvFactory>>>;
@@ -1274,12 +1274,12 @@ Update `build-deps.ts` imports: `TierOverride` now comes from `./seeded-runtime.
 
 (The `if (chatbotEnvFailure !== null)` short-circuit that precedes it stays.) Update the file-header comment "Chatbot env is built lazily on the first chatbot case; reused across the run" to "Chatbot env is built fresh per case and disposed after it (REQ-REG-025)".
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `cd regression && npx vitest run src/__tests__/orchestrator.test.ts src/__tests__/chatbot-environment.test.ts src/__tests__/build-deps.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add regression/src/runner/seeded-runtime.ts regression/src/runner/chatbot-environment.ts regression/src/runner/index.ts regression/src/runner/build-deps.ts regression/src/__tests__/orchestrator.test.ts
@@ -4931,7 +4931,7 @@ Every finding from the plan review that was fixed in this plan's text must be **
 | C2 required `CliOptions` fields | Tasks 3, 10 | [ ] `pnpm --filter @pas/regression typecheck` exits 0 after each of those tasks [Task 3 portion observed: typecheck failed TS2345/TS2304 until the 4th literal in `args.test.ts` (buildTierOverrideFromCli test) and the `archiveCache` import were fixed, then exits 0; Task 10 portion pending] |
 | C3 per-trial process isolation | Tasks 9–10 | [ ] `agent-trial-spawn.test.ts` green; [ ] live smoke shows distinct worker pids (N2) |
 | C4 stale `dist/` benchmarked | Task 12 Step 0 | [ ] findings doc records `pnpm build` + `git rev-parse HEAD` before each baseline |
-| C5 injection: notes, other-user messages, real integrations | Tasks 5, 9, 11 | [ ] `agent-trial.test.ts` noExternalMessages test green; [ ] `buildSeededConfig` test asserts `webhooks: []`, `n8n.dispatchUrl: ''` (N1); [ ] `agent-cases.test.ts` "every injection task watches notes/ and context/ and forbids messages to other users" green (asserts `unchanged` ⊇ {`notes/`, `context/`} and `noExternalMessages: true` for all three) |
+| C5 injection: notes, other-user messages, real integrations | Tasks 5, 9, 11 | [ ] `agent-trial.test.ts` noExternalMessages test green; [x] `buildSeededConfig` test asserts `webhooks: []`, `n8n.dispatchUrl: ''` (N1) [observed: `seeded-runtime.test.ts` 8 passed; mutation-checks: keeping real webhooks fails 'strips outbound webhooks', keeping real dispatchUrl fails 'empties the n8n dispatch url'];  [ ] `agent-cases.test.ts` "every injection task watches notes/ and context/ and forbids messages to other users" green (asserts `unchanged` ⊇ {`notes/`, `context/`} and `noExternalMessages: true` for all three) |
 | C6 fail + error cached as fail | Task 9 | [ ] `agent-runner.test.ts` "infrastructure error outranks a graded failure" green; mutation-check: swap the precedence → test fails |
 | C7 wrong-year dates | Task 7 | [ ] `outcome-oracle.test.ts` wrong-year cases incl. `September 9,2025` green; mutation-check: drop the year check → test fails |
 | C8 seed-facts + photos in key | Task 2 | [x] `BUCKET_HARNESS_PATHS.agent` contains `src/cases/agent/seed-facts.ts` and `fixtures/receipts/` [observed in cache-key.ts]; [ ] existence test green (Task 11) |
@@ -4939,10 +4939,10 @@ Every finding from the plan review that was fixed in this plan's text must be **
 | C10 exact `args.test.ts` expectations | Tasks 3, 10 | [ ] `args.test.ts` green [Task 3 portion observed: both exact `toEqual` expectations carry `archiveCache: false`; 64 passed in args/archive-cache/orchestrator-adjacent run, full suite 692 passed / 2 skipped; Task 10 portion pending] |
 | C11 harness test + smoke ordering | Task 11 | [ ] harness existence test enabled and green in Task 11; smoke run recorded there |
 | C12 swallowed provider errors | Tasks 9–10 | [ ] `agent-trial.test.ts` provider-error test green; [ ] tracker helper test (N4) green; [ ] negative smoke ends `error` |
-| C13/C20 child runs the reported, reconciled models | Task 10 | [ ] `build-deps.test.ts` reconcile test green; [ ] code review confirms `resolvedTiers` reaches both env factories |
+| C13/C20 child runs the reported, reconciled models | Task 10 | [ ] `build-deps.test.ts` reconcile test green [Task 5 portion: `buildSeededConfig` tier overrides incl. reasoning fallthrough tested; dropping the fallthrough fails 'reasoning falls through to the production reasoning tier']; [ ] code review confirms `resolvedTiers` reaches both env factories |
 | C14 spend lost on crash/hang | Task 10 | [ ] `agent-trial-spawn.test.ts` "charges the last reported meter" green; [ ] worker emits periodic meters (code review) |
 | C15 overrun ends pass; run remaining ignored | Tasks 9–10 | [ ] `agent-runner.test.ts` overrun tests green; [ ] orchestrator passes `Math.min(case, runBudget.remainingUsd)` (code review) |
-| C17 guard rejections graded | Task 5 | [ ] `buildSeededConfig` test asserts the generous safeguards (N1) |
+| C17 guard rejections graded | Task 5 | [x] `buildSeededConfig` test asserts the generous safeguards (N1) [observed: green; mutation-check: `globalMonthlyCostCap: 2` fails 'replaces production safeguards with caps the run budget outranks'] |
 | C19 background calls escape | Task 10 | [ ] in-flight tracker test (N3): follow-up call scheduled after the first completes is awaited; timeout records an error |
 | C21 typecheck (and tsx) via stale declarations | Task 0 | [x] typecheck green with stale `core/dist` [observed: with `core/dist/utils/json-strip-fences.d.ts` removed, typecheck fails TS7016 without the tsconfig path and exits clean with it]; [x] `tsx-resolution.test.ts` green — the tsx-loaded probe prints a `core/src/utils/json-strip-fences.ts` path and no `core/dist` [observed: test fails (probe cannot resolve) before the tsconfig path, passes after; suite 679 passed] |
 | C23 smoke did not select a case or expose trial details | Tasks 10, 11 | [ ] `args.test.ts` `--case` block green; [ ] `orchestrator.test.ts` "dispatches only the named cases and rejects unknown ids" + "runCli --case=<id> reaches runSuite" green; [ ] Task 11 Step 8 table recorded: `totalCases` 1, graded verdict, pid count `2`, heartbeat lines for 1/2 and 2/2; [ ] negative smoke: `error` + provider-error details + unchanged cache dir |

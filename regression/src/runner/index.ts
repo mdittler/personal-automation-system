@@ -219,115 +219,102 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 		}),
 	);
 
-	// Chatbot env is built lazily on the first chatbot case; reused across the
-	// run; disposed once in the `finally` below (REQ-REG-006). Codex I3: if the
-	// factory fails once, every subsequent chatbot case yields a synthesized
-	// error result without retrying — the failure message is cached here.
-	let chatbotEnv: Awaited<ReturnType<NonNullable<typeof opts.chatbotEnvFactory>>> | null = null;
+	// Chatbot env is built fresh per case and disposed after it (REQ-REG-025).
+	// Codex I3: if the factory fails once, every subsequent chatbot case yields
+	// a synthesized error result without retrying — the failure message is
+	// cached here.
 	let chatbotEnvFailure: string | null = null;
 
-	try {
-		for (let i = 0; i < filtered.length; i++) {
-			const lc = filtered[i]!;
-			const cacheKey = cacheKeys[i]!;
-			const cached = cacheReads[i];
+	for (let i = 0; i < filtered.length; i++) {
+		const lc = filtered[i]!;
+		const cacheKey = cacheKeys[i]!;
+		const cached = cacheReads[i];
 
-			if (cached) {
-				const out: RunResult = { ...cached, source: 'cached' };
-				results.push(out);
-				opts.onResult?.(out);
-				continue;
-			}
+		if (cached) {
+			const out: RunResult = { ...cached, source: 'cached' };
+			results.push(out);
+			opts.onResult?.(out);
+			continue;
+		}
 
-			if (opts.dryRun) {
-				const dr = makeDryRunResult(lc.case, cacheKey, opts.modelIds);
-				results.push(dr);
-				opts.onResult?.(dr);
-				continue;
-			}
+		if (opts.dryRun) {
+			const dr = makeDryRunResult(lc.case, cacheKey, opts.modelIds);
+			results.push(dr);
+			opts.onResult?.(dr);
+			continue;
+		}
 
-			const caseEstimate =
-				opts.estimateUsd(BUCKET_ESTIMATE[lc.case.bucket]) * Math.max(1, lc.case.inputs.length);
-			if (!runBudget.canAfford(caseEstimate)) {
-				opts.logger.warn(
-					{
-						caseId: lc.case.id,
-						remaining: runBudget.remainingUsd,
-						estimate: caseEstimate,
-					},
-					'orchestrator: run budget exhausted — case skipped without dispatch',
+		const caseEstimate =
+			opts.estimateUsd(BUCKET_ESTIMATE[lc.case.bucket]) * Math.max(1, lc.case.inputs.length);
+		if (!runBudget.canAfford(caseEstimate)) {
+			opts.logger.warn(
+				{
+					caseId: lc.case.id,
+					remaining: runBudget.remainingUsd,
+					estimate: caseEstimate,
+				},
+				'orchestrator: run budget exhausted — case skipped without dispatch',
+			);
+			const be = makeBudgetExceededResult(lc.case, cacheKey, opts.modelIds);
+			results.push(be);
+			opts.onResult?.(be);
+			continue;
+		}
+
+		let result: RunResult;
+		if (lc.case.bucket === 'routing') {
+			result = await runRoutingCase(lc.case, {
+				modelIds: opts.modelIds,
+				cacheKey,
+				caseBudgetUsd: lc.case.budgetUsd,
+				estimateUsd: opts.estimateUsd,
+				logger: opts.logger,
+				classifiers: opts.classifiers,
+			});
+		} else if (lc.case.bucket === 'recall') {
+			if (!opts.recallAdapter) {
+				throw new Error(
+					`orchestrator: case "${lc.case.id}" has bucket="recall" but no recallAdapter was provided`,
 				);
-				const be = makeBudgetExceededResult(lc.case, cacheKey, opts.modelIds);
-				results.push(be);
-				opts.onResult?.(be);
+			}
+			result = await runRecallCase(lc.case, {
+				adapter: opts.recallAdapter,
+				modelIds: opts.modelIds,
+				cacheKey,
+				caseBudgetUsd: lc.case.budgetUsd,
+				estimateUsd: opts.estimateUsd,
+				logger: opts.logger,
+			});
+		} else if (lc.case.bucket === 'chatbot') {
+			if (!opts.chatbotEnvFactory || !opts.judgeLlm) {
+				throw new Error(
+					`orchestrator: chatbotEnvFactory + judgeLlm are required to dispatch chatbot case "${lc.case.id}"`,
+				);
+			}
+			// Codex I3: once the factory has failed once, every subsequent
+			// chatbot case in the same run yields an error result without
+			// dispatch — the factory is NOT retried.
+			if (chatbotEnvFailure !== null) {
+				const errResult = makeEnvFailureResult(lc.case, cacheKey, opts.modelIds, chatbotEnvFailure);
+				results.push(errResult);
+				opts.onResult?.(errResult);
 				continue;
 			}
-
-			let result: RunResult;
-			if (lc.case.bucket === 'routing') {
-				result = await runRoutingCase(lc.case, {
-					modelIds: opts.modelIds,
-					cacheKey,
-					caseBudgetUsd: lc.case.budgetUsd,
-					estimateUsd: opts.estimateUsd,
-					logger: opts.logger,
-					classifiers: opts.classifiers,
-				});
-			} else if (lc.case.bucket === 'recall') {
-				if (!opts.recallAdapter) {
-					throw new Error(
-						`orchestrator: case "${lc.case.id}" has bucket="recall" but no recallAdapter was provided`,
-					);
-				}
-				result = await runRecallCase(lc.case, {
-					adapter: opts.recallAdapter,
-					modelIds: opts.modelIds,
-					cacheKey,
-					caseBudgetUsd: lc.case.budgetUsd,
-					estimateUsd: opts.estimateUsd,
-					logger: opts.logger,
-				});
-			} else if (lc.case.bucket === 'chatbot') {
-				if (!opts.chatbotEnvFactory || !opts.judgeLlm) {
-					throw new Error(
-						`orchestrator: chatbotEnvFactory + judgeLlm are required to dispatch chatbot case "${lc.case.id}"`,
-					);
-				}
-				// Codex I3: once the factory has failed once, every subsequent
-				// chatbot case in the same run yields an error result without
-				// dispatch — the factory is NOT retried.
-				if (chatbotEnvFailure !== null) {
-					const errResult = makeEnvFailureResult(
-						lc.case,
-						cacheKey,
-						opts.modelIds,
-						chatbotEnvFailure,
-					);
-					results.push(errResult);
-					opts.onResult?.(errResult);
-					continue;
-				}
-				if (chatbotEnv === null) {
-					try {
-						chatbotEnv = await opts.chatbotEnvFactory();
-					} catch (err) {
-						chatbotEnvFailure = (err as Error).message || 'chatbot env factory failed';
-						opts.logger.warn(
-							{ err: chatbotEnvFailure },
-							'orchestrator: chatbot env factory failed — marking remaining chatbot cases as error',
-						);
-						const errResult = makeEnvFailureResult(
-							lc.case,
-							cacheKey,
-							opts.modelIds,
-							chatbotEnvFailure,
-						);
-						results.push(errResult);
-						opts.onResult?.(errResult);
-						continue;
-					}
-				}
-				const env = chatbotEnv;
+			let env: Awaited<ReturnType<NonNullable<typeof opts.chatbotEnvFactory>>>;
+			try {
+				env = await opts.chatbotEnvFactory();
+			} catch (err) {
+				chatbotEnvFailure = (err as Error).message || 'chatbot env factory failed';
+				opts.logger.warn(
+					{ err: chatbotEnvFailure },
+					'orchestrator: chatbot env factory failed — marking remaining chatbot cases as error',
+				);
+				const errResult = makeEnvFailureResult(lc.case, cacheKey, opts.modelIds, chatbotEnvFailure);
+				results.push(errResult);
+				opts.onResult?.(errResult);
+				continue;
+			}
+			try {
 				result = await runChatbotCase(lc.case, {
 					env: {
 						userId: env.userId,
@@ -351,40 +338,38 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 					estimateUsd: opts.estimateUsd,
 					logger: opts.logger,
 				});
-			} else if (lc.case.bucket === 'receipt') {
-				if (!opts.receiptLlm) {
-					throw new Error(
-						`orchestrator: receiptLlm is required to dispatch receipt case "${lc.case.id}"`,
-					);
-				}
-				result = await runReceiptCase(lc.case, {
-					llm: opts.receiptLlm,
-					logger: opts.logger,
-					timezone: tz,
-					modelIds: opts.modelIds,
-					cacheKey,
-					caseBudgetUsd: lc.case.budgetUsd,
-					estimateUsd: opts.estimateUsd,
-					costTracker: opts.costTracker ?? ZERO_COST_METER,
-				});
-			} else {
-				// Fallback for any future bucket not yet wired here.
-				opts.logger.info(
-					{ caseId: lc.case.id, bucket: lc.case.bucket },
-					'orchestrator: bucket runner not wired yet — skipping case',
-				);
-				continue;
+			} finally {
+				await env.dispose();
 			}
+		} else if (lc.case.bucket === 'receipt') {
+			if (!opts.receiptLlm) {
+				throw new Error(
+					`orchestrator: receiptLlm is required to dispatch receipt case "${lc.case.id}"`,
+				);
+			}
+			result = await runReceiptCase(lc.case, {
+				llm: opts.receiptLlm,
+				logger: opts.logger,
+				timezone: tz,
+				modelIds: opts.modelIds,
+				cacheKey,
+				caseBudgetUsd: lc.case.budgetUsd,
+				estimateUsd: opts.estimateUsd,
+				costTracker: opts.costTracker ?? ZERO_COST_METER,
+			});
+		} else {
+			// Fallback for any future bucket not yet wired here.
+			opts.logger.info(
+				{ caseId: lc.case.id, bucket: lc.case.bucket },
+				'orchestrator: bucket runner not wired yet — skipping case',
+			);
+			continue;
+		}
 
-			runBudget.add(result.costUsd);
-			if (isCacheableVerdict(result.verdict)) await cache.write(result);
-			results.push(result);
-			opts.onResult?.(result);
-		}
-	} finally {
-		if (chatbotEnv) {
-			await chatbotEnv.dispose();
-		}
+		runBudget.add(result.costUsd);
+		if (isCacheableVerdict(result.verdict)) await cache.write(result);
+		results.push(result);
+		opts.onResult?.(result);
 	}
 
 	const summary = buildSummary(results, targets);

@@ -684,12 +684,17 @@ describe('runSuite — chatbot bucket', () => {
 		};
 	}
 
-	it('builds the chatbot environment once and reuses it across chatbot cases', async () => {
+	it('builds a fresh environment per chatbot case and disposes each (REQ-REG-025)', async () => {
 		await writeTwoChatbotCases();
 		const judge = new StubLLMService()
 			.queue('{"score": 5, "explanation": "ok"}')
 			.queue('{"score": 5, "explanation": "ok"}');
-		const factory = vi.fn(async () => fakeChatbotEnv());
+		const envs: Array<ReturnType<typeof fakeChatbotEnv>> = [];
+		const factory = vi.fn(async () => {
+			const e = fakeChatbotEnv();
+			envs.push(e);
+			return e;
+		});
 		const outcome = await runSuite(
 			chatbotBaseOpts({
 				chatbotEnvFactory: factory,
@@ -700,47 +705,34 @@ describe('runSuite — chatbot bucket', () => {
 				},
 			}),
 		);
-		expect(factory).toHaveBeenCalledTimes(1);
+		expect(factory).toHaveBeenCalledTimes(2);
+		expect(envs.every((e) => e.dispose.mock.calls.length === 1)).toBe(true);
 		expect(outcome.results.map((r) => r.verdict)).toEqual([VERDICT.pass, VERDICT.pass]);
 	});
 
-	it('disposes the env after the last chatbot case (try/finally)', async () => {
+	it('disposes each case environment even when routing throws (REQ-REG-025)', async () => {
 		await writeTwoChatbotCases();
-		const env = fakeChatbotEnv();
-		const judge = new StubLLMService()
-			.queue('{"score": 5, "explanation": "ok"}')
-			.queue('{"score": 5, "explanation": "ok"}');
-		await runSuite(
-			chatbotBaseOpts({
-				chatbotEnvFactory: async () => env,
-				judgeLlm: judge as unknown as RubricJudgeLLM,
-				costTracker: {
-					getMonthlyTotalCost: () => 0,
-					getTokenUsageTotals: () => ({ input: 0, output: 0 }),
-				},
-			}),
-		);
-		expect(env.dispose).toHaveBeenCalledTimes(1);
-	});
-
-	it('disposes the env even when a case throws mid-loop', async () => {
-		await writeTwoChatbotCases();
-		const env = fakeChatbotEnv();
-		env.runtime.services.router.routeMessage = vi.fn(async () => {
-			throw new Error('router exploded');
+		const envs: Array<ReturnType<typeof fakeChatbotEnv>> = [];
+		const factory = vi.fn(async () => {
+			const e = fakeChatbotEnv();
+			e.runtime.services.router.routeMessage = vi.fn(async () => {
+				throw new Error('router exploded');
+			});
+			envs.push(e);
+			return e;
 		});
-		const judge = new StubLLMService();
 		await runSuite(
 			chatbotBaseOpts({
-				chatbotEnvFactory: async () => env,
-				judgeLlm: judge as unknown as RubricJudgeLLM,
+				chatbotEnvFactory: factory,
+				judgeLlm: new StubLLMService() as unknown as RubricJudgeLLM,
 				costTracker: {
 					getMonthlyTotalCost: () => 0,
 					getTokenUsageTotals: () => ({ input: 0, output: 0 }),
 				},
 			}),
 		);
-		expect(env.dispose).toHaveBeenCalledTimes(1);
+		expect(envs).toHaveLength(2);
+		expect(envs.every((e) => e.dispose.mock.calls.length === 1)).toBe(true);
 	});
 
 	it('throws when a chatbot case is present and no chatbotEnvFactory is provided', async () => {
