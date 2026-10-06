@@ -289,6 +289,7 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 		// Receipt bucket uses the same production LLMService instance — the
 		// receipt-runner reads `complete` + `completeWithMeta`.
 		receiptLlm: llm,
+		// Receipt salt and the agent execution-closure date both use this zone.
 		timezone: config.timezone || 'UTC',
 		costTracker,
 		logger,
@@ -487,8 +488,8 @@ export async function buildMetadataDeps(options?: { configPath?: string }): Prom
 			sessionControl: async () => throwOnDispatch(),
 			pas: async () => throwOnDispatch(),
 		},
-		// List mode needs the same timezone production runs would use, so the
-		// receipt-bucket cache-key salt agrees.
+		// List mode and production runs share this timezone: the receipt salt and
+		// the agent execution-closure date both bind it.
 		timezone: config.timezone || 'UTC',
 		logger: {
 			warn: (...args) => logger.warn(...(args as Parameters<typeof logger.warn>)),

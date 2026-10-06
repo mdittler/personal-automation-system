@@ -13007,23 +13007,38 @@ Before P0 an `error` verdict (judge 400, truncation, vision-unsupported, budget)
 
 ---
 
-### REQ-REG-024 — The regression cache key MUST bind the case id and the bucket's harness sources
+### REQ-REG-024 — The regression cache key MUST bind the case id, and chatbot and agent keys MUST bind the execution closure
 
 **Phase:** Agent Runtime P0 (2026-10-05) | **Status:** Implemented
 
-The key previously omitted the case id (two cases in one file shared a key) and the runner, oracle, and LLM-layer sources (a harness fix did not invalidate old grades). `BUCKET_HARNESS_PATHS` lists the harness files per bucket; a missing harness file contributes a stable marker rather than throwing. Test-enforced rules: every listed path exists, and every `regression/src` module that an agent-specific harness file value-imports is itself an agent harness path.
+The key previously omitted the case id (two cases in one file shared a key) and the sources that produce a grade. Routing, recall, and receipt still bind a narrow harness-path list (`BUCKET_HARNESS_PATHS`); a missing harness file contributes a stable marker rather than throwing. Chatbot and agent grade the live process, so their key is an execution-closure hash instead of that list: worktree identity (HEAD, the staged and unstaged diff, and untracked non-ignored files, excluding `docs/` and `__tests__/`), on-disk `apps/<id>/dist/` bytes (`dist:absent` when missing), the run's config file, an allow-list of behaviour-changing env values (never secrets), tier and judge refs, agent repeats, the Node version/platform/arch, and — for the agent bucket — today's date in the configured timezone.
 
 **Standard tests:**
 - `cache-key.test.ts` > computeCacheKey — caseId (REQ-REG-024) > two cases defined in the same file get different keys
 - `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > changing a harness file changes the key
 - `orchestrator.test.ts` > runSuite — cache lifecycle > cases sharing one definition file are cached independently (REQ-REG-024)
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > a tracked-file edit changes the chatbot key and the agent key
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > a new untracked file changes the chatbot key and the agent key
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > changing a byte under apps/food/dist changes the chatbot key and the agent key
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > changing an allow-listed env var changes the chatbot key and the agent key
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > changing the judge ref changes the chatbot key
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > the agent key changes when the injected clock crosses a local date
 
 **Edge case tests:**
 - `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > a missing harness file contributes a stable marker instead of throwing
 - `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > expandHarnessPaths lists files under a directory entry, excluding __tests__
 - `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > every BUCKET_HARNESS_PATHS entry exists in the real repository
-- `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > extracted modules are harness paths (review C24)
-- `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > every regression/src module value-imported by an agent-specific harness file is an agent harness path
+- `cache-key.test.ts` > computeCacheKey — harness paths (REQ-REG-024) > hashes the harness digest once for N cases that share a bucket and repo
+- `cache-key.test.ts` > EXECUTION_CLOSURE_ENV_VARS > lists behaviour-changing vars and no secret-shaped names
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > an edit under docs/ or a __tests__ directory does not change the chatbot or agent key
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > a missing dist directory is a stable marker, distinct from an empty dist
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > changing ANTHROPIC_API_KEY does not change the chatbot or agent key
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > the agent key changes when the timezone changes for the same instant
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > a core edit does not change the routing key and does change the chatbot key
+- `cache-key.test.ts` > computeCacheKey — execution closure (chatbot and agent) > hashes the worktree and app dist once for many chatbot and agent cases
+
+**Fixes:**
+- **R3 (2026-10-05):** Replaced per-path harness enumeration for the chatbot and agent buckets with an execution-closure hash. Narrow buckets keep `BUCKET_HARNESS_PATHS`. CL: execution-closure-cache-key.
 
 ---
 
@@ -13754,7 +13769,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-021 | local-model-estimate.test.ts, estimator.test.ts | 3 | 2 | Implemented |
 | REQ-REG-022 | orchestrator-receipt-dispatch.test.ts, receipt-runner.test.ts | 2 | 4 | Implemented |
 | REQ-REG-023 | cache.test.ts, orchestrator.test.ts | 1 | 2 | Implemented |
-| REQ-REG-024 | cache-key.test.ts, orchestrator.test.ts | 3 | 5 | Implemented |
+| REQ-REG-024 | cache-key.test.ts, orchestrator.test.ts | 9 | 11 | Implemented |
 | REQ-REG-025 | orchestrator.test.ts | 1 | 1 | Implemented |
 | REQ-REG-026 | rubric-oracle.test.ts, chatbot-runner.test.ts | 2 | 1 | Implemented |
 | REQ-REG-027 | archive-cache.test.ts, orchestrator.test.ts | 2 | 0 | Implemented |
@@ -13896,4 +13911,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **442 test files** | **3152** | **3066** | **6218 tests** |
+| **Totals** | **442 test files** | **3158** | **3072** | **6230 tests** |

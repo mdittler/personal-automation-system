@@ -255,17 +255,19 @@ export default c;
 		const loaded = await loadCases(casesDir);
 		const expectedFor = async (id: string) => {
 			const lc = loaded.find((row) => row.case.id === id)!;
-			const salt =
-				lc.case.bucket === 'agent' ? 'repeats:3' : bucketCacheSalt(lc.case.bucket, 'UTC');
+			const closure = lc.case.bucket === 'chatbot' || lc.case.bucket === 'agent';
+			const salt = bucketCacheSalt(lc.case.bucket, 'UTC');
 			return computeCacheKey({
 				casePath: relPath(repoRoot, lc.filePath),
 				coveragePaths: lc.case.coverage,
 				caseId: lc.case.id,
-				harnessPaths: BUCKET_HARNESS_PATHS[lc.case.bucket] ?? [],
+				...(closure
+					? { bucket: lc.case.bucket, timezone: 'UTC' }
+					: { harnessPaths: BUCKET_HARNESS_PATHS[lc.case.bucket] ?? [] }),
 				modelIds: MODEL_IDS,
 				tierRefs,
 				repoRoot,
-				...(lc.case.bucket === 'chatbot' || lc.case.bucket === 'agent' ? { configPath } : {}),
+				...(closure ? { configPath } : {}),
 				...(salt !== undefined ? { extraSalt: salt } : {}),
 			});
 		};

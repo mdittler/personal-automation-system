@@ -38,6 +38,7 @@ import {
 	type TierCacheRefs,
 	bucketCacheSalt,
 	computeCacheKey,
+	usesExecutionClosure,
 } from '../shared/cache-key.js';
 import type { EstimateCall, EstimateUsdFn } from '../shared/types.js';
 import { archiveCache } from './archive-cache.js';
@@ -71,24 +72,6 @@ import {
 	formatSummaryMarkdown,
 } from './markdown-report.js';
 import type { ManifestDefaults } from './runner-options.js';
-
-/**
- * Cache chatbot grades by both the tested tiers and the rubric judge. A
- * different judge can legitimately reach a different verdict for the same
- * reply, so reusing the prior grade would make model comparisons misleading.
- */
-function cacheSaltForCase(
-	bucket: PersonaCase['bucket'],
-	timezone: string,
-	judgeModelRef?: ModelRef,
-	agentRepeats = 3,
-): string | undefined {
-	if (bucket === 'agent') return `repeats:${agentRepeats}`;
-	const bucketSalt = bucketCacheSalt(bucket, timezone);
-	if (bucket !== 'chatbot' || !judgeModelRef) return bucketSalt;
-	const judgeSalt = `judge:${judgeModelRef.provider}/${judgeModelRef.model}`;
-	return bucketSalt ? `${bucketSalt}:${judgeSalt}` : judgeSalt;
-}
 
 export interface AgentHeartbeat extends TrialMeter {
 	caseId: string;
@@ -130,7 +113,7 @@ export interface RunSuiteOptions {
 	}>;
 	/** Runs one agent trial in isolation (production: a worker process per trial). REQ-REG-AGENT-002. */
 	agentTrialRunner?: AgentTrialRunner;
-	/** Trials per agent task (default 3). Part of the agent cache salt. */
+	/** Trials per agent task (default 3). Part of the agent execution closure. */
 	agentRepeats?: number;
 	/** Run only these case ids (applied after `bucketFilter`). Unknown ids throw. Review C23. */
 	caseFilter?: Set<string>;
@@ -149,9 +132,9 @@ export interface RunSuiteOptions {
 	 */
 	receiptLlm?: Pick<LLMService, 'complete' | 'completeWithMeta'>;
 	/**
-	 * Timezone for receipt-bucket "today" computation — feeds both the cache-key
-	 * salt and the receipt-runner's date-fallback assertion. Defaults to 'UTC'
-	 * when omitted.
+	 * Timezone for "today". The receipt bucket mixes it into the cache-key salt;
+	 * the agent execution closure mixes today's date in this zone (seeds expand
+	 * `{date:±N}` against it). Defaults to 'UTC' when omitted.
 	 */
 	timezone?: string;
 	/** CostTracker proxy used by the rubric oracle to meter judge cost (and chatbot turn cost). */
@@ -204,8 +187,8 @@ function bucketTier(bucket: PersonaCase['bucket']): EvaluatedTier {
 
 /**
  * One cache-key shape for `runSuite` and `--list`. Chatbot and agent trials
- * load `configPath`; other buckets do not, so a config edit must not move
- * their keys.
+ * load `configPath` and the execution closure; other buckets keep a narrow
+ * harness-path list, so a config edit must not move their keys.
  */
 function cacheKeyForCase(
 	filePath: string,
@@ -221,23 +204,25 @@ function cacheKeyForCase(
 		agentRepeats?: number;
 	},
 ): Promise<string> {
-	const salt = cacheSaltForCase(
-		persona.bucket,
-		opts.timezone,
-		opts.judgeModelRef,
-		opts.agentRepeats,
-	);
-	const gradesLiveConfig = persona.bucket === 'chatbot' || persona.bucket === 'agent';
+	const closure = usesExecutionClosure(persona.bucket);
+	const salt = bucketCacheSalt(persona.bucket, opts.timezone);
 	return computeCacheKey({
 		casePath: relative(opts.repoRoot, filePath),
 		coveragePaths: persona.coverage,
 		modelIds: opts.modelIds,
 		...(opts.tierRefs ? { tierRefs: opts.tierRefs } : {}),
-		...(gradesLiveConfig && opts.configPath !== undefined ? { configPath: opts.configPath } : {}),
+		...(closure && opts.configPath !== undefined ? { configPath: opts.configPath } : {}),
 		repoRoot: opts.repoRoot,
 		hashCache: opts.hashCache,
 		caseId: persona.id,
-		harnessPaths: BUCKET_HARNESS_PATHS[persona.bucket] ?? [],
+		...(closure
+			? {
+					bucket: persona.bucket,
+					timezone: opts.timezone,
+					...(persona.bucket === 'agent' ? { repeats: opts.agentRepeats ?? 3 } : {}),
+					...(persona.bucket === 'chatbot' ? { judgeRef: opts.judgeModelRef ?? null } : {}),
+				}
+			: { harnessPaths: BUCKET_HARNESS_PATHS[persona.bucket] ?? [] }),
 		...(salt !== undefined ? { extraSalt: salt } : {}),
 	});
 }
