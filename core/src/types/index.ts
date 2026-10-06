@@ -84,6 +84,16 @@ export type {
 	LLMClient,
 	LLMProviderClient,
 	ProviderModel,
+	LLMImage,
+	ChatRole,
+	ChatMessage,
+	ToolCallRequest,
+	ChatToolSpec,
+	ChatOptions,
+	ChatUsage,
+	ChatResult,
+	ChatFinishReason,
+	ThinkingLevel,
 } from './llm.js';
 
 // Data Store

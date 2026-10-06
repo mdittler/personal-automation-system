@@ -119,8 +119,13 @@ export interface LLMCompletionOptions {
 	 *
 	 * Only Ollama honours this today; other providers ignore it. Non-thinking
 	 * Ollama models accept and ignore the flag.
+	 *
+	 * Since Agent Runtime P1 this also accepts a `ThinkingLevel`
+	 * (`'off' | 'low' | 'medium' | 'high'`). `false` and `'off'` are
+	 * identical; `true` asks the provider for its default effort. Only Ollama
+	 * honours any of these; other providers ignore the field.
 	 */
-	thinking?: boolean;
+	thinking?: boolean | ThinkingLevel;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +211,16 @@ export interface LLMProviderClient extends LLMClient {
 	completeWithUsage(prompt: string, options?: LLMCompletionOptions): Promise<LLMCompletionResult>;
 	/** List models available from this provider. */
 	listModels(): Promise<ProviderModel[]>;
+	/** Chat with optional tools. Same retry, temperature self-heal, and cost recording as completeWithUsage. */
+	chatWithUsage(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResult>;
+	/**
+	 * Whether `modelId` on this provider accepts native tool definitions.
+	 * Rejects (does not return false) when the probe itself fails, so callers
+	 * can tell "this model lacks tools" from "the provider is unreachable".
+	 */
+	supportsTools(modelId: string): Promise<boolean>;
+	/** Whether `modelId` on this provider accepts image input. Same rejection rule as supportsTools. */
+	supportsVisionModel(modelId: string): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +250,93 @@ export interface LLMCompletionMeta {
 		inputTokens: number;
 		outputTokens: number;
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Chat with tools (Agent Runtime P1 — design §5)
+// ---------------------------------------------------------------------------
+
+/** Reasoning effort for providers that expose one (Ollama `think`). */
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high';
+
+export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
+
+/** A tool call the model asked for. `arguments` is whatever the provider returned (an object, or a raw string when it could not be parsed — P2 validates). */
+export interface ToolCallRequest {
+	id: string;
+	name: string;
+	arguments: unknown;
+}
+
+/** A tool offered to the model. `inputSchema` is JSON Schema (root type object). */
+export interface ChatToolSpec {
+	name: string;
+	description: string;
+	inputSchema: object;
+}
+
+export interface ChatMessage {
+	role: ChatRole;
+	content: string;
+	/** User turns only (photos). */
+	images?: LLMImage[];
+	/** Assistant turns: the tool calls the model made. */
+	toolCalls?: ToolCallRequest[];
+	/** Tool turns: the id of the call this message answers. */
+	toolCallId?: string;
+	/** Tool turns: the tool's name (Ollama needs it; others ignore it). */
+	toolName?: string;
+	/** Tool turns: the result is an error message for the model, not data. */
+	isError?: boolean;
+	/** Assistant turns: provider thinking, passed back within a turn only (design §5.3). */
+	thinking?: string;
+}
+
+export interface ChatOptions
+	extends Pick<
+		LLMCompletionOptions,
+		'tier' | 'modelRef' | 'maxTokens' | 'temperature' | 'thinking'
+	> {
+	tools?: ChatToolSpec[];
+	/** Allow the model to request several tool calls in one step. Default true. */
+	parallelToolCalls?: boolean;
+	/** Cancels the in-flight SDK request. Honoured by every provider on this path. */
+	signal?: AbortSignal;
+	/** Ollama `num_ctx`. Defaults to DEFAULT_CHAT_CONTEXT_WINDOW (32768). */
+	contextWindow?: number;
+	/** Ollama `keep_alive`. Defaults to DEFAULT_OLLAMA_KEEP_ALIVE ('30m'). */
+	keepAlive?: string | number;
+	/** App ID for cost attribution. Injected by the guards — callers must not set this. */
+	_appId?: string;
+}
+
+/** `tool_calls` whenever the assistant message carries tool calls, regardless of the provider's own stop reason. */
+export type ChatFinishReason = 'stop' | 'tool_calls' | 'length' | 'error' | 'other';
+
+export interface ChatUsage {
+	/** Uncached prompt tokens (Anthropic `input_tokens`; the whole prompt on other providers). Billed at the input rate. */
+	inputTokens: number;
+	outputTokens: number;
+	/**
+	 * Anthropic `cache_creation_input_tokens`, when reported. NOT included in
+	 * `inputTokens` and NOT billed by `CostTracker` in P1 (which has one input
+	 * rate; cache writes bill 1.25×, reads 0.1×). P1 sends no `cache_control`,
+	 * so this is 0 or absent; P2 adds cache-aware pricing before enabling it.
+	 */
+	cacheCreationTokens?: number;
+	/** Anthropic `cache_read_input_tokens`, same rules as `cacheCreationTokens`. */
+	cacheReadTokens?: number;
+}
+
+export interface ChatResult {
+	/** Always role 'assistant'. */
+	message: ChatMessage;
+	finishReason: ChatFinishReason;
+	usage?: ChatUsage;
+	/** Model id that served the request. */
+	model: string;
+	/** Provider key that served the request. */
+	provider: string;
 }
 
 /** LLM interface provided to apps via CoreServices. */
@@ -270,6 +372,21 @@ export interface LLMService {
 	 * Uses the fast tier model.
 	 */
 	extractStructured<T>(text: string, schema: object): Promise<T>;
+
+	/**
+	 * Chat with tools. Model selection priority is the same as `complete()`
+	 * minus the legacy options: `modelRef`, then `tier`, then the fast tier.
+	 * Throws `LLMToolsUnsupportedError` before any inference call when `tools`
+	 * are given and the resolved model cannot accept them (the capability
+	 * probe itself — Ollama `/api/show` — may run first).
+	 */
+	chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResult>;
+
+	/** False when the provider is not registered; otherwise the provider's answer (which may reject). */
+	supportsTools(ref: ModelRef): Promise<boolean>;
+
+	/** False when the provider is not registered; otherwise the provider's answer (which may reject). */
+	supportsVision(ref: ModelRef): Promise<boolean>;
 
 	/**
 	 * Get the current model assignment for a tier.
