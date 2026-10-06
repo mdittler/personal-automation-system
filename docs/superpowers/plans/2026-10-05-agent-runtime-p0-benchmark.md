@@ -737,7 +737,7 @@ Chatbot rubrics reference seed data the judge never sees ("MUST NOT claim a pric
 - Modify: `regression/src/cases/chatbot/index.ts`
 - Test: `regression/src/__tests__/rubric-oracle.test.ts`, `regression/src/__tests__/chatbot-runner.test.ts`
 
-- [ ] **Step 1: Write the failing tests** — add to `rubric-oracle.test.ts` (it already builds a `StubLLMService` judge; capture the prompt passed to `completeWithMeta`):
+- [x] **Step 1: Write the failing tests** — add to `rubric-oracle.test.ts` (it already builds a `StubLLMService` judge; capture the prompt passed to `completeWithMeta`):
 
 ```ts
 describe('runRubricOracle — reference data + reply labelling (REQ-REG-026)', () => {
@@ -790,12 +790,12 @@ describe('runRubricOracle — reference data + reply labelling (REQ-REG-026)', (
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd regression && npx vitest run src/__tests__/rubric-oracle.test.ts`
 Expected: FAIL — `referenceData` not accepted / prompt lacks the strings.
 
-- [ ] **Step 3: Implement** — in `regression/src/oracles/rubric.ts`:
+- [x] **Step 3: Implement** — in `regression/src/oracles/rubric.ts`:
 
 Add `referenceData?: string;` to `RubricOracleInput` with JSDoc `/** Ground truth the rubric refers to (e.g. seeded receipts and prices). Fenced as data. */`.
 
@@ -890,12 +890,12 @@ Add to `chatbot-runner.test.ts` inside `describe('runChatbotCase', …)` (uses t
 	});
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cd regression && npx vitest run src/__tests__/rubric-oracle.test.ts src/__tests__/chatbot-runner.test.ts src/__tests__/orchestrator.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add regression/src/oracles/rubric.ts regression/src/runner/case-runners/chatbot-runner.ts regression/src/runner/index.ts regression/src/runner/build-deps.ts regression/src/__tests__/rubric-oracle.test.ts regression/src/__tests__/chatbot-runner.test.ts
@@ -4894,7 +4894,7 @@ The plan→execution contract (`docs/review-protocol.md` §2). Code review adjud
 - [ ] **D2** — `error` and `budget-exceeded` results are never written to the cache, and legacy ones on disk read as misses. (Task 1)
 - [ ] **D3** — Two cases defined in one file get different cache keys. Editing any harness path changes the affected keys. Agent harness paths are the runner, trial, worker/spawn, environment, seeded runtime, seed verifier, provider-call tracker, provider registry, oracle, `seed-facts.ts`, seed manifest, receipt fixtures, and the LLM layer; the chatbot harness includes `seeded-runtime.ts`. Rule (test-enforced): every `regression/src` module an agent-specific harness file value-imports is itself an agent harness path. (Tasks 2, 10, 11)
 - [ ] **D4** — `--archive-cache` moves the cache to `<cacheDir>-archive/<stamp>/` and leaves an empty cache. (Task 3)
-- [ ] **D5** — The rubric judge prompt carries the seed reference data and names the reply block. (Task 4)
+- [x] **D5** — The rubric judge prompt carries the seed reference data and names the reply block. (Task 4) [observed: rubric-oracle + chatbot-runner tests green; mutation-checks failed for the right reasons: dropping `...reference` fails the reference test, dropping the reply-naming line fails 2 tests, dropping runner forwarding fails the chatbot-runner test]
 - [ ] **D6** — Every chatbot case runs in its own seeded runtime. Every seeded runtime has webhooks and n8n disabled, generous safeguards, and the parent's **reconciled** tiers. (Tasks 5, 10)
 - [ ] **D7** — `agent` is accepted by the CLI, the case validator, the GUI estimator, and the three GUI bucket selectors. The CLI's `--case <id>` (repeatable) selects cases by id after the bucket filter; unknown ids are an error. (Tasks 6, 10)
 - [ ] **D8** — The outcome oracle grades:

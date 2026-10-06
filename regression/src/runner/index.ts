@@ -94,6 +94,8 @@ export interface RunSuiteOptions {
 		captureHandler: () => () => string | null;
 		endActiveSession: () => Promise<void>;
 		dispose: () => Promise<void>;
+		/** Seed ground truth (receipts + price lists) shown to the rubric judge. */
+		referenceData?: string;
 	}>;
 	/** Judge LLM used by the rubric oracle. Required if any chatbot case is present. */
 	judgeLlm?: RubricJudgeLLM;
@@ -341,6 +343,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 					judgeLlm: opts.judgeLlm,
 					judgeModelId: opts.judgeModelRef?.model ?? opts.modelIds.standard,
 					...(opts.judgeModelRef ? { judgeModelRef: opts.judgeModelRef } : {}),
+					...(env.referenceData !== undefined ? { referenceData: env.referenceData } : {}),
 					costTracker: opts.costTracker ?? ZERO_COST_METER,
 					modelIds: opts.modelIds,
 					cacheKey,

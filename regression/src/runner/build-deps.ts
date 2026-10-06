@@ -14,6 +14,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSystemConfig } from '@core/services/config/index.js';
@@ -223,6 +224,15 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 			...(opts?.tierOverride ? { tierOverride: opts.tierOverride } : {}),
 			logger,
 		});
+		const seed = JSON.parse(await readFile(paths.chatbotSeedJsonPath, 'utf8')) as {
+			foodSeed?: {
+				receipts?: Array<{ path: string; contents: string }>;
+				priceLists?: Array<{ path: string; contents: string }>;
+			};
+		};
+		const referenceData = [...(seed.foodSeed?.receipts ?? []), ...(seed.foodSeed?.priceLists ?? [])]
+			.map((f) => `${f.path.replace('households/{householdId}/shared/food/', '')}:\n${f.contents}`)
+			.join('\n\n');
 		// `captureHandler` + `endActiveSession` real-runtime plumbing lands with
 		// Task 14 (chatSessions/eventBus are not currently surfaced on
 		// RuntimeServices). For now, captureHandler returns a null handler id
@@ -239,6 +249,7 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 			captureHandler: () => () => null,
 			endActiveSession: async () => undefined,
 			dispose: env.dispose,
+			referenceData,
 		};
 	};
 
