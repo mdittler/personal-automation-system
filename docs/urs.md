@@ -13262,6 +13262,20 @@ The Markdown report's Agent bucket section tabulates pass^k (tasks) and trial pa
 
 ---
 
+### REQ-REG-AGENT-005 — The regression trial worker's provider wrapper MUST track chatWithUsage so a chat-path provider error forces the trial to error
+
+**Phase:** Agent Runtime P1 (2026-10-06) | **Status:** Implemented
+
+The per-trial worker's provider wrapper MUST track `chatWithUsage` as well as `completeWithUsage`, so a provider error on the chat path forces the trial to `error`
+
+**Standard tests:**
+- `provider-call-tracker.test.ts` > provider-call tracker (REQ-REG-AGENT-002; review C12/C19) > wrap(): also tracks chatWithUsage, so a provider error on the chat path forces error (REQ-REG-AGENT-005)
+
+**Edge case tests:**
+- `provider-call-tracker.test.ts` > provider-call tracker (REQ-REG-AGENT-002; review C12/C19) > wrap(): tolerates a provider without chatWithUsage (older test doubles)
+
+---
+
 ### REQ-SEC-013 — Model-id validation MUST accept namespaced ids and MUST be the same rule on every operator surface
 
 **Phase:** Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02) | **Status:** Implemented
@@ -13305,6 +13319,331 @@ Widening was verified safe against every downstream consumer of a model id befor
 - `system-info.test.ts` > setTierModel > rejects model ID with path traversal
 - `security-measures.test.ts` > MODEL_ID_PATTERN > rejects traversal sequences even though slashes are allowed
 - `model-spec.test.ts` > parseModelRef > rejects 'foo/bar/../etc' (traversal inside namespaced model)
+
+---
+
+## Agent Runtime P1 — LLMService.chat() with Native Tools (2026-10-06)
+
+Design: `docs/superpowers/specs/2026-10-05-agent-runtime-design.md`; plan: `docs/superpowers/plans/2026-10-06-agent-runtime-p1-llm-chat.md`. The URS counts below were recounted by executing the P1 test files with the Vitest JSON reporter (R1-14), not by grepping; it.each rows count once per expanded case.
+
+### REQ-LLM-045 — LLMService.chat() MUST exist on the service and both guards, validate message shape before any network call, and be guarded and priced against the model that serves the request
+
+**Phase:** Agent Runtime P1 (2026-10-06) | **Status:** Implemented
+
+`LLMService.chat(messages, options)` MUST exist on the service and both guards, resolve the model as `completeWithMeta` does (modelRef → tier → fast), validate the message shape before any network call (system prefix included, each system message non-empty, at least one non-system message; every tool call answered exactly once before the next non-tool message and before the history ends; a user turn carries text or images; an assistant turn carries text or tool calls), estimate the guard reservation from message text **plus replayed thinking, tool-call arguments and the tool list** **and price it against the model that will serve the request** (an explicit `modelRef` through `PriceLookup.priceForRef`, legacy `model: 'claude'` as the standard tier — on `complete`/`completeWithMeta` as well as `chat`; an unpriceable ref takes the default reservation, never the tier price), record usage with provider type and app id, and export every chat type from `core/src/types/index.ts`
+
+**Standard tests:**
+- `base-provider.test.ts` > BaseProvider.chatWithUsage (REQ-LLM-045) > returns the doChat result and records usage with provider type and app id
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > accepts system → user → assistant(tool_calls) → tool → assistant
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > accepts two tool calls answered in either order
+- `chat-messages.test.ts` > serializeChatForEstimate (REQ-LLM-045) > joins message contents and the JSON of the tool list so the guard estimate scales with both
+- `chat-messages.test.ts` > serializeChatForEstimate (REQ-LLM-045) > counts assistant tool-call arguments: a 100k-character tool-call history estimates ≥ 100k characters (R1-5)
+- `estimate-guard-cost.test.ts` > modelRef takes precedence over tier (P2-1) > prices an explicit modelRef through priceForRef even when the tier is local
+- `guard-price-lookup.test.ts` > createGuardPriceLookup (P2-1) > priceForRef: local provider → $0/$0
+- `guard-price-lookup.test.ts` > createGuardPriceLookup (P2-1) > priceForRef: priced remote model → MODEL_PRICING per 1k
+- `guard-price-lookup.test.ts` > createGuardPriceLookup (P2-1) > priceForRef: unknown model on a registered remote provider → conservative DEFAULT_REMOTE_PRICING
+- `llm-guard.test.ts` > LLMGuard.chat (REQ-LLM-045) > runs chat through the guard: rate slot committed, _appId injected, result passed through
+- `llm-guard.test.ts` > LLMGuard.chat (REQ-LLM-045) > reserves an estimate that grows with the tool list (message text + tool JSON)
+- `llm-guard.test.ts` > LLMGuard.chat (REQ-LLM-045) > supportsTools / supportsVision delegate to the inner service
+- `llm-guard.test.ts` > LLMGuard.chat (REQ-LLM-045) > reserves an estimate that grows with replayed tool-call arguments (R1-5: 100k chars of tool-call history)
+- `llm-service.test.ts` > LLMServiceImpl.chat (REQ-LLM-045) > routes to the fast tier by default and forwards messages, options and the resolved modelRef
+- `llm-service.test.ts` > LLMServiceImpl.chat (REQ-LLM-045) > routes via tier, and an explicit modelRef wins over tier
+- `llm-service.test.ts` > LLMServiceImpl.chat (REQ-LLM-045) > supportsTools / supportsVision return false for an unregistered provider and delegate otherwise
+- `system-llm-guard.test.ts` > SystemLLMGuard.chat (REQ-LLM-045) > runs chat through the guard: _appId injected, result passed through
+- `system-llm-guard.test.ts` > SystemLLMGuard.chat (REQ-LLM-045) > reserves an estimate that grows with the tool list (message text + tool JSON)
+- `system-llm-guard.test.ts` > SystemLLMGuard.chat (REQ-LLM-045) > supportsTools / supportsVision delegate to the inner service
+- `system-llm-guard.test.ts` > SystemLLMGuard.chat (REQ-LLM-045) > reserves an estimate that grows with replayed tool-call arguments (R1-5: 100k chars of tool-call history)
+
+**Edge case tests:**
+- `base-provider.test.ts` > BaseProvider.chatWithUsage (REQ-LLM-045) > does not record usage when the provider reported none
+- `base-provider.test.ts` > BaseProvider.chatWithUsage (REQ-LLM-045) > rejects a malformed history before calling doChat
+- `base-provider.test.ts` > BaseProvider.chatWithUsage (REQ-LLM-045) > retries transient doChat failures with the provider retry options
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects an empty message list
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects a system message that is not at the start
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects a tool message without toolCallId
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects a tool message whose toolCallId was not requested by the preceding assistant turn
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects a tool message that does not follow an assistant tool call (or another tool result)
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects duplicate tool-call ids inside one assistant turn
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects images on a non-user message
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects images on a leading system message too (R1-7: the system prefix was skipped unvalidated)
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects a second tool result for an id that was already answered (R1-7)
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects a user turn while an assistant tool call is still unanswered (R1-7)
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects a history that ends with an unanswered assistant tool call (R1-7)
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects a user message with neither text nor images (Anthropic rejects an empty text block — R1-3)
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > accepts a captionless photo (images, empty text)
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects a system message with no text (Anthropic rejects an empty system text block — P2-6)
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects a system-only history (Anthropic rejects messages: [] — P2-6)
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > rejects an assistant turn with neither text nor tool calls (Anthropic rejects content: [] — P2-6)
+- `chat-messages.test.ts` > validateChatMessages (REQ-LLM-045) > accepts an assistant turn with tool calls and empty text (the normal tool-call shape)
+- `chat-messages.test.ts` > serializeChatForEstimate (REQ-LLM-045) > is just the message text when there are no tools
+- `chat-messages.test.ts` > serializeChatForEstimate (REQ-LLM-045) > counts replayed assistant thinking and raw-string tool-call arguments
+- `estimate-guard-cost.test.ts` > modelRef takes precedence over tier (P2-1) > a modelRef the lookup cannot price never falls back to the tier price — it takes the default reservation (or $0 on an all-local install)
+- `estimate-guard-cost.test.ts` > modelRef takes precedence over tier (P2-1) > a lookup without priceForRef cannot price a modelRef at all → default reservation, not the tier
+- `guard-price-lookup.test.ts` > createGuardPriceLookup (P2-1) > priceForRef: unregistered provider → undefined (the estimator then reserves the default)
+- `guard-price-lookup.test.ts` > createGuardPriceLookup (P2-1) > priceFor(tier) resolves the tier to its ref and prices that ref; an unassigned tier → undefined
+- `guard-price-lookup.test.ts` > createGuardPriceLookup (P2-1) > hasBillableProvider: true with no providers (unknown), false when all are local, true when any is remote
+- `llm-guard.test.ts` > LLMGuard.chat (REQ-LLM-045) > refuses chat when the app monthly cost cap is reached (same gate as complete), without calling inner
+- `llm-guard.test.ts` > LLMGuard prices the model that serves the request, not the default tier (P2-1) > household budget — chat: a paid explicit modelRef on a local fast tier is refused by HouseholdLLMLimiter.checkCost when the household is just under its cap (the fast-tier estimate would have been $0 and admitted it)
+- `llm-guard.test.ts` > LLMGuard prices the model that serves the request, not the default tier (P2-1) > household budget — complete(): the same bypass existed at HEAD on the completion path and is closed too
+- `llm-guard.test.ts` > LLMGuard prices the model that serves the request, not the default tier (P2-1) > legacy `model: 'claude'` routes to the standard tier in LLMServiceImpl, so the guard prices it as standard, not fast
+- `llm-guard.test.ts` > LLMGuard prices the model that serves the request, not the default tier (P2-1) > an explicit modelRef the lookup cannot price falls back to the default reservation, never to the tier price
+- `llm-service.test.ts` > LLMServiceImpl.chat (REQ-LLM-045) > throws a clear error when the provider is not registered
+- `system-llm-guard.test.ts` > SystemLLMGuard.chat (REQ-LLM-045) > refuses chat when the global monthly cost cap is reached (same gate as complete), without calling inner
+- `system-llm-guard.test.ts` > SystemLLMGuard prices the model that serves the request, not the default tier (P2-1) > household budget — chat: a paid explicit modelRef on a local fast tier is refused by HouseholdLLMLimiter.checkCost when the household is just under its cap (the fast-tier estimate would have been $0 and admitted it)
+- `system-llm-guard.test.ts` > SystemLLMGuard prices the model that serves the request, not the default tier (P2-1) > household budget — complete(): the same bypass existed at HEAD on the completion path and is closed too
+- `system-llm-guard.test.ts` > SystemLLMGuard prices the model that serves the request, not the default tier (P2-1) > legacy `model: 'claude'` routes to the standard tier in LLMServiceImpl, so the guard prices it as standard, not fast
+- `system-llm-guard.test.ts` > SystemLLMGuard prices the model that serves the request, not the default tier (P2-1) > an explicit modelRef the lookup cannot price falls back to the default reservation, never to the tier price
+
+---
+
+### REQ-LLM-046 — Ollama chat MUST use /api/chat with explicit num_ctx, keep_alive and think, return tool calls with ids, and gate vision per model on the chat path only
+
+**Phase:** Agent Runtime P1 (2026-10-06) | **Status:** Implemented
+
+Ollama chat MUST use `/api/chat`, always send `num_ctx` (default 32768) and `keep_alive` (default 30m), send `think: false` unless thinking is requested (levels map to Ollama's strings), pass user images, return tool calls with ids (synthesized `call_<8 hex>` when absent), report `tool_calls` whenever calls are present, pass `thinking` back and forth within a turn, gate vision per model **on the chat path only** (`supportsVision`, the `complete()` gate, stays `false`), apply the 120 s HTTP timeout to per-call clients, and raise `LLMEmptyOutputError` (with usage) on empty output at the cap
+
+**Standard tests:**
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — vision gate (REQ-LLM-046) > the chat gate is per model only: complete() keeps the provider-wide gate and its message (R1-2)
+- `chat-messages.test.ts` > synthesizeToolCallId (REQ-LLM-046) > matches call_<8 hex> and is unique across calls
+- `chat-messages.test.ts` > toOllamaThink (REQ-LLM-046) > maps false → false
+- `chat-messages.test.ts` > toOllamaThink (REQ-LLM-046) > maps off → false
+- `chat-messages.test.ts` > toOllamaThink (REQ-LLM-046) > maps true → true
+- `chat-messages.test.ts` > toOllamaThink (REQ-LLM-046) > maps low → low
+- `chat-messages.test.ts` > toOllamaThink (REQ-LLM-046) > maps medium → medium
+- `chat-messages.test.ts` > toOllamaThink (REQ-LLM-046) > maps high → high
+- `chat-messages.test.ts` > chat defaults are pinned (design §5.3, §18) > context window 32768, keep-alive 30m, Ollama HTTP timeout 120 s, agent model qwen3.8:27b-mlx on ollama, thinking off
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > always sends num_ctx (default 32768) and keep_alive (default 30m), and think: false by default
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > honours contextWindow, keepAlive, maxTokens and temperature when given
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > maps thinking true → think true
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > maps thinking low → think low
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > maps thinking high → think high
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > maps thinking off → think false
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > maps system/user/assistant(tool_calls, thinking)/tool messages to the Ollama shapes
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > sends user images as base64 strings
+- `ollama-provider.test.ts` > OllamaProvider — chat response mapping (REQ-LLM-046) > returns tool calls with synthesized ids when Ollama provides none, finishReason tool_calls
+- `ollama-provider.test.ts` > OllamaProvider — chat response mapping (REQ-LLM-046) > uses the id Ollama provides when present
+- `ollama-provider.test.ts` > OllamaProvider — chat response mapping (REQ-LLM-046) > parses string arguments that are JSON
+- `ollama-provider.test.ts` > OllamaProvider — chat response mapping (REQ-LLM-046) > returns thinking on the assistant message when the model emitted it
+
+**Edge case tests:**
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — vision gate (REQ-LLM-046) > rejects images when the provider does not support vision at all (default supportsVisionModel = provider flag)
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — vision gate (REQ-LLM-046) > rejects images when the provider supports vision but the model does not
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — vision gate (REQ-LLM-046) > rejects an unsupported image MIME type
+- `chat-messages.test.ts` > toOllamaThink (REQ-LLM-046) > maps undefined → false
+- `ollama-provider.test.ts` > OllamaProvider — capability detection via /api/show (REQ-LLM-049) > supportsVision (provider-wide, the complete() gate) stays false: complete() with images is still rejected and generate is never called (R1-2)
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > calls client.chat (not generate) with tools in the function wrapper
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > sends no temperature unless the caller sets one (model-card defaults apply; unlike complete())
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > refuses images for a model whose /api/show lacks vision, before calling chat
+- `ollama-provider.test.ts` > OllamaProvider — chat request mapping (REQ-LLM-046) > refuses tools for a model whose /api/show lacks tools, before calling chat
+- `ollama-provider.test.ts` > OllamaProvider — chat response mapping (REQ-LLM-046) > keeps string arguments that are not JSON as the raw string (P2 validates)
+- `ollama-provider.test.ts` > OllamaProvider — chat response mapping (REQ-LLM-046) > does not set toolCalls when none were made and maps done_reason stop/length
+- `ollama-provider.test.ts` > OllamaProvider — chat response mapping (REQ-LLM-046) > empty content + tool calls is not an empty-output failure
+
+---
+
+### REQ-LLM-047 — OpenAI-compatible and llama.cpp chat MUST send function tools and the model-correct output-limit field, and take tool support from supports_tools
+
+**Phase:** Agent Runtime P1 (2026-10-06) | **Status:** Implemented
+
+OpenAI-compatible and llama.cpp chat MUST send `tools` + `parallel_tool_calls` (only when tools are given), send the output limit as `max_completion_tokens` for o-series / gpt-5 ids and `max_tokens` otherwise (on `complete()` too), map tool-call arguments from JSON (keeping unparseable strings raw), pass the AbortSignal as a request option, and take tool support from `supports_tools` (default true for openai-compatible, false for llama-cpp)
+
+**Standard tests:**
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — tools need --jinja and an explicit flag (REQ-LLM-047) > supportsTools defaults to false
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — tools need --jinja and an explicit flag (REQ-LLM-047) > supportsTools: true in config enables chat with tools
+- `model-capabilities.test.ts` > openAIOutputLimitField (REQ-LLM-047, R1-4) > o3 → max_completion_tokens
+- `model-capabilities.test.ts` > openAIOutputLimitField (REQ-LLM-047, R1-4) > o3-mini → max_completion_tokens
+- `model-capabilities.test.ts` > openAIOutputLimitField (REQ-LLM-047, R1-4) > o4-mini → max_completion_tokens
+- `model-capabilities.test.ts` > openAIOutputLimitField (REQ-LLM-047, R1-4) > o1 → max_completion_tokens
+- `model-capabilities.test.ts` > openAIOutputLimitField (REQ-LLM-047, R1-4) > gpt-5 → max_completion_tokens
+- `model-capabilities.test.ts` > openAIOutputLimitField (REQ-LLM-047, R1-4) > gpt-5-mini → max_completion_tokens
+- `model-capabilities.test.ts` > openAIOutputLimitField (REQ-LLM-047, R1-4) > gpt-4o → max_tokens
+- `model-capabilities.test.ts` > openAIOutputLimitField (REQ-LLM-047, R1-4) > gpt-4.1-mini → max_tokens
+- `model-capabilities.test.ts` > openAIOutputLimitField (REQ-LLM-047, R1-4) > local-model → max_tokens
+- `model-capabilities.test.ts` > openAIOutputLimitField (REQ-LLM-047, R1-4) > qwen3.8:27b-mlx → max_tokens
+- `model-capabilities.test.ts` > openAIOutputLimitField (REQ-LLM-047, R1-4) > openai/o3-mini → max_tokens
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > supportsTools defaults to true for openai-compatible
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > supportsTools follows the config flag when set
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > sends tools as function tools, parallel_tool_calls default true, and the signal as request option
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > maps system/user/assistant(tool_calls)/tool messages to chat-completions shapes
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > sends user images as data URLs in content parts
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > returns tool calls with parsed JSON arguments and finishReason tool_calls
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > maps finish_reason length/content_filter/unknown and keeps reasoning_content out of the answer
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > non-o-series models keep max_tokens (OpenAI-compatible servers such as Groq/vLLM/llama-server accept only that field)
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > complete() uses the same model-aware output-limit field (o3 → max_completion_tokens)
+- `provider-factory.test.ts` > createProvider — supports_tools flag (REQ-LLM-047) > forwards supportsTools from config into the openai-compatible and llama-cpp constructor options
+
+**Edge case tests:**
+- `llama-cpp-provider.test.ts` > LlamaCppProvider — tools need --jinja and an explicit flag (REQ-LLM-047) > supportsVisionModel stays false (no --mmproj flag exists in pas.yaml)
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > parallelToolCalls: false is forwarded; without tools parallel_tool_calls is omitted (the API rejects it)
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > keeps unparseable argument strings raw (P2 validates)
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > o-series models get max_completion_tokens and no max_tokens on chat (R1-4; SDK 6.27 marks max_tokens incompatible with o-series)
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > sdkMaxRetries is forwarded to the OpenAI client as maxRetries; absent → not passed (SDK default stays)
+- `provider-factory.test.ts` > createProvider — supports_tools flag (REQ-LLM-047) > leaves supportsTools undefined when the config omits it (the provider default then applies)
+
+---
+
+### REQ-LLM-048 — Anthropic chat MUST send tools without cache_control, fold tool results into the user turn, and keep cache tokens out of the billed input count
+
+**Phase:** Agent Runtime P1 (2026-10-06) | **Status:** Implemented
+
+Anthropic chat MUST send tools with `input_schema` in the order given and **no `cache_control`**, `tool_choice: auto` (with `disable_parallel_tool_use` when parallel calls are off), fold tool results into a user message whose first blocks are `tool_result` (with `is_error`; empty content omitted), emit text blocks only for non-empty text (assistant and user — a captionless photo is image blocks alone), report `inputTokens` as the uncached `input_tokens` with cache creation/read counts carried separately and never priced at the input rate (warned when non-zero), and map `refusal` → error
+
+**Standard tests:**
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > supportsTools and supportsVisionModel are true for every model
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > maps assistant tool calls to tool_use blocks and tool results to a user message whose first blocks are tool_result
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > non-object tool-call arguments are replayed as {} (the API requires an object)
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > user images become image blocks before the text block
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > returns tool_use blocks as toolCalls with finishReason tool_calls and the text alongside
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > temperature is sent only when the model accepts it and the caller set it
+
+**Edge case tests:**
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > sends tools with input_schema in the order given, tool_choice auto, the signal — and no cache_control anywhere (R1-1: caching is P2)
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > sdkMaxRetries is forwarded to the Anthropic client as maxRetries; absent → not passed (SDK default stays)
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > parallelToolCalls: false sets disable_parallel_tool_use; no tools → no tool_choice
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > leading system messages become the system block array (plain text blocks, no cache_control)
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > an assistant turn with tool calls and empty text has no empty text block (the API rejects empty text)
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > a captionless photo sends the image block only — no empty text block, which the API rejects with 400 (R1-3)
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > a tool result with empty content omits the content field (the API accepts a bare tool_result)
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > usage: inputTokens is the uncached input_tokens; cache counts ride separately and are never folded into the billed count (R1-1)
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > usage: if the API ever reports cache tokens (impossible without cache_control), they are carried on usage, warned about, and not billed at the input rate
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > maps stop_reason end_turn → stop when no tool calls
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > maps stop_reason stop_sequence → stop when no tool calls
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > maps stop_reason max_tokens → length when no tool calls
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > maps stop_reason refusal → error when no tool calls
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > maps stop_reason pause_turn → other when no tool calls
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > rejects a non-leading system message with ChatMessageShapeError before calling the SDK
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > rejects an empty system message before calling the SDK — no empty text block, empty messages, or content: [] is ever sent (P2-6)
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > rejects a system-only history before calling the SDK — no empty text block, empty messages, or content: [] is ever sent (P2-6)
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > rejects an empty assistant turn before calling the SDK — no empty text block, empty messages, or content: [] is ever sent (P2-6)
+- `anthropic-provider.test.ts` > toAnthropicMessages — defence in depth for direct callers (P2-6) > throws on an empty system message, a system-only history, and an empty assistant turn
+
+---
+
+### REQ-LLM-049 — Capability detection MUST be per model, and chat() with tools on an incapable model MUST throw LLMToolsUnsupportedError before any inference call
+
+**Phase:** Agent Runtime P1 (2026-10-06) | **Status:** Implemented
+
+Capability detection MUST be per model: Ollama probes `/api/show` once per model (cached; failures reject and are not cached; a legacy server without `capabilities` is treated as capable), Anthropic is always capable, Google never; `chat()` with tools on an incapable model MUST throw `LLMToolsUnsupportedError` before any inference call (`/api/show` may run; `/api/chat` never does), classified `tools-unsupported`, non-retryable
+
+**Standard tests:**
+- `errors.test.ts` > LLMToolsUnsupportedError (REQ-LLM-049) > names the model and provider and says what to do
+- `ollama-provider.test.ts` > OllamaProvider — capability detection via /api/show (REQ-LLM-049) > supportsTools is true when capabilities include "tools"
+- `ollama-provider.test.ts` > OllamaProvider — capability detection via /api/show (REQ-LLM-049) > supportsTools is false when capabilities lack "tools"
+- `ollama-provider.test.ts` > OllamaProvider — capability detection via /api/show (REQ-LLM-049) > supportsVisionModel reads the "vision" capability
+- `ollama-provider.test.ts` > OllamaProvider — capability detection via /api/show (REQ-LLM-049) > probes each model once and caches the answer for the provider lifetime
+- `ollama-provider.test.ts` > OllamaProvider — capability detection via /api/show (REQ-LLM-049) > concurrent probes of the same model share one /api/show request
+
+**Edge case tests:**
+- `llm-errors.test.ts` > classifyLLMError — tools-unsupported and aborted (REQ-LLM-049, REQ-LLM-050) > classifies LLMToolsUnsupportedError by name as tools-unsupported, non-retryable
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — capability gates (REQ-LLM-049) > throws LLMToolsUnsupportedError before doChat when tools are given and the model lacks them
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — capability gates (REQ-LLM-049) > does not consult supportsTools when no tools are passed (plain chat works on any model)
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — capability gates (REQ-LLM-049) > an empty tools array is treated as no tools
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — capability gates (REQ-LLM-049) > the default supportsTools is false and the default doChat throws a clear not-implemented error
+- `google-provider.test.ts` > GoogleProvider — chat is out of scope (design §5.2, open-items deferral 1) > supportsTools is false and chatWithUsage throws not-implemented without calling the SDK
+- `ollama-provider.test.ts` > OllamaProvider — capability detection via /api/show (REQ-LLM-049) > a failed probe rejects with the provider error and is not cached (server down ≠ no tools)
+- `ollama-provider.test.ts` > OllamaProvider — capability detection via /api/show (REQ-LLM-049) > an older server without a capabilities field is treated as capable, with one warning
+
+---
+
+### REQ-LLM-050 — On the chat path an AbortSignal MUST cancel before any work, reach every SDK call and a pending capability probe, and an aborted call MUST never be retried
+
+**Phase:** Agent Runtime P1 (2026-10-06) | **Status:** Implemented
+
+On the chat path a pre-aborted signal MUST fail before any work with the signal's reason, the signal MUST reach every SDK call (Anthropic/OpenAI request options; Ollama per-call fetch) **and end the wait on a pending capability probe**, and an aborted call MUST never be retried — cancellation is recognised by `signal.aborted` at the catch site and by `instanceof` on the SDKs' `APIUserAbortError` classes (which are named `'Error'`), not by error name alone; a cancellation surfaces as the caller's `signal.reason` (else an `AbortError` with the SDK error as `cause`) and classifies as `aborted`, non-retryable
+
+**Standard tests:**
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — AbortSignal (REQ-LLM-050) > passes the signal through to doChat
+- `chat-messages.test.ts` > toAbortError (REQ-LLM-050, P2-4) > returns the signal reason when the caller supplied one
+- `ollama-provider.test.ts` > OllamaProvider — AbortSignal on chat (REQ-LLM-050) > uses a per-call client whose fetch carries a signal that follows the caller signal
+- `ollama-provider.test.ts` > OllamaProvider — AbortSignal on chat (REQ-LLM-050) > the per-call fetch still enforces the 120 s HTTP timeout alongside the caller signal (R1-14 pin)
+
+**Edge case tests:**
+- `llm-errors.test.ts` > classifyLLMError — tools-unsupported and aborted (REQ-LLM-049, REQ-LLM-050) > classifies an AbortError as aborted, non-retryable
+- `llm-errors.test.ts` > classifyLLMError — tools-unsupported and aborted (REQ-LLM-049, REQ-LLM-050) > isAbortError is true for an AbortError by name, false for other errors and non-errors
+- `llm-errors.test.ts` > classifyLLMError — tools-unsupported and aborted (REQ-LLM-049, REQ-LLM-050) > isAbortError is true for ANY error once the caller signal has aborted (P2-4: the SDK abort classes are named "Error")
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > the real SDK APIUserAbortError (name "Error") is surfaced as the caller signal reason and never retried (P2-4)
+- `anthropic-provider.test.ts` > AnthropicProvider — chat with tools (REQ-LLM-048) > the real SDK APIUserAbortError without a caller signal becomes an AbortError (cause = the SDK error), classified aborted, not retried (P2-4)
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — AbortSignal (REQ-LLM-050) > throws the signal reason immediately when the signal is already aborted, without calling doChat
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — AbortSignal (REQ-LLM-050) > never retries an aborted call
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — AbortSignal (REQ-LLM-050) > an SDK-shaped abort (name "Error") thrown after the caller signal fired is not retried and surfaces as the signal reason (P2-4)
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — AbortSignal (REQ-LLM-050) > a generic error thrown after the signal fired with no custom reason surfaces as an AbortError (P2-4)
+- `base-provider.test.ts` > BaseProvider.chatWithUsage — AbortSignal (REQ-LLM-050) > an abort while the capability probe is still pending rejects at once with AbortError and never reaches doChat (R1-6)
+- `chat-messages.test.ts` > abortable (REQ-LLM-050, R1-6) > returns the promise unchanged when no signal is given
+- `chat-messages.test.ts` > abortable (REQ-LLM-050, R1-6) > rejects with the signal reason when the signal fires while the promise is pending
+- `chat-messages.test.ts` > abortable (REQ-LLM-050, R1-6) > rejects immediately when the signal is already aborted
+- `chat-messages.test.ts` > toAbortError (REQ-LLM-050, P2-4) > otherwise returns an Error named AbortError whose cause is the provider error
+- `ollama-provider.test.ts` > OllamaProvider — capability detection via /api/show (REQ-LLM-049) > an abort while /api/show is still pending rejects at once; the probe result is still cached when it lands (R1-6)
+- `ollama-provider.test.ts` > OllamaProvider — AbortSignal on chat (REQ-LLM-050) > reuses the shared client when no signal is given
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > the real SDK APIUserAbortError (name "Error") is surfaced as the caller signal reason and never retried (P2-4)
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > the real SDK APIUserAbortError without a caller signal still becomes an AbortError (cause = the SDK error), not an "unknown" retried failure (P2-4)
+
+---
+
+### REQ-LLM-051 — A provider call that fails after the provider billed it MUST still be charged
+
+**Phase:** Agent Runtime P1 (2026-10-06) | **Status:** Implemented
+
+A provider call that fails after the provider billed it MUST still be charged: `LLMEmptyOutputError` carries usage and `BaseProvider` records it on both the completion and chat paths; errors without usage record nothing
+
+**Standard tests:**
+- `base-provider.test.ts` > BaseProvider records usage from a failed call (REQ-LLM-051) > chatWithUsage: same — usage on the error is charged exactly once
+- `errors.test.ts` > LLMEmptyOutputError.usage (REQ-LLM-051) > carries the provider-reported usage so BaseProvider can still charge it
+- `errors.test.ts` > LLMEmptyOutputError.usage (REQ-LLM-051) > usage is optional (older call sites keep working)
+
+**Edge case tests:**
+- `base-provider.test.ts` > BaseProvider records usage from a failed call (REQ-LLM-051) > completeWithUsage: an LLMEmptyOutputError carrying usage is recorded, then rethrown
+- `base-provider.test.ts` > BaseProvider records usage from a failed call (REQ-LLM-051) > an LLMEmptyOutputError without usage records nothing (regression guard: no phantom zero rows)
+- `base-provider.test.ts` > BaseProvider records usage from a failed call (REQ-LLM-051) > a generic provider error records nothing (there is no usage to charge)
+- `ollama-provider.test.ts` > OllamaProvider — chat response mapping (REQ-LLM-046) > empty content + no tool calls + length throws LLMEmptyOutputError carrying usage
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > empty content + no tool calls + length throws LLMEmptyOutputError carrying usage
+- `openai-compatible-provider.test.ts` > OpenAICompatibleProvider — chat with tools (REQ-LLM-047) > completeWithUsage: the existing empty-output throw now carries usage too (REQ-LLM-051)
+
+---
+
+### REQ-LLM-052 — The agent.* settings and llm.providers.<id>.supports_tools MUST load from pas.yaml with schema validation and sanitizers that fall back to the defaults
+
+**Phase:** Agent Runtime P1 (2026-10-06) | **Status:** Implemented
+
+`agent.model` (default ollama/qwen3.8:27b-mlx), `agent.vision_model` (default the Claude reasoning tier, else the Claude standard tier, else undefined), `agent.thinking` (default off), `agent.context_window` (default 32768), `agent.keep_alive` (default 30m) and `llm.providers.<id>.supports_tools` MUST load from pas.yaml with schema validation and sanitizers that fall back to the defaults
+
+**Standard tests:**
+- `config.test.ts` > loadSystemConfig > agent settings (REQ-LLM-052, design §18) > vision_model defaults to the configured Claude reasoning tier, else the Claude standard tier
+- `config.test.ts` > loadSystemConfig > agent settings (REQ-LLM-052, design §18) > accepts explicit model, vision_model, thinking, context_window, keep_alive
+- `config.test.ts` > loadSystemConfig > agent settings (REQ-LLM-052, design §18) > llm.providers.<id>.supports_tools maps to supportsTools
+- `pas-yaml-schema.test.ts` > agent block — schema validation (REQ-LLM-052) > accepts a full agent block
+- `pas-yaml-schema.test.ts` > agent block — schema validation (REQ-LLM-052) > accepts supports_tools on a provider
+
+**Edge case tests:**
+- `config.test.ts` > loadSystemConfig > agent settings (REQ-LLM-052, design §18) > defaults: model ollama/qwen3.8:27b-mlx, thinking off, context_window 32768, keep_alive 30m, when the block is absent
+- `config.test.ts` > loadSystemConfig > agent settings (REQ-LLM-052, design §18) > a reasoning-only tiers block is ignored by the loader (HEAD rule), so vision_model falls back to the auto-assigned Claude standard tier
+- `config.test.ts` > loadSystemConfig > agent settings (REQ-LLM-052, design §18) > vision_model is undefined when no Claude tier is configured (photo turns then get a plain explanation — §18.2)
+- `config.test.ts` > loadSystemConfig > agent settings (REQ-LLM-052, design §18) > the loader rejects type-invalid agent values loudly (schema layer)
+- `config.test.ts` > loadSystemConfig > agent settings (REQ-LLM-052, design §18) > buildAgentConfig sanitizes values that bypass the schema back to the defaults (R1-12: asserted directly, not behind a swallowed throw)
+- `config.test.ts` > loadSystemConfig > agent settings (REQ-LLM-052, design §18) > YAML 1.2: `thinking: off` is the string 'off', not boolean false
+- `pas-yaml-schema.test.ts` > agent block — schema validation (REQ-LLM-052) > accepts an absent block and an empty block
+- `pas-yaml-schema.test.ts` > agent block — schema validation (REQ-LLM-052) > rejects thinking outside off|low|medium|high
+- `pas-yaml-schema.test.ts` > agent block — schema validation (REQ-LLM-052) > rejects a non-positive or non-integer context_window
+- `pas-yaml-schema.test.ts` > agent block — schema validation (REQ-LLM-052) > rejects a model without both provider and model
+
+---
+
+### REQ-LLM-053 — Every Anthropic row in MODEL_PRICING MUST match Anthropic's published base rates, and an unpriced Claude row MUST fail the test
+
+**Phase:** Agent Runtime P1 (2026-10-06) | **Status:** Implemented
+
+Every Anthropic row in `MODEL_PRICING` MUST match Anthropic's published base rates (source and verification date recorded in the table comment): Fable 5.1 $10/$50, Opus 5.5 $4/$20, Opus 4.6 $5/$25, Sonnet 5.5 $2/$10, Sonnet 4.6 $3/$15, Sonnet 4 $3/$15, Haiku 4.5 $1/$5 per MTok; a Claude row without a price assertion fails the test
+
+**Standard tests:**
+- `model-pricing.test.ts` > Anthropic rows match the official price list (P2-2; https://platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-06) > claude-fable-5-1 is 10 in / 50 out (USD per MTok)
+- `model-pricing.test.ts` > Anthropic rows match the official price list (P2-2; https://platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-06) > claude-opus-5-5 is 4 in / 20 out (USD per MTok)
+- `model-pricing.test.ts` > Anthropic rows match the official price list (P2-2; https://platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-06) > claude-opus-4-6 is 5 in / 25 out (USD per MTok)
+- `model-pricing.test.ts` > Anthropic rows match the official price list (P2-2; https://platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-06) > claude-sonnet-5-5 is 2 in / 10 out (USD per MTok)
+- `model-pricing.test.ts` > Anthropic rows match the official price list (P2-2; https://platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-06) > claude-sonnet-4-6 is 3 in / 15 out (USD per MTok)
+- `model-pricing.test.ts` > Anthropic rows match the official price list (P2-2; https://platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-06) > claude-sonnet-4-20250514 is 3 in / 15 out (USD per MTok)
+- `model-pricing.test.ts` > Anthropic rows match the official price list (P2-2; https://platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-06) > claude-haiku-4-5-20251001 is 1 in / 5 out (USD per MTok)
+
+**Edge case tests:**
+- `model-pricing.test.ts` > Anthropic rows match the official price list (P2-2; https://platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-06) > every Anthropic row is covered by the table above (adding a claude-* row without a price assertion fails here)
 
 ---
 
@@ -13447,6 +13786,15 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-042 | openai-compatible-provider.test.ts, llama-cpp-provider.test.ts | 4 | 6 | Implemented |
 | REQ-LLM-043 | estimator.test.ts, local-model-estimate.test.ts, regression-routes.test.ts, estimate-guard-cost.test.ts, system-info.test.ts | 8 | 14 | Implemented |
 | REQ-LLM-044 | classify.test.ts, intent-classifier.test.ts, model-pricing.test.ts, pas-classifier.parser.test.ts | 12 | 18 | Implemented |
+| REQ-LLM-045 | base-provider.test.ts, chat-messages.test.ts, estimate-guard-cost.test.ts, guard-price-lookup.test.ts, llm-guard.test.ts, llm-service.test.ts, system-llm-guard.test.ts | 20 | 38 | Implemented |
+| REQ-LLM-046 | base-provider.test.ts, chat-messages.test.ts, ollama-provider.test.ts | 21 | 12 | Implemented |
+| REQ-LLM-047 | llama-cpp-provider.test.ts, model-capabilities.test.ts, openai-compatible-provider.test.ts, provider-factory.test.ts | 23 | 6 | Implemented |
+| REQ-LLM-048 | anthropic-provider.test.ts | 6 | 19 | Implemented |
+| REQ-LLM-049 | llm-errors.test.ts, base-provider.test.ts, errors.test.ts, google-provider.test.ts, ollama-provider.test.ts | 6 | 8 | Implemented |
+| REQ-LLM-050 | llm-errors.test.ts, anthropic-provider.test.ts, base-provider.test.ts, chat-messages.test.ts, ollama-provider.test.ts, openai-compatible-provider.test.ts | 4 | 18 | Implemented |
+| REQ-LLM-051 | base-provider.test.ts, errors.test.ts, ollama-provider.test.ts, openai-compatible-provider.test.ts | 3 | 6 | Implemented |
+| REQ-LLM-052 | config.test.ts, pas-yaml-schema.test.ts | 5 | 10 | Implemented |
+| REQ-LLM-053 | model-pricing.test.ts | 7 | 1 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -13832,6 +14180,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-REG-AGENT-002 | agent-environment.test.ts, agent-runner.test.ts, agent-trial.test.ts, agent-trial-spawn.test.ts, provider-call-tracker.test.ts, args.test.ts, orchestrator.test.ts | 19 | 19 | Implemented |
 | REQ-REG-AGENT-003 | agent-cases.test.ts | 3 | 4 | Implemented |
 | REQ-REG-AGENT-004 | markdown-report.test.ts, agent-runner.test.ts, args.test.ts, orchestrator.test.ts | 6 | 3 | Implemented |
+| REQ-REG-AGENT-005 | provider-call-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-REG-GUI-OV-001 | regression-routes-write.test.ts | 5 | 0 | Implemented |
 | REQ-REG-GUI-OV-002 | model-spec.test.ts | 7 | 14 | Implemented |
 | REQ-REG-GUI-OV-003 | regression-routes-write.test.ts | 4 | 6 | Implemented |
@@ -13966,4 +14315,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **442 test files** | **3170** | **3090** | **6260 tests** |
+| **Totals** | **471 test files** | **3266** | **3220** | **6486 tests** |
