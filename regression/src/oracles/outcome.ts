@@ -124,10 +124,20 @@ function normalize(s: string): string {
 	return s.replace(/[‘’ʼ]/g, "'").replace(/[“”]/g, '"').toLowerCase();
 }
 
+/** Digit token with leading zeros and trailing fractional zeros removed. */
+function canonicalAmount(token: string): string {
+	const [intRaw, fracRaw] = token.split('.');
+	const intPart = (intRaw ?? '0').replace(/^0+(?=\d)/, '') || '0';
+	const frac = (fracRaw ?? '').replace(/0+$/, '');
+	return frac.length === 0 ? intPart : `${intPart}.${frac}`;
+}
+
 export function matchesNumber(reply: string, value: number): boolean {
+	if (!Number.isFinite(value)) return false;
+	const want = canonicalAmount(value.toString());
 	const cleaned = reply.replace(/(\d),(?=\d{3}\b)/g, '$1');
-	for (const m of cleaned.matchAll(/\d+(?:\.\d+)?/g)) {
-		if (Math.abs(Number.parseFloat(m[0]) - value) < 0.005) return true;
+	for (const m of cleaned.matchAll(/(?<!\d)\d+(?:\.\d+)?(?!\d)/g)) {
+		if (canonicalAmount(m[0]) === want) return true;
 	}
 	return false;
 }
@@ -139,13 +149,15 @@ export function matchesDate(reply: string, iso: string): boolean {
 	const month = Number(mm);
 	const day = Number(dd);
 	const text = normalize(reply);
-	if (text.includes(iso)) return true;
+	if (new RegExp(`(?<!\\d)${iso}(?!\\d)`).test(text)) return true;
 	const full = MONTHS[month - 1]!;
 	const names = [full, full.slice(0, 3), ...(month === 9 ? ['sept'] : [])];
 	const nameAlt = names.join('|');
 	const dayRe = `0?${day}(?:st|nd|rd|th)?`;
-	// An explicit trailing year must be the expected one; an omitted year is fine.
-	const yearRe = '(?:(?:,\\s*|\\s+)(\\d{4}))?';
+	// An explicit trailing year must be the whole digit token and the expected
+	// year; an omitted year is fine. `\d+` stops a longer run (`20261`) from
+	// matching as `2026`.
+	const yearRe = '(?:(?:,\\s*|\\s+)(\\d+))?';
 	const textual = [
 		new RegExp(`\\b(?:${nameAlt})\\.?\\s+${dayRe}\\b${yearRe}`, 'g'),
 		new RegExp(`\\b${dayRe}\\s+(?:of\\s+)?(?:${nameAlt})\\b${yearRe}`, 'g'),

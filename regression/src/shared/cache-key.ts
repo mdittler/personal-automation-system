@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import type { PersonaCase } from '@core/types/regression.js';
 import { hashRepoRelative } from './git-hash.js';
@@ -216,10 +217,33 @@ async function memoizedHarnessDigest(
 	}
 }
 
+/**
+ * Resolved provider + model for each tier. The cache key uses `provider/model`
+ * so two backends serving the same model string do not share a grade.
+ * `modelIds` stays the display snapshot (model strings only).
+ */
+export interface TierCacheRefs {
+	fast: { provider: string; model: string } | null;
+	standard: { provider: string; model: string } | null;
+	reasoning: { provider: string; model: string } | null;
+}
+
 export interface ComputeCacheKeyArgs {
 	casePath: string; // repo-relative
 	coveragePaths: string[]; // all repo-relative
 	modelIds: TierModelSnapshot;
+	/**
+	 * Resolved refs the trial actually runs. When set, each tier is keyed as
+	 * `provider/model` (a null slot falls back to the `modelIds` string).
+	 */
+	tierRefs?: TierCacheRefs;
+	/**
+	 * Behavioural config the chatbot and agent runtimes load (`pas.yaml`).
+	 * Callers pass the path actually used for the run, and only for those
+	 * buckets. The file's bytes are hashed; a missing file contributes
+	 * `config:absent`.
+	 */
+	configPath?: string;
 	repoRoot: string;
 	/**
 	 * Optional memo of `repoRelativePath → Promise<hash>`. Pass a shared `Map`
@@ -265,7 +289,11 @@ export async function computeCacheKey(args: ComputeCacheKeyArgs): Promise<string
 		? await memoizedHarnessDigest(args.harnessPaths, args.repoRoot, hash)
 		: '';
 
-	const modelStr = `fast=${args.modelIds.fast},standard=${args.modelIds.standard},reasoning=${args.modelIds.reasoning ?? 'none'}`;
+	const modelStr = args.tierRefs
+		? `fast=${tierToken(args.tierRefs.fast, args.modelIds.fast, 'unknown')},standard=${tierToken(args.tierRefs.standard, args.modelIds.standard, 'unknown')},reasoning=${tierToken(args.tierRefs.reasoning, args.modelIds.reasoning, 'none')}`
+		: `fast=${args.modelIds.fast},standard=${args.modelIds.standard},reasoning=${args.modelIds.reasoning ?? 'none'}`;
+	const configMarker =
+		args.configPath !== undefined ? await configKeyMarker(args.configPath) : undefined;
 
 	const h = createHash('sha256');
 	h.update(caseHash);
@@ -281,6 +309,10 @@ export async function computeCacheKey(args: ComputeCacheKeyArgs): Promise<string
 		h.update('\0');
 		h.update(`harness:${harnessJoined}`);
 	}
+	if (configMarker !== undefined) {
+		h.update('\0');
+		h.update(configMarker);
+	}
 	// Salt is mixed in last with a distinguishing prefix. `extraSalt` omitted
 	// vs `extraSalt: ''` yields different keys (defensive: empty string is a
 	// real value, not "unsalted").
@@ -290,4 +322,24 @@ export async function computeCacheKey(args: ComputeCacheKeyArgs): Promise<string
 		h.update(args.extraSalt);
 	}
 	return h.digest('hex');
+}
+
+function tierToken(
+	ref: { provider: string; model: string } | null,
+	modelId: string | null,
+	missing: string,
+): string {
+	if (ref) return `${ref.provider}/${ref.model}`;
+	return modelId ?? missing;
+}
+
+/** SHA-256 of the config bytes, or the stable `config:absent` marker. */
+async function configKeyMarker(configPath: string): Promise<string> {
+	try {
+		const bytes = await readFile(configPath);
+		return `config:${createHash('sha256').update(bytes).digest('hex')}`;
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 'config:absent';
+		throw err;
+	}
 }

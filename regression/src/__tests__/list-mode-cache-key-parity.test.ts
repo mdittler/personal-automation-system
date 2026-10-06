@@ -208,6 +208,92 @@ export default c;
 		expect(entry?.currentCacheKey).toBe(expected);
 	});
 
+	it('chatbot and agent list keys include provider refs and the config file; routing does not', async () => {
+		const CHAT_CASE = `
+import type { PersonaCase } from '@core/types/regression.js';
+const c: PersonaCase = {
+  id: 'chatbot-parity',
+  description: 'chatbot config in the cache key',
+  bucket: 'chatbot',
+  coverage: ['fixtures/coverage.ts'],
+  inputs: [{ payload: 'hello', expected: {} }],
+  oracle: 'rubric',
+  rubric: 'Reply is relevant.',
+  budgetUsd: 0.05,
+};
+export default c;
+`;
+		const AGENT_CASE = `
+import type { PersonaCase } from '@core/types/regression.js';
+const c: PersonaCase = {
+  id: 'agent-parity',
+  description: 'agent config in the cache key',
+  bucket: 'agent',
+  coverage: ['fixtures/coverage.ts'],
+  inputs: [{ payload: { turns: [{ text: 'hi' }] }, expected: {} }],
+  oracle: 'outcome',
+  budgetUsd: 0.05,
+};
+export default c;
+`;
+		await writeFile(join(casesDir, 'chatbot.case.ts'), CHAT_CASE);
+		await writeFile(join(casesDir, 'agent.case.ts'), AGENT_CASE);
+		const configPath = join(repoRoot, 'config-for-run.yaml');
+		await writeFile(configPath, 'routing:\n  multi_intent_split: true\n');
+		execSync('git add -A', { cwd: repoRoot });
+		execSync('git commit -q -m cases', { cwd: repoRoot });
+
+		const tierRefs = {
+			fast: { provider: 'ollama', model: MODEL_IDS.fast },
+			standard: { provider: 'llama-cpp', model: MODEL_IDS.standard },
+			reasoning: null,
+		};
+		const deps = buildDeps();
+		deps.tierRefs = tierRefs;
+		deps.configPath = configPath;
+
+		const loaded = await loadCases(casesDir);
+		const expectedFor = async (id: string) => {
+			const lc = loaded.find((row) => row.case.id === id)!;
+			const salt =
+				lc.case.bucket === 'agent' ? 'repeats:3' : bucketCacheSalt(lc.case.bucket, 'UTC');
+			return computeCacheKey({
+				casePath: relPath(repoRoot, lc.filePath),
+				coveragePaths: lc.case.coverage,
+				caseId: lc.case.id,
+				harnessPaths: BUCKET_HARNESS_PATHS[lc.case.bucket] ?? [],
+				modelIds: MODEL_IDS,
+				tierRefs,
+				repoRoot,
+				...(lc.case.bucket === 'chatbot' || lc.case.bucket === 'agent' ? { configPath } : {}),
+				...(salt !== undefined ? { extraSalt: salt } : {}),
+			});
+		};
+
+		const keysFor = async () => {
+			const chunks: string[] = [];
+			await runCli(['--list', '--json'], deps, { stdout: (s) => chunks.push(s) });
+			const out = new Map<string, string>();
+			for (const line of chunks.join('').split('\n')) {
+				if (!line.trim()) continue;
+				const row = JSON.parse(line) as { caseId?: string; currentCacheKey?: string };
+				if (row.caseId && row.currentCacheKey) out.set(row.caseId, row.currentCacheKey);
+			}
+			return out;
+		};
+
+		const before = await keysFor();
+		expect(before.get('chatbot-parity')).toBe(await expectedFor('chatbot-parity'));
+		expect(before.get('agent-parity')).toBe(await expectedFor('agent-parity'));
+		expect(before.get('parity-demo')).toBe(await expectedFor('parity-demo'));
+
+		await writeFile(configPath, 'routing:\n  multi_intent_split: fals\n');
+		const after = await keysFor();
+		expect(after.get('chatbot-parity')).not.toBe(before.get('chatbot-parity'));
+		expect(after.get('agent-parity')).not.toBe(before.get('agent-parity'));
+		expect(after.get('parity-demo')).toBe(before.get('parity-demo'));
+	});
+
 	it('non-receipt buckets do NOT receive the date salt in --list (regression guard)', async () => {
 		// Sanity: the routing case from beforeEach must continue to use the
 		// non-salted cache key — only receipts get the date binding.

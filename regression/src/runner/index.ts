@@ -33,7 +33,12 @@ import {
 	VERDICT,
 } from '@core/types/regression.js';
 import type { RubricJudgeLLM } from '../oracles/rubric.js';
-import { BUCKET_HARNESS_PATHS, bucketCacheSalt, computeCacheKey } from '../shared/cache-key.js';
+import {
+	BUCKET_HARNESS_PATHS,
+	type TierCacheRefs,
+	bucketCacheSalt,
+	computeCacheKey,
+} from '../shared/cache-key.js';
 import type { EstimateCall, EstimateUsdFn } from '../shared/types.js';
 import { archiveCache } from './archive-cache.js';
 import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
@@ -96,6 +101,16 @@ export interface RunSuiteOptions {
 	cacheDir: string;
 	repoRoot: string;
 	modelIds: TierModelSnapshot;
+	/**
+	 * Resolved `provider/model` refs the run actually dispatches. Display
+	 * `modelIds` stay model strings; the cache key uses these refs.
+	 */
+	tierRefs?: TierCacheRefs;
+	/**
+	 * Config file the chatbot and agent runtimes load. Hashed into those
+	 * buckets' keys only. The path is the one used for this run.
+	 */
+	configPath?: string;
 	maxRunBudgetUsd: number;
 	estimateUsd: EstimateUsdFn;
 	classifiers: RoutingClassifierAdapter;
@@ -187,6 +202,46 @@ function bucketTier(bucket: PersonaCase['bucket']): EvaluatedTier {
 	return BUCKET_ESTIMATE[bucket].tier ?? 'fast';
 }
 
+/**
+ * One cache-key shape for `runSuite` and `--list`. Chatbot and agent trials
+ * load `configPath`; other buckets do not, so a config edit must not move
+ * their keys.
+ */
+function cacheKeyForCase(
+	filePath: string,
+	persona: PersonaCase,
+	opts: {
+		repoRoot: string;
+		modelIds: TierModelSnapshot;
+		tierRefs?: TierCacheRefs;
+		configPath?: string;
+		hashCache: Map<string, Promise<string>>;
+		timezone: string;
+		judgeModelRef?: ModelRef;
+		agentRepeats?: number;
+	},
+): Promise<string> {
+	const salt = cacheSaltForCase(
+		persona.bucket,
+		opts.timezone,
+		opts.judgeModelRef,
+		opts.agentRepeats,
+	);
+	const gradesLiveConfig = persona.bucket === 'chatbot' || persona.bucket === 'agent';
+	return computeCacheKey({
+		casePath: relative(opts.repoRoot, filePath),
+		coveragePaths: persona.coverage,
+		modelIds: opts.modelIds,
+		...(opts.tierRefs ? { tierRefs: opts.tierRefs } : {}),
+		...(gradesLiveConfig && opts.configPath !== undefined ? { configPath: opts.configPath } : {}),
+		repoRoot: opts.repoRoot,
+		hashCache: opts.hashCache,
+		caseId: persona.id,
+		harnessPaths: BUCKET_HARNESS_PATHS[persona.bucket] ?? [],
+		...(salt !== undefined ? { extraSalt: salt } : {}),
+	});
+}
+
 export interface RunSuiteOutcome {
 	summary: RunSummary;
 	results: RunResult[];
@@ -228,19 +283,18 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 	const hashCache = new Map<string, Promise<string>>();
 	const tz = opts.timezone ?? 'UTC';
 	const cacheKeys = await Promise.all(
-		filtered.map((lc) => {
-			const salt = cacheSaltForCase(lc.case.bucket, tz, opts.judgeModelRef, opts.agentRepeats);
-			return computeCacheKey({
-				casePath: relative(opts.repoRoot, lc.filePath),
-				coveragePaths: lc.case.coverage,
-				modelIds: opts.modelIds,
+		filtered.map((lc) =>
+			cacheKeyForCase(lc.filePath, lc.case, {
 				repoRoot: opts.repoRoot,
+				modelIds: opts.modelIds,
+				tierRefs: opts.tierRefs,
+				configPath: opts.configPath,
 				hashCache,
-				caseId: lc.case.id,
-				harnessPaths: BUCKET_HARNESS_PATHS[lc.case.bucket] ?? [],
-				...(salt !== undefined ? { extraSalt: salt } : {}),
-			});
-		}),
+				timezone: tz,
+				judgeModelRef: opts.judgeModelRef,
+				agentRepeats: opts.agentRepeats,
+			}),
+		),
 	);
 
 	// Pre-read every cache entry in parallel for the cache-hit happy path.
@@ -637,19 +691,18 @@ async function emitCaseList(
 	// post-dispatch cache file the GUI looks up.
 	const tz = deps.timezone ?? 'UTC';
 	const cacheKeys = await Promise.all(
-		loaded.map((lc) => {
-			const salt = cacheSaltForCase(lc.case.bucket, tz, deps.judgeModelRef, agentRepeats);
-			return computeCacheKey({
-				casePath: relative(deps.repoRoot, lc.filePath),
-				coveragePaths: lc.case.coverage,
-				modelIds: deps.modelIds,
+		loaded.map((lc) =>
+			cacheKeyForCase(lc.filePath, lc.case, {
 				repoRoot: deps.repoRoot,
+				modelIds: deps.modelIds,
+				tierRefs: deps.tierRefs,
+				configPath: deps.configPath,
 				hashCache,
-				caseId: lc.case.id,
-				harnessPaths: BUCKET_HARNESS_PATHS[lc.case.bucket] ?? [],
-				...(salt !== undefined ? { extraSalt: salt } : {}),
-			});
-		}),
+				timezone: tz,
+				judgeModelRef: deps.judgeModelRef,
+				agentRepeats,
+			}),
+		),
 	);
 	let totalInputs = 0;
 	for (let i = 0; i < loaded.length; i++) {

@@ -30,6 +30,15 @@ describe('matchesNumber', () => {
 		expect(matchesNumber('It cost $57.36', 57.35)).toBe(false);
 		expect(matchesNumber('no numbers here', 3)).toBe(false);
 	});
+	it('does not match a value embedded in a longer digit sequence', () => {
+		expect(matchesNumber('17.79', 7.79)).toBe(false);
+		expect(matchesNumber('saw 17.79 today', 7.79)).toBe(false);
+		expect(matchesNumber('7.791', 7.79)).toBe(false);
+		expect(matchesNumber('the price is 7.79.', 7.79)).toBe(true);
+		expect(matchesNumber('(7.79)', 7.79)).toBe(true);
+		// A trailing zero is the same amount, same as "48.50" matching 48.5.
+		expect(matchesNumber('7.790', 7.79)).toBe(true);
+	});
 });
 
 describe('matchesDate', () => {
@@ -56,6 +65,19 @@ describe('matchesDate', () => {
 		expect(matchesDate('It was September 9,2025.', '2026-09-09')).toBe(false);
 		expect(matchesDate('It was September 9, 2026.', '2026-09-09')).toBe(true);
 		expect(matchesDate('It was September 9.', '2026-09-09')).toBe(true);
+	});
+	it('requires non-digit boundaries around an ISO date', () => {
+		expect(matchesDate('12026-09-09', '2026-09-09')).toBe(false);
+		expect(matchesDate('2026-09-091', '2026-09-09')).toBe(false);
+		expect(matchesDate('on 2026-09-09.', '2026-09-09')).toBe(true);
+		expect(matchesDate('(2026-09-09)', '2026-09-09')).toBe(true);
+	});
+	it('rejects a textual or numeric date whose year or day has an extra digit', () => {
+		expect(matchesDate('It was September 9, 20261.', '2026-09-09')).toBe(false);
+		expect(matchesDate('It was 9 September 20261.', '2026-09-09')).toBe(false);
+		expect(matchesDate('It was 9/9/20261.', '2026-09-09')).toBe(false);
+		expect(matchesDate('It was September 91.', '2026-09-09')).toBe(false);
+		expect(matchesDate('It was September 9, 2026.', '2026-09-09')).toBe(true);
 	});
 });
 

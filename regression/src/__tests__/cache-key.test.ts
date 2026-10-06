@@ -519,3 +519,65 @@ describe('computeCacheKey — system under test (review R1-1)', () => {
 		expect(harnessDigestComputeCount()).toBe(1);
 	});
 });
+
+describe('computeCacheKey — provider identity and behavioural config (review R2-1)', () => {
+	const modelIds = { fast: 'gemma', standard: 'gemma', reasoning: null as string | null };
+
+	async function baseArgs() {
+		await writeFile(join(tempRepo, 'case.ts'), 'export {}\n');
+		return {
+			casePath: 'case.ts',
+			coveragePaths: [] as string[],
+			modelIds,
+			repoRoot: tempRepo,
+			caseId: 'case-1',
+		};
+	}
+
+	function refs(fastProvider: string, standardProvider = fastProvider) {
+		return {
+			fast: { provider: fastProvider, model: 'gemma' },
+			standard: { provider: standardProvider, model: 'gemma' },
+			reasoning: null,
+		};
+	}
+
+	it('same model string with a different provider produces a different key', async () => {
+		const base = await baseArgs();
+		const ollama = await computeCacheKey({ ...base, tierRefs: refs('ollama') });
+		const llamaCpp = await computeCacheKey({ ...base, tierRefs: refs('llama-cpp') });
+		expect(llamaCpp).not.toBe(ollama);
+	});
+
+	it('the same provider/model produces the same key', async () => {
+		const base = await baseArgs();
+		const first = await computeCacheKey({ ...base, tierRefs: refs('ollama', 'llama-cpp') });
+		const second = await computeCacheKey({ ...base, tierRefs: refs('ollama', 'llama-cpp') });
+		expect(second).toBe(first);
+	});
+
+	it('changing one byte of the config changes the key, and a missing config is stable', async () => {
+		const base = await baseArgs();
+		const configPath = join(tempRepo, 'pas.yaml');
+		await writeFile(configPath, 'routing:\n  multi_intent_split: true\n');
+		const chatBefore = await computeCacheKey({ ...base, caseId: 'chat', configPath });
+		const agentBefore = await computeCacheKey({ ...base, caseId: 'agent', configPath });
+		await writeFile(configPath, 'routing:\n  multi_intent_split: fals\n');
+		const chatAfter = await computeCacheKey({ ...base, caseId: 'chat', configPath });
+		const agentAfter = await computeCacheKey({ ...base, caseId: 'agent', configPath });
+		expect(chatAfter).not.toBe(chatBefore);
+		expect(agentAfter).not.toBe(agentBefore);
+
+		const missing = join(tempRepo, 'missing-pas.yaml');
+		const absentA = await computeCacheKey({ ...base, caseId: 'chat', configPath: missing });
+		const absentB = await computeCacheKey({ ...base, caseId: 'chat', configPath: missing });
+		const absentOtherPath = await computeCacheKey({
+			...base,
+			caseId: 'chat',
+			configPath: join(tempRepo, 'also-missing.yaml'),
+		});
+		expect(absentA).toBe(absentB);
+		expect(absentOtherPath).toBe(absentA);
+		expect(absentA).not.toBe(chatBefore);
+	});
+});

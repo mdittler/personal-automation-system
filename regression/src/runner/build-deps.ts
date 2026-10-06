@@ -27,7 +27,7 @@ import { ProviderRegistry } from '@core/services/llm/providers/provider-registry
 import type { ModelRef, ModelTier, ProviderType } from '@core/types/llm.js';
 import type { TierModelSnapshot } from '@core/types/regression.js';
 import { type Logger, pino } from 'pino';
-import { todayInTimezone } from '../shared/cache-key.js';
+import { type TierCacheRefs, todayInTimezone } from '../shared/cache-key.js';
 import type { EstimateUsdFn } from '../shared/types.js';
 import { WORKER_TIMEOUT_MS, spawnAgentTrial } from './agent-trial-spawn.js';
 import type { CliOptions } from './args.js';
@@ -60,10 +60,9 @@ function applyAllTransientOverrides(selector: ModelSelector, override?: TierOver
  * `qwen3.8:27b-mlx`) silently falls through to `DEFAULT_REMOTE_PRICING` and
  * gets quoted at frontier rates.
  *
- * Deliberately kept OUT of `TierModelSnapshot`: that type is serialized into
- * the regression cache key (`shared/cache-key.ts`), so widening it would
- * invalidate every cached result. Provider information rides alongside the
- * snapshot instead of inside it.
+ * Deliberately kept OUT of `TierModelSnapshot`: that type is the reported
+ * display snapshot (model strings only). Provider identity enters the cache
+ * key through `tierRefs` (`provider/model`), not by widening the snapshot.
  */
 export interface TierPricingRef {
 	model: string;
@@ -100,16 +99,19 @@ interface RepoPaths {
 
 /**
  * Locate the repo root by walking up from this module's filesystem location
- * looking for `config/pas.yaml`. Independent of `process.cwd()` so that
- * `pnpm --filter @pas/regression test:regression` (cwd = regression/) and
- * root-invoked `pnpm test:regression` (cwd = repo) both resolve identically.
+ * looking for the tracked `pnpm-workspace.yaml`. Independent of `process.cwd()`
+ * so that `pnpm --filter @pas/regression test:regression` (cwd = regression/)
+ * and root-invoked `pnpm test:regression` (cwd = repo) both resolve identically.
+ * `config/pas.yaml` is gitignored, so a clean checkout does not have it.
  * Falls back to cwd if the marker is not found, which only happens if the
  * regression workspace is installed outside the PAS repo.
+ *
+ * `startDir` overrides the walk origin (tests pass a temp layout).
  */
-export function findRepoRoot(): string {
-	let dir = dirname(fileURLToPath(import.meta.url));
+export function findRepoRoot(startDir?: string): string {
+	let dir = startDir === undefined ? dirname(fileURLToPath(import.meta.url)) : resolve(startDir);
 	for (let i = 0; i < 10; i++) {
-		if (existsSync(resolve(dir, 'config', 'pas.yaml'))) {
+		if (existsSync(resolve(dir, 'pnpm-workspace.yaml'))) {
 			return dir;
 		}
 		const parent = dirname(dir);
@@ -257,6 +259,8 @@ export async function buildProductionDeps(opts?: ProductionDepsOptions): Promise
 		cacheDir: paths.cacheDir,
 		repoRoot: paths.repoRoot,
 		modelIds,
+		tierRefs: cacheRefsFrom(tierRefs),
+		configPath: paths.configPath,
 		maxRunBudgetUsd,
 		estimateUsd: makeTierAwareEstimator(costTracker, pricingRefs),
 		classifiers,
@@ -458,7 +462,8 @@ export async function buildMetadataDeps(options?: { configPath?: string }): Prom
 		configPath: options?.configPath ?? paths.configPath,
 		mode: 'strict',
 	});
-	const modelIds = await resolveTierModelIds(config, logger);
+	const resolvedRefs = await resolveTierRefs(config, logger);
+	const modelIds = tierRefsToSnapshot(resolvedRefs);
 	const maxRunBudgetUsd = config.regression?.maxRunBudgetUsd ?? DEFAULT_MAX_RUN_BUDGET_USD;
 	const throwOnDispatch = (): never => {
 		throw new Error(
@@ -470,6 +475,8 @@ export async function buildMetadataDeps(options?: { configPath?: string }): Prom
 		cacheDir: paths.cacheDir,
 		repoRoot: paths.repoRoot,
 		modelIds,
+		tierRefs: cacheRefsFrom(resolvedRefs),
+		configPath: options?.configPath ?? paths.configPath,
 		maxRunBudgetUsd,
 		estimateUsd: () => 0,
 		agentTrialRunner: async () => {
@@ -548,9 +555,8 @@ export async function resolveTierRefs(
 }
 
 /**
- * Narrow tier refs to the cache-key snapshot. The shape here is frozen:
- * `shared/cache-key.ts` serializes exactly these three fields, so any change
- * invalidates every cached result.
+ * Narrow tier refs to the reported model-id snapshot. Provider identity is
+ * kept beside this snapshot (`cacheRefsFrom`) and hashed as `provider/model`.
  */
 export function tierRefsToSnapshot(
 	refs: Readonly<Record<ModelTier, ModelRef | undefined>>,
@@ -559,6 +565,14 @@ export function tierRefsToSnapshot(
 		fast: refs.fast?.model ?? 'unknown',
 		standard: refs.standard?.model ?? 'unknown',
 		reasoning: refs.reasoning?.model ?? null,
+	};
+}
+
+function cacheRefsFrom(refs: Readonly<Record<ModelTier, ModelRef | undefined>>): TierCacheRefs {
+	return {
+		fast: refs.fast ?? null,
+		standard: refs.standard ?? null,
+		reasoning: refs.reasoning ?? null,
 	};
 }
 
@@ -587,12 +601,11 @@ export function buildTierPricingRefs(
 
 /**
  * Substitute tier model IDs from a `--model-matrix=<list>` override into the
- * deps. Only `modelIds` are rewritten; the chatbot environment factory must
- * be re-built with `tierOverride` separately if the override needs to flow
- * into the live LLMService composed inside the chatbot runtime (see
- * `buildProductionDeps({ tierOverride })`). For routing / recall buckets the
- * `modelIds` substitution alone is sufficient because the cache key reflects
- * the override and the adapters dispatch through the shared LLMService.
+ * deps. Display `modelIds` stay model strings; `tierRefs` keeps the provider
+ * so the cache key can tell `ollama/gemma` from `llama-cpp/gemma`. The chatbot
+ * environment factory must be re-built with `tierOverride` separately if the
+ * override needs to flow into the live LLMService (see
+ * `buildProductionDeps({ tierOverride })`).
  *
  * Returns a NEW deps object — does not mutate `deps.modelIds` in place.
  */
@@ -605,7 +618,13 @@ export function applyModelMatrixOverride(
 		standard: matrix.standard?.model ?? deps.modelIds.standard,
 		reasoning: matrix.reasoning?.model ?? deps.modelIds.reasoning,
 	};
-	return { ...deps, modelIds: newModelIds };
+	const prev = deps.tierRefs;
+	const tierRefs: TierCacheRefs = {
+		fast: matrix.fast ?? prev?.fast ?? null,
+		standard: matrix.standard ?? prev?.standard ?? null,
+		reasoning: matrix.reasoning ?? prev?.reasoning ?? null,
+	};
+	return { ...deps, modelIds: newModelIds, tierRefs };
 }
 
 /**
