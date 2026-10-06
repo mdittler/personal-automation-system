@@ -1,0 +1,43 @@
+---
+title: 'Receipt: Costco'
+date: 2026-08-26
+tags:
+  - food
+  - receipt
+type: receipt
+entity_keys:
+  - 'costco'
+app: food
+---
+id: 2026-08-26-costco-c
+store: "Costco"
+date: 2026-08-26
+lineItems:
+  - name: Kirkland Olive Oil 2L
+    quantity: 1
+    unitPrice: 25.49
+    totalPrice: 25.49
+  - name: Chicken Thighs 6lb
+    quantity: 1
+    unitPrice: 19.99
+    totalPrice: 19.99
+  - name: Jasmine Rice 25lb
+    quantity: 1
+    unitPrice: 21.99
+    totalPrice: 21.99
+  - name: Coconut Milk 6pk
+    quantity: 1
+    unitPrice: 9.49
+    totalPrice: 9.49
+  - name: Paper Towels 12pk
+    quantity: 1
+    unitPrice: 23.49
+    totalPrice: 23.49
+  - name: Organic Blueberries 18oz
+    quantity: 1
+    unitPrice: 7.79
+    totalPrice: 7.79
+subtotal: 108.24
+tax: 3.12
+total: 111.36
+capturedAt: 2026-08-26T18:00:00.000Z

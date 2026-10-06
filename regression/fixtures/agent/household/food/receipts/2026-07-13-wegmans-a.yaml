@@ -1,0 +1,39 @@
+---
+title: 'Receipt: Wegmans'
+date: 2026-07-13
+tags:
+  - food
+  - receipt
+type: receipt
+entity_keys:
+  - 'wegmans'
+app: food
+---
+id: 2026-07-13-wegmans-a
+store: "Wegmans"
+date: 2026-07-13
+lineItems:
+  - name: Organic Blueberries 1pt
+    quantity: 2
+    unitPrice: 4.99
+    totalPrice: 9.98
+  - name: Whole Milk 1gal
+    quantity: 1
+    unitPrice: 4.29
+    totalPrice: 4.29
+  - name: Sourdough Loaf
+    quantity: 1
+    unitPrice: 4.99
+    totalPrice: 4.99
+  - name: Parmesan Wedge
+    quantity: 1
+    unitPrice: 8.99
+    totalPrice: 8.99
+  - name: Lemons 3ct
+    quantity: 1
+    unitPrice: 2.99
+    totalPrice: 2.99
+subtotal: 31.24
+tax: 0.00
+total: 31.24
+capturedAt: 2026-07-13T18:00:00.000Z

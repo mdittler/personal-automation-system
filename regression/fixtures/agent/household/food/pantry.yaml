@@ -1,0 +1,44 @@
+---
+title: Pantry Inventory
+date: "2026-09-01T12:00:00.000Z"
+tags:
+  - pas/pantry
+  - pas/food
+app: food
+---
+items:
+  - name: Pasta
+    quantity: 2 boxes
+    addedDate: 2026-09-01
+    category: grains
+    canonicalName: pasta
+  - name: Jasmine Rice
+    quantity: 1 bag
+    addedDate: 2026-09-01
+    category: grains
+    canonicalName: jasmine rice
+  - name: Olive Oil
+    quantity: 1 bottle
+    addedDate: 2026-09-01
+    category: oils
+    canonicalName: olive oil
+  - name: Canned Chickpeas
+    quantity: 3 cans
+    addedDate: 2026-09-01
+    category: canned
+    canonicalName: canned chickpea
+  - name: Coconut Milk
+    quantity: 2 cans
+    addedDate: 2026-09-01
+    category: canned
+    canonicalName: coconut milk
+  - name: Curry Powder
+    quantity: 1 jar
+    addedDate: 2026-09-01
+    category: spices
+    canonicalName: curry powder
+  - name: Peanut Butter
+    quantity: 1 jar
+    addedDate: 2026-09-01
+    category: spreads
+    canonicalName: peanut butter

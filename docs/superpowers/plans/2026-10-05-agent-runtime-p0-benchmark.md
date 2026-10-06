@@ -1972,7 +1972,7 @@ The seed is synthetic (never the operator's real data) and deterministic. Receip
 - Create: `regression/src/runner/agent-environment.ts`
 - Test: `regression/src/__tests__/agent-environment.test.ts`
 
-- [ ] **Step 1: Create the receipt generator** — `regression/scripts/generate-agent-seed.py`:
+- [x] **Step 1: Create the receipt generator** — `regression/scripts/generate-agent-seed.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -2027,7 +2027,7 @@ if __name__ == '__main__':
 Run: `python3 regression/scripts/generate-agent-seed.py && ls regression/fixtures/agent/household/food/receipts | wc -l`
 Expected: `9`. Spot-check: `grep '^total:' regression/fixtures/agent/household/food/receipts/2026-09-09-costco-d.yaml` → `total: 57.35`.
 
-- [ ] **Step 2: Write the hand-authored seed files** (verbatim):
+- [x] **Step 2: Write the hand-authored seed files** (verbatim):
 
 `regression/fixtures/agent/household/food/prices/costco.md`:
 
@@ -2494,12 +2494,12 @@ items:
     canonicalName: granola
 ```
 
-- [ ] **Step 3: Generate the integrity manifest**
+- [x] **Step 3: Generate the integrity manifest**
 
 Run: `cd regression/fixtures/agent && find household overlays -type f | LC_ALL=C sort | xargs shasum -a 256 > seed.sha256 && wc -l seed.sha256 && cd -`
 Expected: `20 seed.sha256`.
 
-- [ ] **Step 4: Write the failing environment tests** — create `regression/src/__tests__/agent-environment.test.ts`. These test the pure seed-copy helper (the full runtime is exercised by the live baseline in Task 12):
+- [x] **Step 4: Write the failing environment tests** — create `regression/src/__tests__/agent-environment.test.ts`. These test the pure seed-copy helper (the full runtime is exercised by the live baseline in Task 12):
 
 ```ts
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -2568,12 +2568,12 @@ describe('agent seed fixtures', () => {
 });
 ```
 
-- [ ] **Step 5: Run to verify failure**
+- [x] **Step 5: Run to verify failure**
 
 Run: `cd regression && npx vitest run src/__tests__/agent-environment.test.ts`
 Expected: FAIL — module not found.
 
-- [ ] **Step 6: Implement** — create `regression/src/runner/agent-environment.ts`:
+- [x] **Step 6: Implement** — create `regression/src/runner/agent-environment.ts`:
 
 ```ts
 /**
@@ -2678,12 +2678,12 @@ export async function createAgentEnvironment(
 }
 ```
 
-- [ ] **Step 7: Run to verify pass**
+- [x] **Step 7: Run to verify pass**
 
 Run: `cd regression && npx vitest run src/__tests__/agent-environment.test.ts`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add regression/scripts/generate-agent-seed.py regression/fixtures/agent regression/src/runner/agent-environment.ts regression/src/__tests__/agent-environment.test.ts
@@ -4904,7 +4904,7 @@ The plan→execution contract (`docs/review-protocol.md` §2). Code review adjud
   - unchanged paths;
   - messages to other users.
   (Tasks 7, 9)
-- [ ] **D9** — The 20-file synthetic seed passes its integrity check. Overlays and `{date:±N}` expansion work. (Task 8)
+- [x] **D9** — The 20-file synthetic seed passes its integrity check. Overlays and `{date:±N}` expansion work. (Task 8) [agent-environment.test.ts 5/5 pass; tampering pantry.yaml fails the integrity test, overlay-replace and date-expansion tests cover the rest; the full runtime build is exercised in Task 12]
 - [ ] **D10** — Agent trial behaviour (Tasks 9, 10):
   - each agent trial runs in its own worker process;
   - verdict precedence is error > budget-exceeded > fail > pass;
@@ -4949,7 +4949,7 @@ Every finding from the plan review that was fixed in this plan's text must be **
 | C24 harness paths missed extracted modules | Tasks 2, 10, 11 | [x] `cache-key.test.ts` "extracted modules are harness paths" green (`chatbot` has `seeded-runtime.ts`; `agent` has `seeded-runtime.ts`, `provider-call-tracker.ts`, `provider-registry.ts`, `seed.ts`) [observed green]; [ ] existence test and the import-rule test un-skipped in Task 11 and green; [ ] code review: the worker imports `provider-registry.ts`, not `build-deps.ts` |
 | C25 slow case outlives the GUI watchdog; orphaned workers | Task 10 | [ ] `agent-trial-spawn.test.ts` "forwards each meter line to onMeter as it arrives, before the result" green; [ ] `agent-runner.test.ts` "forwards each trial meter to deps.onMeter" green; [ ] `orchestrator.test.ts` "relays every trial meter as a heartbeat", "runCli --json writes heartbeat NDJSON lines before the case-result", and "keeps heartbeats off stdout" green; [ ] core `subprocess.test.ts` "heartbeat NDJSON lines keep a slow run alive" green (40 ms stall window, 90 ms of heartbeats); [ ] `agent-trial-spawn.test.ts` "installWorkerTeardown kills live workers…" green (exit 143, `worker-terminated` log with `costUsd` 0.02, pid gone); [ ] code review: `cli-main.ts` calls `installWorkerTeardown()` |
 | C26 weak acceptance rows (C5, C9, C21) | Tasks 0, 9, 11 | [ ] the three strengthened rows above are ticked with the named tests |
-| C27 contractual numbers not pinned | Tasks 8, 10, 11 | [ ] `agent-cases.test.ts`: `cases.length === 46`, `AGENT_CATEGORIES.length === 8` and 8 distinct categories used, every `budgetUsd === 0.75`; [ ] `agent-environment.test.ts`: `seed.sha256` has 20 lines (9 receipts, 3 overlay files); [ ] `provider-call-tracker.test.ts`: `DEFAULT_SETTLE_MS === 250`, `DEFAULT_DRAIN_TIMEOUT_MS === 120_000`; [ ] `agent-trial-spawn.test.ts`: `METER_INTERVAL_MS === 2000`, `WORKER_TIMEOUT_MS === 900_000`; [ ] `args.test.ts`: `repeats` defaults to 3, range 1..10 |
+| C27 contractual numbers not pinned | Tasks 8, 10, 11 | [ ] `agent-cases.test.ts`: `cases.length === 46`, `AGENT_CATEGORIES.length === 8` and 8 distinct categories used, every `budgetUsd === 0.75`; [x] `agent-environment.test.ts`: `seed.sha256` has 20 lines (9 receipts, 3 overlay files) [observed: deleting a manifest line fails with 'length 20 but got 19']; [ ] `provider-call-tracker.test.ts`: `DEFAULT_SETTLE_MS === 250`, `DEFAULT_DRAIN_TIMEOUT_MS === 120_000`; [ ] `agent-trial-spawn.test.ts`: `METER_INTERVAL_MS === 2000`, `WORKER_TIMEOUT_MS === 900_000`; [ ] `args.test.ts`: `repeats` defaults to 3, range 1..10 |
 | C28 smoke explanation misattributed the need to build | Task 11 Step 8 | [ ] Step 8 text names `loader.ts:78` (compiled app entry preferred) as the reason and `tsx-resolution.test.ts` as proof core resolves to source; [ ] smoke run recorded after `pnpm build` |
 
 ## Implementation notes from review

@@ -1,0 +1,35 @@
+---
+title: 'Receipt: Trader Joe''s'
+date: 2026-06-14
+tags:
+  - food
+  - receipt
+type: receipt
+entity_keys:
+  - 'trader joe''s'
+app: food
+---
+id: 2026-06-14-traderjoes-b
+store: "Trader Joe's"
+date: 2026-06-14
+lineItems:
+  - name: Mandarin Orange Chicken
+    quantity: 2
+    unitPrice: 4.99
+    totalPrice: 9.98
+  - name: Everything Bagel Seasoning
+    quantity: 1
+    unitPrice: 2.29
+    totalPrice: 2.29
+  - name: Oat Milk
+    quantity: 2
+    unitPrice: 3.49
+    totalPrice: 6.98
+  - name: Granola
+    quantity: 1
+    unitPrice: 3.99
+    totalPrice: 3.99
+subtotal: 23.24
+tax: 0.00
+total: 23.24
+capturedAt: 2026-06-14T18:00:00.000Z

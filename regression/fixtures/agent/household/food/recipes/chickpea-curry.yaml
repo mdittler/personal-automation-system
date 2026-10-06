@@ -1,0 +1,46 @@
+---
+title: Chickpea Curry
+date: "2026-08-01T12:00:00.000Z"
+tags:
+  - pas/recipe
+  - pas/food
+type: recipe
+entity_keys:
+  - chickpea curry
+app: food
+---
+id: chickpea-curry
+title: Chickpea Curry
+source: manual
+ingredients:
+  - name: Canned Chickpeas
+    quantity: 2
+    unit: cans
+    notes: null
+    canonicalName: canned chickpeas
+  - name: Coconut Milk
+    quantity: 1
+    unit: can
+    notes: null
+    canonicalName: coconut milk
+  - name: Jasmine Rice
+    quantity: 1.5
+    unit: cups
+    notes: null
+    canonicalName: jasmine rice
+  - name: Curry Powder
+    quantity: 2
+    unit: tbsp
+    notes: null
+    canonicalName: curry powder
+instructions:
+  - Simmer chickpeas in coconut milk with curry powder for 20 minutes.
+  - Serve over steamed jasmine rice.
+servings: 4
+tags: []
+ratings: []
+history: []
+allergens: []
+status: confirmed
+createdAt: "2026-08-01T12:00:00.000Z"
+updatedAt: "2026-08-01T12:00:00.000Z"

@@ -1,0 +1,35 @@
+---
+title: 'Receipt: Trader Joe''s'
+date: 2026-04-29
+tags:
+  - food
+  - receipt
+type: receipt
+entity_keys:
+  - 'trader joe''s'
+app: food
+---
+id: 2026-04-29-traderjoes-a
+store: "Trader Joe's"
+date: 2026-04-29
+lineItems:
+  - name: Chocolate Croissants 4ct
+    quantity: 1
+    unitPrice: 5.99
+    totalPrice: 5.99
+  - name: Organic Blueberries 12oz
+    quantity: 1
+    unitPrice: 4.49
+    totalPrice: 4.49
+  - name: Peanut Butter Creamy
+    quantity: 1
+    unitPrice: 2.49
+    totalPrice: 2.49
+  - name: Bananas
+    quantity: 6
+    unitPrice: 0.25
+    totalPrice: 1.50
+subtotal: 14.47
+tax: 0.00
+total: 14.47
+capturedAt: 2026-04-29T18:00:00.000Z
