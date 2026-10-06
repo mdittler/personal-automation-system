@@ -18,6 +18,7 @@
   <a href="/gui/regression?view=compare&bucket=routing" <% if (it.selectedBucket === 'routing') { %>aria-current="page"<% } %>>Routing</a>
   <a href="/gui/regression?view=compare&bucket=receipt" <% if (it.selectedBucket === 'receipt') { %>aria-current="page"<% } %>>Receipt</a>
   <a href="/gui/regression?view=compare&bucket=chatbot" <% if (it.selectedBucket === 'chatbot') { %>aria-current="page"<% } %>>Chatbot</a>
+  <a href="/gui/regression?view=compare&bucket=agent" <% if (it.selectedBucket === 'agent') { %>aria-current="page"<% } %>>Agent</a>
   <a href="/gui/regression?view=compare&bucket=recall" <% if (it.selectedBucket === 'recall') { %>aria-current="page"<% } %>>Recall</a>
 </nav>
 

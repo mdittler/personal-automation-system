@@ -192,3 +192,40 @@ describe('Chunk C — rubric oracle rules', () => {
 		).toThrow(/judge.*reserved/i);
 	});
 });
+
+describe('agent bucket (REQ-REG-AGENT-001)', () => {
+	const agentCase = (over: Partial<PersonaCase> = {}): PersonaCase => ({
+		id: 'agent-x',
+		description: 'd',
+		bucket: 'agent',
+		coverage: ['core/src/services/router/index.ts'],
+		inputs: [
+			{
+				payload: { turns: [{ text: 'hi' }] },
+				expected: { set: 'regression', category: 'no-tool' },
+			},
+		],
+		oracle: 'outcome',
+		budgetUsd: 0.5,
+		...over,
+	});
+	it('accepts a well-formed agent case', () => {
+		expect(() => validatePersonaCase(agentCase())).not.toThrow();
+	});
+	it('rejects an agent case whose oracle is not outcome', () => {
+		expect(() => validatePersonaCase(agentCase({ oracle: 'structural' }))).toThrow(/outcome/);
+	});
+	it('rejects the outcome oracle outside the agent bucket', () => {
+		expect(() =>
+			validatePersonaCase({ ...agentCase(), bucket: 'receipt', oracle: 'outcome' } as PersonaCase),
+		).toThrow(/outcome/);
+	});
+	it('requires exactly one input (one task per case)', () => {
+		const two = agentCase();
+		two.inputs = [...two.inputs, ...two.inputs];
+		expect(() => validatePersonaCase(two)).toThrow(/exactly one input/);
+	});
+	it('requires agent case ids to start with agent-', () => {
+		expect(() => validatePersonaCase(agentCase({ id: 'x-agent' }))).toThrow(/agent-/);
+	});
+});

@@ -14,7 +14,7 @@
 import type { PersonaCase } from './types.js';
 
 const ID_RE = /^[a-z][a-z0-9-]{0,127}$/;
-const BUCKETS: PersonaCase['bucket'][] = ['receipt', 'chatbot', 'recall', 'routing'];
+const BUCKETS: PersonaCase['bucket'][] = ['receipt', 'chatbot', 'recall', 'routing', 'agent'];
 const VALID_ROUTING_TARGETS = new Set<string>(['food-shadow', 'session-control', 'pas']);
 
 function isPosixRepoRelative(p: string): boolean {
@@ -67,6 +67,22 @@ export function validatePersonaCase(c: PersonaCase): void {
 	if (!Array.isArray(c.inputs) || c.inputs.length === 0) {
 		throw new Error('PersonaCase.inputs must be non-empty');
 	}
+	if (c.bucket === 'agent' || c.oracle === 'outcome') {
+		if (c.bucket !== 'agent' || c.oracle !== 'outcome') {
+			throw new Error(
+				`PersonaCase: oracle 'outcome' and bucket 'agent' go together (got bucket="${c.bucket}", oracle="${c.oracle}", case: ${c.id})`,
+			);
+		}
+		if (c.inputs.length !== 1) {
+			throw new Error(
+				`PersonaCase: agent cases take exactly one input (one task per case): ${c.id}`,
+			);
+		}
+		if (!c.id.startsWith('agent-')) {
+			throw new Error(`PersonaCase: agent case ids must start with "agent-": ${c.id}`);
+		}
+		return;
+	}
 	if (c.oracle === 'judge') {
 		throw new Error(`PersonaCase.oracle 'judge' is reserved (REQ-REG-014)`);
 	}
@@ -86,7 +102,7 @@ export function validatePersonaCase(c: PersonaCase): void {
 	}
 	if (c.oracle !== 'structural') {
 		throw new Error(
-			`PersonaCase.oracle must be 'structural' or 'rubric': ${JSON.stringify(c.oracle)}`,
+			`PersonaCase.oracle must be 'structural', 'rubric' or 'outcome': ${JSON.stringify(c.oracle)}`,
 		);
 	}
 }

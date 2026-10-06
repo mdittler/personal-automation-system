@@ -1298,7 +1298,7 @@ git commit -m "fix(regression): fresh seeded runtime per chatbot case (no transc
 - Modify: `core/src/gui/views/partials/regression-tab-trends.eta`, `regression-tab-compare.eta`, `regression-tab-run.eta`
 - Test: `regression/src/__tests__/validate-case.test.ts`, `regression/src/__tests__/args.test.ts`, `core/src/gui/services/regression/__tests__/estimator.test.ts`
 
-- [ ] **Step 1: Write failing tests** — add to `validate-case.test.ts`:
+- [x] **Step 1: Write failing tests** — add to `validate-case.test.ts`:
 
 ```ts
 describe('agent bucket (REQ-REG-AGENT-001)', () => {
@@ -1354,12 +1354,12 @@ it('prices agent cases on the standard tier and charges nothing when it is local
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd regression && npx vitest run src/__tests__/validate-case.test.ts src/__tests__/args.test.ts` and `npx vitest run --project core core/src/gui/services/regression/__tests__/estimator.test.ts`
 Expected: FAIL (type errors / unknown bucket).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `core/src/types/regression.ts`:
 
@@ -1412,12 +1412,12 @@ In each of the three `.eta` partials, add an Agent entry immediately after the C
 
 If any existing GUI test asserts the exact `perBucketUsd` object or the exact bucket option list, add the `agent` entry to its expectation.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `pnpm --filter @pas/regression test` and `npx vitest run --project core core/src/gui`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add core/src/types/regression.ts core/src/gui regression/src/shared/validate-case.ts regression/src/runner/args.ts regression/src/runner/index.ts regression/src/__tests__/validate-case.test.ts regression/src/__tests__/args.test.ts
@@ -4896,7 +4896,7 @@ The plan→execution contract (`docs/review-protocol.md` §2). Code review adjud
 - [ ] **D4** — `--archive-cache` moves the cache to `<cacheDir>-archive/<stamp>/` and leaves an empty cache. (Task 3)
 - [x] **D5** — The rubric judge prompt carries the seed reference data and names the reply block. (Task 4) [observed: rubric-oracle + chatbot-runner tests green; mutation-checks failed for the right reasons: dropping `...reference` fails the reference test, dropping the reply-naming line fails 2 tests, dropping runner forwarding fails the chatbot-runner test]
 - [ ] **D6** — Every chatbot case runs in its own seeded runtime. Every seeded runtime has webhooks and n8n disabled, generous safeguards, and the parent's **reconciled** tiers. (Tasks 5, 10)
-- [ ] **D7** — `agent` is accepted by the CLI, the case validator, the GUI estimator, and the three GUI bucket selectors. The CLI's `--case <id>` (repeatable) selects cases by id after the bucket filter; unknown ids are an error. (Tasks 6, 10)
+- [ ] **D7** — `agent` is accepted by the CLI, the case validator, the GUI estimator, and the three GUI bucket selectors. The CLI's `--case <id>` (repeatable) selects cases by id after the bucket filter; unknown ids are an error. (Tasks 6, 10) [Task 6 portion observed: `--bucket=agent` (args.test), validator agent block (5 tests), estimator agent rate/tier (2 tests), three `.eta` selectors edited (no automated test exists for the option lists); mutation-checks: coupling guard off fails 2 tests, one-input guard off fails 1, `agent-` prefix guard off fails 1, estimator rate 0 fails 1, estimator tier 'fast' fails 2, dropping 'agent' from VALID_BUCKETS fails 'accepts --bucket=agent'; `--case` part pending Task 10]
 - [ ] **D8** — The outcome oracle grades:
   - facts: number, text, any-text, and date, including rejecting an explicit wrong year;
   - forbidden phrases;

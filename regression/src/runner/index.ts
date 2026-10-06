@@ -118,7 +118,7 @@ export interface RunSuiteOptions {
 		getTokenUsageTotals: () => { input: number; output: number };
 	};
 	logger: MinimalLogger;
-	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall';
+	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall' | 'agent';
 	rerunIds?: Set<string>;
 	/** Force fresh dispatch for every case (skip all cache reads). Plumbs the
 	 * `--no-cache` CLI flag through. */
@@ -152,6 +152,7 @@ export const BUCKET_ESTIMATE: Readonly<Record<PersonaCase['bucket'], EstimateCal
 	recall: ESTIMATE_TOKENS,
 	chatbot: CHATBOT_ESTIMATE_TOKENS,
 	receipt: RECEIPT_ESTIMATE_TOKENS,
+	agent: { tokenIn: 6000, tokenOut: 600, tier: 'standard' },
 };
 
 /** Tier slot each bucket's dispatch exercises (derived from BUCKET_ESTIMATE). */

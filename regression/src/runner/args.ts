@@ -2,7 +2,7 @@
  * CLI arg parser for `pnpm test:regression`.
  *
  * Supports:
- *   --bucket=<name>  or  --bucket <name>   (routing | receipt | chatbot | recall)
+ *   --bucket=<name>  or  --bucket <name>   (routing | receipt | chatbot | recall | agent)
  *   --rerun=<id>     or  --rerun <id>      (repeatable — accumulates into a Set)
  *   --dry-run        (skip dispatch; print estimate)
  *   --json           (emit line-delimited JSON events; used by the GUI subprocess)
@@ -44,7 +44,7 @@ const RERUN_ID_RE = /^[a-z][a-z0-9-]{0,127}$/;
 export { SAFE_RUN_ID_RE as RUN_ID_RE };
 
 export interface CliOptions {
-	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall';
+	bucketFilter?: 'routing' | 'receipt' | 'chatbot' | 'recall' | 'agent';
 	rerunIds?: Set<string>;
 	dryRun: boolean;
 	json: boolean;
@@ -74,7 +74,7 @@ Usage:
   pnpm test:regression -- --dry-run    Print estimated cost without dispatching.
   pnpm test:regression -- --json       Emit line-delimited JSON events (used by GUI).
   pnpm test:regression -- --list       List cases as JSON (used by GUI; no dispatch).
-  pnpm test:regression -- --bucket=<b> Run only cases with bucket=<b> (routing|receipt|chatbot|recall).
+  pnpm test:regression -- --bucket=<b> Run only cases with bucket=<b> (routing|receipt|chatbot|recall|agent).
   pnpm test:regression -- --rerun <id> Force fresh dispatch for case <id> (repeatable).
   pnpm test:regression -- --rerun=<id> Same, in equals form (used by GUI subprocess).
   pnpm test:regression -- --model-matrix=<list>

@@ -159,6 +159,10 @@ describe('parseCliArgs', () => {
 		expect(parseCliArgs(['--bucket=routing']).bucketFilter).toBe('routing');
 	});
 
+	it('accepts --bucket=agent', () => {
+		expect(parseCliArgs(['--bucket=agent']).bucketFilter).toBe('agent');
+	});
+
 	it('parses --bucket routing (space-form)', () => {
 		expect(parseCliArgs(['--bucket', 'routing']).bucketFilter).toBe('routing');
 	});
