@@ -69,12 +69,12 @@ The suite currently has 12 failures (`dispatch.test.ts`, `orchestrator.integrati
 **Files:**
 - Modify: `regression/vitest.config.ts`
 
-- [ ] **Step 1: Confirm the failure**
+- [x] **Step 1: Confirm the failure**
 
 Run: `pnpm --filter @pas/regression test 2>&1 | grep -E "Test Files|Tests "`
 Expected: `Tests  12 failed | ...`
 
-- [ ] **Step 2: Add the source alias**
+- [x] **Step 2: Add the source alias**
 
 Replace the `resolve` block in `regression/vitest.config.ts` with:
 
@@ -94,13 +94,13 @@ Replace the `resolve` block in `regression/vitest.config.ts` with:
 	},
 ```
 
-- [ ] **Step 2b: Same mapping for TypeScript and tsx** — `pnpm --filter @pas/regression typecheck` (and tsx, which reads this file via `TSX_TSCONFIG_PATH`) also resolves `@pas/core/*` through the stale `core/dist` declarations (TS2305 at `apps/food/src/routing/shadow-classifier.ts:2`). In `regression/tsconfig.json` add to `compilerOptions.paths`:
+- [x] **Step 2b: Same mapping for TypeScript and tsx** — `pnpm --filter @pas/regression typecheck` (and tsx, which reads this file via `TSX_TSCONFIG_PATH`) also resolves `@pas/core/*` through the stale `core/dist` declarations (TS2305 at `apps/food/src/routing/shadow-classifier.ts:2`). In `regression/tsconfig.json` add to `compilerOptions.paths`:
 
 ```json
 			"@pas/core/*": ["../core/src/*"]
 ```
 
-- [ ] **Step 2c: Prove the tsx resolution, not only the typecheck** — the CLI (`pnpm test:regression`), the GUI subprocess (`spawn-helper.ts`) and the Task 10 worker all load through `node --import=tsx/esm` with `TSX_TSCONFIG_PATH`, so the alias must hold there too. Create the probe `regression/src/__tests__/_tsx-resolve-probe.ts` (the `_` prefix keeps it out of the vitest include glob, like `_stub-provider.ts`):
+- [x] **Step 2c: Prove the tsx resolution, not only the typecheck** — the CLI (`pnpm test:regression`), the GUI subprocess (`spawn-helper.ts`) and the Task 10 worker all load through `node --import=tsx/esm` with `TSX_TSCONFIG_PATH`, so the alias must hold there too. Create the probe `regression/src/__tests__/_tsx-resolve-probe.ts` (the `_` prefix keeps it out of the vitest include glob, like `_stub-provider.ts`):
 
 ```ts
 // Printed by tsx-resolution.test.ts's child process: where tsx resolves the
@@ -133,12 +133,12 @@ describe('tsx resolves @pas/core/* to core source (REQ-REG-024 harness; review C
 
 (Verified against HEAD: with `TSX_TSCONFIG_PATH=regression/tsconfig.json`, `import.meta.resolve('@core/utils/json-strip-fences.js')` already prints the `core/src/...ts` URL, so the same mechanism covers the new `@pas/core/*` entry.)
 
-- [ ] **Step 3: Verify green**
+- [x] **Step 3: Verify green**
 
 Run: `pnpm --filter @pas/regression test 2>&1 | grep -E "Test Files|Tests " && pnpm --filter @pas/regression typecheck`
 Expected: `Tests  <N> passed (<N>)`, zero failed (including `tsx-resolution.test.ts`); typecheck exits 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add regression/vitest.config.ts regression/tsconfig.json regression/src/__tests__/tsx-resolution.test.ts regression/src/__tests__/_tsx-resolve-probe.ts
@@ -4944,7 +4944,7 @@ Every finding from the plan review that was fixed in this plan's text must be **
 | C15 overrun ends pass; run remaining ignored | Tasks 9–10 | [ ] `agent-runner.test.ts` overrun tests green; [ ] orchestrator passes `Math.min(case, runBudget.remainingUsd)` (code review) |
 | C17 guard rejections graded | Task 5 | [ ] `buildSeededConfig` test asserts the generous safeguards (N1) |
 | C19 background calls escape | Task 10 | [ ] in-flight tracker test (N3): follow-up call scheduled after the first completes is awaited; timeout records an error |
-| C21 typecheck (and tsx) via stale declarations | Task 0 | [ ] typecheck green with stale `core/dist`; [ ] `tsx-resolution.test.ts` green — the tsx-loaded probe prints a `core/src/utils/json-strip-fences.ts` path and no `core/dist` |
+| C21 typecheck (and tsx) via stale declarations | Task 0 | [x] typecheck green with stale `core/dist` [observed: with `core/dist/utils/json-strip-fences.d.ts` removed, typecheck fails TS7016 without the tsconfig path and exits clean with it]; [x] `tsx-resolution.test.ts` green — the tsx-loaded probe prints a `core/src/utils/json-strip-fences.ts` path and no `core/dist` [observed: test fails (probe cannot resolve) before the tsconfig path, passes after; suite 679 passed] |
 | C23 smoke did not select a case or expose trial details | Tasks 10, 11 | [ ] `args.test.ts` `--case` block green; [ ] `orchestrator.test.ts` "dispatches only the named cases and rejects unknown ids" + "runCli --case=<id> reaches runSuite" green; [ ] Task 11 Step 8 table recorded: `totalCases` 1, graded verdict, pid count `2`, heartbeat lines for 1/2 and 2/2; [ ] negative smoke: `error` + provider-error details + unchanged cache dir |
 | C24 harness paths missed extracted modules | Tasks 2, 10, 11 | [ ] `cache-key.test.ts` "extracted modules are harness paths" green (`chatbot` has `seeded-runtime.ts`; `agent` has `seeded-runtime.ts`, `provider-call-tracker.ts`, `provider-registry.ts`, `seed.ts`); [ ] existence test and the import-rule test un-skipped in Task 11 and green; [ ] code review: the worker imports `provider-registry.ts`, not `build-deps.ts` |
 | C25 slow case outlives the GUI watchdog; orphaned workers | Task 10 | [ ] `agent-trial-spawn.test.ts` "forwards each meter line to onMeter as it arrives, before the result" green; [ ] `agent-runner.test.ts` "forwards each trial meter to deps.onMeter" green; [ ] `orchestrator.test.ts` "relays every trial meter as a heartbeat", "runCli --json writes heartbeat NDJSON lines before the case-result", and "keeps heartbeats off stdout" green; [ ] core `subprocess.test.ts` "heartbeat NDJSON lines keep a slow run alive" green (40 ms stall window, 90 ms of heartbeats); [ ] `agent-trial-spawn.test.ts` "installWorkerTeardown kills live workers…" green (exit 143, `worker-terminated` log with `costUsd` 0.02, pid gone); [ ] code review: `cli-main.ts` calls `installWorkerTeardown()` |

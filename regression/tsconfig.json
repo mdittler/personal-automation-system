@@ -6,7 +6,8 @@
 		"paths": {
 			"@regression/*": ["./src/*"],
 			"@core/*": ["../core/src/*"],
-			"@food/*": ["../apps/food/src/*"]
+			"@food/*": ["../apps/food/src/*"],
+			"@pas/core/*": ["../core/src/*.ts", "../core/src/*"]
 		}
 	},
 	"include": ["src/**/*.ts", "src/**/*.json"],
