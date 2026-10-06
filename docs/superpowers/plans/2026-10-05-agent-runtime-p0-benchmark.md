@@ -1433,7 +1433,7 @@ git commit -m "feat(regression): agent bucket + outcome oracle kind"
 - Create: `regression/src/oracles/outcome.ts`
 - Test: `regression/src/__tests__/outcome-oracle.test.ts`
 
-- [ ] **Step 1: Create the types** — `regression/src/cases/agent/types.ts`:
+- [x] **Step 1: Create the types** — `regression/src/cases/agent/types.ts`:
 
 ```ts
 /**
@@ -1512,7 +1512,7 @@ export const FOOD = 'households/{householdId}/shared/food';
 export const USER = 'households/{householdId}/users/{userId}';
 ```
 
-- [ ] **Step 2: Write the failing oracle tests** — create `regression/src/__tests__/outcome-oracle.test.ts`:
+- [x] **Step 2: Write the failing oracle tests** — create `regression/src/__tests__/outcome-oracle.test.ts`:
 
 ```ts
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -1690,12 +1690,12 @@ describe('evaluateOutcome', () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `cd regression && npx vitest run src/__tests__/outcome-oracle.test.ts`
 Expected: FAIL — module `../oracles/outcome.js` not found.
 
-- [ ] **Step 4: Implement** — create `regression/src/oracles/outcome.ts`:
+- [x] **Step 4: Implement** — create `regression/src/oracles/outcome.ts`:
 
 ```ts
 /**
@@ -1946,12 +1946,12 @@ export async function evaluateOutcome(input: OutcomeInput, today = new Date().to
 }
 ```
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `cd regression && npx vitest run src/__tests__/outcome-oracle.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add regression/src/cases/agent/types.ts regression/src/oracles/outcome.ts regression/src/__tests__/outcome-oracle.test.ts
@@ -4897,7 +4897,7 @@ The plan→execution contract (`docs/review-protocol.md` §2). Code review adjud
 - [x] **D5** — The rubric judge prompt carries the seed reference data and names the reply block. (Task 4) [observed: rubric-oracle + chatbot-runner tests green; mutation-checks failed for the right reasons: dropping `...reference` fails the reference test, dropping the reply-naming line fails 2 tests, dropping runner forwarding fails the chatbot-runner test]
 - [ ] **D6** — Every chatbot case runs in its own seeded runtime. Every seeded runtime has webhooks and n8n disabled, generous safeguards, and the parent's **reconciled** tiers. (Tasks 5, 10)
 - [ ] **D7** — `agent` is accepted by the CLI, the case validator, the GUI estimator, and the three GUI bucket selectors. The CLI's `--case <id>` (repeatable) selects cases by id after the bucket filter; unknown ids are an error. (Tasks 6, 10) [Task 6 portion observed: `--bucket=agent` (args.test), validator agent block (5 tests), estimator agent rate/tier (2 tests), three `.eta` selectors edited (no automated test exists for the option lists); mutation-checks: coupling guard off fails 2 tests, one-input guard off fails 1, `agent-` prefix guard off fails 1, estimator rate 0 fails 1, estimator tier 'fast' fails 2, dropping 'agent' from VALID_BUCKETS fails 'accepts --bucket=agent'; `--case` part pending Task 10]
-- [ ] **D8** — The outcome oracle grades:
+- [ ] **D8** — The outcome oracle grades [Task 7 portion observed: facts (number/text/any-text/date incl. wrong year), forbidden, data state (items/contains/lineRegex/wildcard), unchanged incl. new files — 18 oracle tests green; `exists` implemented but not directly tested; messages to other users pending Task 9]:
   - facts: number, text, any-text, and date, including rejecting an explicit wrong year;
   - forbidden phrases;
   - data state: items, contains, lineRegex, exists, and wildcards;
@@ -4933,7 +4933,7 @@ Every finding from the plan review that was fixed in this plan's text must be **
 | C4 stale `dist/` benchmarked | Task 12 Step 0 | [ ] findings doc records `pnpm build` + `git rev-parse HEAD` before each baseline |
 | C5 injection: notes, other-user messages, real integrations | Tasks 5, 9, 11 | [ ] `agent-trial.test.ts` noExternalMessages test green; [x] `buildSeededConfig` test asserts `webhooks: []`, `n8n.dispatchUrl: ''` (N1) [observed: `seeded-runtime.test.ts` 8 passed; mutation-checks: keeping real webhooks fails 'strips outbound webhooks', keeping real dispatchUrl fails 'empties the n8n dispatch url'];  [ ] `agent-cases.test.ts` "every injection task watches notes/ and context/ and forbids messages to other users" green (asserts `unchanged` ⊇ {`notes/`, `context/`} and `noExternalMessages: true` for all three) |
 | C6 fail + error cached as fail | Task 9 | [ ] `agent-runner.test.ts` "infrastructure error outranks a graded failure" green; mutation-check: swap the precedence → test fails |
-| C7 wrong-year dates | Task 7 | [ ] `outcome-oracle.test.ts` wrong-year cases incl. `September 9,2025` green; mutation-check: drop the year check → test fails |
+| C7 wrong-year dates | Task 7 | [x] `outcome-oracle.test.ts` wrong-year cases incl. `September 9,2025` green [observed: 18 passed; mutation-checks: replacing the year comparison with `return true` fails 'rejects an explicitly wrong year but allows an omitted one'; changing the comma-no-space year capture to require whitespace fails the same test] |
 | C8 seed-facts + photos in key | Task 2 | [x] `BUCKET_HARNESS_PATHS.agent` contains `src/cases/agent/seed-facts.ts` and `fixtures/receipts/` [observed in cache-key.ts]; [ ] existence test green (Task 11) |
 | C9/C16 dry-run vs dispatch pricing; baseline sizing | Tasks 9, 10, 12 | [ ] `agent-runner.test.ts` "prices a case as per-turn estimate × turns × repeats" green (`estimateAgentCaseUsd(2, 3, …)` ≈ 0.006); [ ] `markdown-report.test.ts` per-case override test green; [ ] code review: both the orchestrator pre-check and the dry-run branch call `estimateAgentCaseUsd`; [ ] findings doc shows the completeness gate applied |
 | C10 exact `args.test.ts` expectations | Tasks 3, 10 | [ ] `args.test.ts` green [Task 3 portion observed: both exact `toEqual` expectations carry `archiveCache: false`; 64 passed in args/archive-cache/orchestrator-adjacent run, full suite 692 passed / 2 skipped; Task 10 portion pending] |
