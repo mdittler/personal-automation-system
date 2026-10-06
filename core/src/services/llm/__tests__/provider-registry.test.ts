@@ -7,6 +7,10 @@ const logger = pino({ level: 'silent' });
 
 function createMockProvider(providerId: string, models: ProviderModel[] = []): LLMProviderClient {
 	return {
+		supportsVision: false,
+		chatWithUsage: vi.fn(),
+		supportsTools: vi.fn().mockResolvedValue(true),
+		supportsVisionModel: vi.fn().mockResolvedValue(false),
 		providerId,
 		providerType: 'anthropic',
 		complete: vi.fn().mockResolvedValue('response'),

@@ -1,7 +1,7 @@
-import type { ModelTier } from '../../types/llm.js';
+import type { ModelRef, ModelTier } from '../../types/llm.js';
 import { DEFAULT_LLM_SAFEGUARDS } from '../config/defaults.js';
 
-export type GuardMethod = 'complete' | 'classify' | 'extractStructured';
+export type GuardMethod = 'complete' | 'classify' | 'extractStructured' | 'chat';
 
 export interface TierPrice {
 	inputUsdPer1k: number;
@@ -11,6 +11,15 @@ export interface TierPrice {
 export interface PriceLookup {
 	/** Returns undefined if tier unknown; estimator falls back to defaultReservationUsd. */
 	priceFor(tier: ModelTier): TierPrice | undefined;
+	/**
+	 * Price for an explicit provider+model. Used whenever the caller passed
+	 * `modelRef`, which `LLMServiceImpl.resolveModelRef` honours ahead of the
+	 * tier — so pricing the tier instead would let a local fast tier admit a
+	 * paid Claude call with a $0 reservation (P2-1). Optional for lookups that
+	 * cannot resolve providers; the estimator then takes the default
+	 * reservation, never the tier price.
+	 */
+	priceForRef?(ref: ModelRef): TierPrice | undefined;
 	/**
 	 * Whether ANY configured provider bills per token.
 	 *
@@ -32,6 +41,8 @@ export interface PriceLookup {
 export interface EstimateInput {
 	method: GuardMethod;
 	tier: ModelTier;
+	/** When set, priced through `priceForRef`; `tier` is ignored for pricing. */
+	modelRef?: ModelRef;
 	prompt: string;
 	maxOutputTokens?: number;
 }
@@ -41,9 +52,11 @@ const METHOD_DEFAULT_OUTPUT_TOKENS: Record<GuardMethod, number> = {
 	complete: 4096,
 	classify: 32,
 	extractStructured: 2048,
+	// A chat step answers or emits tool calls; 1024 is the Anthropic/OpenAI default cap this layer uses.
+	chat: 1024,
 };
 
-const VALID_METHODS = new Set<string>(['complete', 'classify', 'extractStructured']);
+const VALID_METHODS = new Set<string>(['complete', 'classify', 'extractStructured', 'chat']);
 
 /** Approximate token count from text. 4 chars ≈ 1 token, ceiling, capped at 1M. */
 export function approximateTokens(text: string): number {
@@ -84,7 +97,7 @@ export function estimateGuardCost(
 
 	const inputTokens = approximateTokens(input.prompt);
 
-	const price = prices.priceFor(input.tier);
+	const price = input.modelRef ? prices.priceForRef?.(input.modelRef) : prices.priceFor(input.tier);
 	if (
 		!price ||
 		!Number.isFinite(price.inputUsdPer1k) ||
@@ -98,13 +111,13 @@ export function estimateGuardCost(
 		// conservative reservation.
 		if (prices.hasBillableProvider?.() === false) {
 			logger?.warn(
-				{ tier: input.tier, price },
+				{ tier: input.tier, modelRef: input.modelRef, price },
 				'estimateGuardCost: no valid price for tier, but every configured provider is local — estimating $0',
 			);
 			return 0;
 		}
 		logger?.warn(
-			{ tier: input.tier, price },
+			{ tier: input.tier, modelRef: input.modelRef, price },
 			'estimateGuardCost: no valid price for tier, using defaultReservationUsd',
 		);
 		return DEFAULT_LLM_SAFEGUARDS.defaultReservationUsd;

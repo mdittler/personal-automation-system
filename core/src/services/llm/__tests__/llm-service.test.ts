@@ -1,6 +1,12 @@
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
-import type { LLMCompletionResult, LLMProviderClient, ModelRef } from '../../../types/llm.js';
+import type {
+	ChatMessage,
+	ChatResult,
+	LLMCompletionResult,
+	LLMProviderClient,
+	ModelRef,
+} from '../../../types/llm.js';
 import type { CostTracker } from '../cost-tracker.js';
 import { LLMServiceImpl } from '../index.js';
 import type { ModelSelector } from '../model-selector.js';
@@ -22,6 +28,16 @@ function createMockProvider(providerId: string, response = 'provider response'):
 			finishReason: 'stop',
 		} satisfies LLMCompletionResult),
 		listModels: vi.fn().mockResolvedValue([]),
+		supportsVision: false,
+		chatWithUsage: vi.fn().mockResolvedValue({
+			message: { role: 'assistant', content: `${response} (chat)` },
+			finishReason: 'stop',
+			usage: { inputTokens: 5, outputTokens: 2 },
+			model: 'test-model',
+			provider: providerId,
+		} satisfies ChatResult),
+		supportsTools: vi.fn().mockResolvedValue(true),
+		supportsVisionModel: vi.fn().mockResolvedValue(false),
 	};
 }
 
@@ -454,5 +470,60 @@ describe('LLMServiceImpl (multi-provider)', () => {
 			const callArgs = (provider.completeWithUsage as ReturnType<typeof vi.fn>).mock.calls[0];
 			expect(callArgs?.[1]).not.toHaveProperty('responseFormat');
 		});
+	});
+});
+
+describe('LLMServiceImpl.chat (REQ-LLM-045)', () => {
+	const USER: ChatMessage[] = [{ role: 'user', content: 'hi' }];
+	const FAST: ModelRef = { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' };
+	const STANDARD: ModelRef = { provider: 'openai', model: 'gpt-4o' };
+
+	function build() {
+		const anthropic = createMockProvider('anthropic');
+		const openai = createMockProvider('openai');
+		const service = new LLMServiceImpl({
+			registry: createMockRegistry({ anthropic, openai }),
+			modelSelector: createMockSelector({ fast: FAST, standard: STANDARD }),
+			costTracker: createMockCostTracker(),
+			logger,
+		});
+		return { service, anthropic, openai };
+	}
+
+	it('routes to the fast tier by default and forwards messages, options and the resolved modelRef', async () => {
+		const { service, anthropic } = build();
+		const result = await service.chat(USER, { maxTokens: 50 });
+		expect(result.message.content).toBe('provider response (chat)');
+		expect(result.provider).toBe('anthropic');
+		expect(anthropic.chatWithUsage).toHaveBeenCalledWith(
+			USER,
+			expect.objectContaining({ maxTokens: 50, modelRef: FAST }),
+		);
+	});
+
+	it('routes via tier, and an explicit modelRef wins over tier', async () => {
+		const { service, openai, anthropic } = build();
+		await service.chat(USER, { tier: 'standard' });
+		expect(openai.chatWithUsage).toHaveBeenCalledTimes(1);
+		await service.chat(USER, { tier: 'fast', modelRef: STANDARD });
+		expect(openai.chatWithUsage).toHaveBeenCalledTimes(2);
+		expect(anthropic.chatWithUsage).not.toHaveBeenCalled();
+	});
+
+	it('throws a clear error when the provider is not registered', async () => {
+		const { service } = build();
+		await expect(
+			service.chat(USER, { modelRef: { provider: 'ghost', model: 'x' } }),
+		).rejects.toThrow(/provider 'ghost' is not registered/);
+	});
+
+	it('supportsTools / supportsVision return false for an unregistered provider and delegate otherwise', async () => {
+		const { service, anthropic } = build();
+		await expect(service.supportsTools({ provider: 'ghost', model: 'x' })).resolves.toBe(false);
+		await expect(service.supportsVision({ provider: 'ghost', model: 'x' })).resolves.toBe(false);
+		await expect(service.supportsTools(FAST)).resolves.toBe(true);
+		await expect(service.supportsVision(FAST)).resolves.toBe(false);
+		expect(anthropic.supportsTools).toHaveBeenCalledWith(FAST.model);
+		expect(anthropic.supportsVisionModel).toHaveBeenCalledWith(FAST.model);
 	});
 });

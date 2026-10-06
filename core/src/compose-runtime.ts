@@ -98,16 +98,11 @@ import { HouseholdService } from './services/household/index.js';
 import { InteractionContextServiceImpl } from './services/interaction-context/index.js';
 import { InviteService } from './services/invite/index.js';
 import { CostTracker } from './services/llm/cost-tracker.js';
-import type { PriceLookup } from './services/llm/estimate-guard-cost.js';
+import { createGuardPriceLookup } from './services/llm/guard-price-lookup.js';
 import { HouseholdLLMLimiter } from './services/llm/household-llm-limiter.js';
 import { LLMServiceImpl } from './services/llm/index.js';
 import { LLMGuard } from './services/llm/llm-guard.js';
 import { ModelCatalog } from './services/llm/model-catalog.js';
-import {
-	DEFAULT_REMOTE_PRICING,
-	getModelPricing,
-	isLocalProvider,
-} from './services/llm/model-pricing.js';
 import { ModelSelector } from './services/llm/model-selector.js';
 import { createProvider } from './services/llm/providers/provider-factory.js';
 import { ProviderRegistry } from './services/llm/providers/provider-registry.js';
@@ -397,38 +392,7 @@ export async function composeRuntime(overrides: RuntimeOverrides = {}): Promise<
 		logger: createChildLogger(logger, { service: 'llm' }),
 	});
 
-	const guardPriceLookup: PriceLookup = {
-		// An all-local install (Ollama / llama.cpp only) never bills per token,
-		// so an unresolvable tier must estimate $0 instead of the flat
-		// `defaultReservationUsd`. With zero providers registered locality is
-		// undeterminable — report `true` so the conservative reservation stands.
-		hasBillableProvider: () => {
-			const all = providerRegistry.getAll();
-			if (all.length === 0) return true;
-			return all.some((p) => !isLocalProvider(p.providerType));
-		},
-		priceFor: (tier) => {
-			const ref = modelSelector.getTierRef(tier);
-			if (!ref) {
-				return undefined;
-			}
-
-			const providerType = providerRegistry.get(ref.provider)?.providerType;
-			if (isLocalProvider(providerType)) {
-				return { inputUsdPer1k: 0, outputUsdPer1k: 0 };
-			}
-
-			const pricing = getModelPricing(ref.model) ?? (providerType ? DEFAULT_REMOTE_PRICING : null);
-			if (!pricing) {
-				return undefined;
-			}
-
-			return {
-				inputUsdPer1k: pricing.input / 1000,
-				outputUsdPer1k: pricing.output / 1000,
-			};
-		},
-	};
+	const guardPriceLookup = createGuardPriceLookup({ registry: providerRegistry, modelSelector });
 
 	// Load monthly cost cache for LLMGuard enforcement
 	await costTracker.loadMonthlyCache();

@@ -19,6 +19,9 @@ function createMockLogger(): Logger {
 
 function createMockLLM(classifyResult: { category: string; confidence: number }): LLMService {
 	return {
+		chat: vi.fn(),
+		supportsTools: vi.fn(),
+		supportsVision: vi.fn(),
 		complete: vi.fn(),
 		classify: vi.fn().mockResolvedValue(classifyResult),
 		extractStructured: vi.fn(),

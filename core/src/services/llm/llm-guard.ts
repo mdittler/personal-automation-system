@@ -17,19 +17,27 @@ import type { Logger } from 'pino';
 import { RateLimiter } from '../../middleware/rate-limiter.js';
 import { getCurrentHouseholdId, getCurrentUserId } from '../../services/context/request-context.js';
 import type {
+	ChatMessage,
+	ChatOptions,
+	ChatResult,
 	ClassifyResult,
 	LLMCompletionMeta,
 	LLMCompletionOptions,
 	LLMService,
+	ModelRef,
 	ModelTier,
 } from '../../types/llm.js';
 import { DEFAULT_LLM_SAFEGUARDS } from '../config/defaults.js';
+import { serializeChatForEstimate } from './chat-messages.js';
 import { classify } from './classify.js';
 import type { CostTracker } from './cost-tracker.js';
 import { LLMCostCapError, LLMRateLimitError } from './errors.js';
 import { type GuardMethod, type PriceLookup, estimateGuardCost } from './estimate-guard-cost.js';
 import { extractStructured } from './extract-structured.js';
 import type { HouseholdLLMLimiter } from './household-llm-limiter.js';
+
+/** What the guard prices: the explicit model when given, else the tier. */
+type PricingKey = { tier: ModelTier; modelRef?: ModelRef };
 
 export interface LLMGuardConfig {
 	/** Maximum requests in the sliding window. */
@@ -113,7 +121,7 @@ export class LLMGuard implements LLMService {
 	}
 
 	async complete(prompt: string, options?: LLMCompletionOptions): Promise<string> {
-		return this.guarded('complete', prompt, options?.maxTokens, options?.tier ?? this.tier, () =>
+		return this.guarded('complete', prompt, options?.maxTokens, this.pricingKey(options), () =>
 			this.inner.complete(prompt, { ...options, _appId: this.appId }),
 		);
 	}
@@ -122,13 +130,43 @@ export class LLMGuard implements LLMService {
 		prompt: string,
 		options?: LLMCompletionOptions,
 	): Promise<LLMCompletionMeta> {
-		return this.guarded('complete', prompt, options?.maxTokens, options?.tier ?? this.tier, () =>
+		return this.guarded('complete', prompt, options?.maxTokens, this.pricingKey(options), () =>
 			this.inner.completeWithMeta(prompt, { ...options, _appId: this.appId }),
 		);
 	}
 
+	/** What LLMServiceImpl will route this call to, for pricing. Keep in step with resolveModelRef. */
+	private pricingKey(
+		options?: Pick<LLMCompletionOptions, 'modelRef' | 'tier' | 'model'>,
+	): PricingKey {
+		if (options?.modelRef?.provider && options.modelRef.model) {
+			return { modelRef: options.modelRef, tier: options.tier ?? this.tier };
+		}
+		if (options?.tier) return { tier: options.tier };
+		if (options?.model === 'claude') return { tier: 'standard' };
+		return { tier: this.tier };
+	}
+
+	async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResult> {
+		return this.guarded(
+			'chat',
+			serializeChatForEstimate(messages, options?.tools),
+			options?.maxTokens,
+			this.pricingKey(options),
+			() => this.inner.chat(messages, { ...options, _appId: this.appId }),
+		);
+	}
+
+	supportsTools(ref: ModelRef): Promise<boolean> {
+		return this.inner.supportsTools(ref);
+	}
+
+	supportsVision(ref: ModelRef): Promise<boolean> {
+		return this.inner.supportsVision(ref);
+	}
+
 	async classify(text: string, categories: string[]): Promise<ClassifyResult> {
-		return this.guarded('classify', text, undefined, 'fast', () => {
+		return this.guarded('classify', text, undefined, { tier: 'fast' }, () => {
 			const client = {
 				complete: (p: string, opts?: LLMCompletionOptions) => this.completeRaw(p, opts),
 			};
@@ -137,7 +175,7 @@ export class LLMGuard implements LLMService {
 	}
 
 	async extractStructured<T>(text: string, schema: object): Promise<T> {
-		return this.guarded('extractStructured', text, undefined, 'fast', () => {
+		return this.guarded('extractStructured', text, undefined, { tier: 'fast' }, () => {
 			const client = {
 				complete: (p: string, opts?: LLMCompletionOptions) => this.completeRaw(p, opts),
 			};
@@ -157,12 +195,12 @@ export class LLMGuard implements LLMService {
 		method: GuardMethod,
 		prompt: string,
 		maxOutputTokens: number | undefined,
-		tier: ModelTier,
+		key: PricingKey,
 		run: () => Promise<T>,
 	): Promise<T> {
 		const hhId = getCurrentHouseholdId();
 		const estCost = estimateGuardCost(
-			{ method, tier, prompt, maxOutputTokens },
+			{ method, tier: key.tier, modelRef: key.modelRef, prompt, maxOutputTokens },
 			this.priceLookup,
 			this.logger,
 		);

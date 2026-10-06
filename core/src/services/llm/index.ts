@@ -16,10 +16,14 @@
 
 import type { Logger } from 'pino';
 import type {
+	ChatMessage,
+	ChatOptions,
+	ChatResult,
 	ClassifyResult,
 	LLMClient,
 	LLMCompletionMeta,
 	LLMCompletionOptions,
+	LLMProviderClient,
 	LLMService,
 	ModelRef,
 	ModelTier,
@@ -64,13 +68,7 @@ export class LLMServiceImpl implements LLMService {
 		options?: LLMCompletionOptions,
 	): Promise<LLMCompletionMeta> {
 		const ref = this.resolveModelRef(options);
-		const provider = this.registry.get(ref.provider);
-
-		if (!provider) {
-			throw new Error(
-				`LLM provider '${ref.provider}' is not registered. Available: ${this.registry.getProviderIds().join(', ') || '(none)'}`,
-			);
-		}
+		const provider = this.requireProvider(ref);
 
 		this.logger.debug({ provider: ref.provider, model: ref.model }, 'Routing completion request');
 
@@ -85,6 +83,36 @@ export class LLMServiceImpl implements LLMService {
 			finishReason: result.finishReason,
 			usage: result.usage,
 		};
+	}
+
+	async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResult> {
+		const ref = this.resolveModelRef(options);
+		const provider = this.requireProvider(ref);
+		this.logger.debug(
+			{ provider: ref.provider, model: ref.model, tools: options?.tools?.length ?? 0 },
+			'Routing chat request',
+		);
+		return provider.chatWithUsage(messages, { ...options, modelRef: ref });
+	}
+
+	async supportsTools(ref: ModelRef): Promise<boolean> {
+		const provider = this.registry.get(ref.provider);
+		return provider ? provider.supportsTools(ref.model) : false;
+	}
+
+	async supportsVision(ref: ModelRef): Promise<boolean> {
+		const provider = this.registry.get(ref.provider);
+		return provider ? provider.supportsVisionModel(ref.model) : false;
+	}
+
+	private requireProvider(ref: ModelRef): LLMProviderClient {
+		const provider = this.registry.get(ref.provider);
+		if (!provider) {
+			throw new Error(
+				`LLM provider '${ref.provider}' is not registered. Available: ${this.registry.getProviderIds().join(', ') || '(none)'}`,
+			);
+		}
+		return provider;
 	}
 
 	async classify(text: string, categories: string[]): Promise<ClassifyResult> {
@@ -111,7 +139,9 @@ export class LLMServiceImpl implements LLMService {
 	 *   4. options.model === 'local' → fast tier (backward compat)
 	 *   5. Default → fast tier
 	 */
-	private resolveModelRef(options?: LLMCompletionOptions): ModelRef {
+	private resolveModelRef(
+		options?: Pick<LLMCompletionOptions, 'modelRef' | 'tier' | 'model' | 'claudeModel'>,
+	): ModelRef {
 		// 1. Explicit modelRef
 		if (options?.modelRef?.provider && options.modelRef.model) {
 			return options.modelRef;

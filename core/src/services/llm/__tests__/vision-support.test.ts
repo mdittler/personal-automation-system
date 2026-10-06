@@ -200,6 +200,9 @@ describe('LLM Vision Support', () => {
 	describe('LLMGuard — vision pass-through', () => {
 		it('passes images option through to inner service', async () => {
 			const inner: LLMService = {
+				chat: vi.fn(),
+				supportsTools: vi.fn(),
+				supportsVision: vi.fn(),
 				complete: vi.fn().mockResolvedValue('result'),
 				classify: vi.fn().mockResolvedValue({ category: 'test', confidence: 0.9 }),
 				extractStructured: vi.fn().mockResolvedValue({}),

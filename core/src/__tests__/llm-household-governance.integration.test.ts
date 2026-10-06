@@ -26,6 +26,9 @@ const logger = pino({ level: 'silent' });
 
 function makeStubInner(response = 'stub-response'): LLMService {
 	return {
+		chat: vi.fn(),
+		supportsTools: vi.fn(),
+		supportsVision: vi.fn(),
 		complete: vi.fn().mockResolvedValue(response),
 		classify: vi.fn().mockResolvedValue({ category: 'a', confidence: 0.9 } as ClassifyResult),
 		extractStructured: vi.fn().mockResolvedValue({ ok: true }),

@@ -106,6 +106,14 @@ export function createMockCoreServices(overrides?: MockOverrides): CoreServices 
 		classify: vi.fn().mockResolvedValue({ category: 'unknown', confidence: 0 }),
 		extractStructured: vi.fn().mockResolvedValue({}),
 		getModelForTier: vi.fn().mockReturnValue('anthropic/mock-model'),
+		chat: vi.fn().mockResolvedValue({
+			message: { role: 'assistant', content: '' },
+			finishReason: 'stop',
+			model: 'mock-model',
+			provider: 'mock',
+		}),
+		supportsTools: vi.fn().mockResolvedValue(true),
+		supportsVision: vi.fn().mockResolvedValue(true),
 		...llmOverrides,
 		complete,
 		// Delegates to the `complete` mock rather than being a second independent
