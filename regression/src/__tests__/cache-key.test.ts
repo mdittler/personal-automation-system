@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -531,6 +531,74 @@ describe('computeCacheKey — execution closure (chatbot and agent)', () => {
 		expect(after.agent).not.toBe(before.agent);
 	});
 
+	// `.gitignore`'s `vendor-link/` matches a directory, not a symlink, so git
+	// lists the link as untracked. The target lives under docs/ so its bytes
+	// are outside the worktree identity.
+	async function seedIgnoredDirSymlink(target: string): Promise<void> {
+		await seedCase();
+		await writeFile(join(tempRepo, '.gitignore'), 'vendor-link/\n');
+		commitAll('gitignore');
+		await mkdir(join(tempRepo, 'docs', target), { recursive: true });
+		await writeFile(join(tempRepo, 'docs', target, 'pkg.js'), 'v1\n');
+		await symlink(`docs/${target}`, join(tempRepo, 'vendor-link'));
+	}
+
+	it('an untracked symlink to a directory does not throw and contributes a stable key', async () => {
+		await seedIgnoredDirSymlink('modules');
+		const withLink = await bothKeys();
+		clearHarnessDigestCache();
+		const again = await bothKeys();
+		expect(again.chatbot).toBe(withLink.chatbot);
+		expect(again.agent).toBe(withLink.agent);
+
+		await writeFile(join(tempRepo, 'docs/modules/pkg.js'), 'v2\n');
+		clearHarnessDigestCache();
+		const afterInterior = await bothKeys();
+		expect(afterInterior.chatbot).toBe(withLink.chatbot);
+		expect(afterInterior.agent).toBe(withLink.agent);
+
+		await rm(join(tempRepo, 'vendor-link'));
+		clearHarnessDigestCache();
+		const without = await bothKeys();
+		expect(without.chatbot).not.toBe(withLink.chatbot);
+		expect(without.agent).not.toBe(withLink.agent);
+	});
+
+	it('changing an untracked directory symlink target changes the chatbot and agent key', async () => {
+		await seedIgnoredDirSymlink('modules-a');
+		await mkdir(join(tempRepo, 'docs/modules-b'), { recursive: true });
+		await writeFile(join(tempRepo, 'docs/modules-b/pkg.js'), 'v1\n');
+		const before = await bothKeys();
+		await rm(join(tempRepo, 'vendor-link'));
+		await symlink('docs/modules-b', join(tempRepo, 'vendor-link'));
+		clearHarnessDigestCache();
+		const after = await bothKeys();
+		expect(after.chatbot).not.toBe(before.chatbot);
+		expect(after.agent).not.toBe(before.agent);
+	});
+
+	it('an untracked symlink to a file is keyed by its target string, not the file bytes', async () => {
+		await seedCase();
+		await mkdir(join(tempRepo, 'docs'), { recursive: true });
+		await writeFile(join(tempRepo, 'docs/secret.txt'), 'same\n');
+		await writeFile(join(tempRepo, 'docs/other.txt'), 'same\n');
+		await symlink('docs/secret.txt', join(tempRepo, 'link.txt'));
+		const before = await bothKeys();
+
+		await writeFile(join(tempRepo, 'docs/secret.txt'), 'different bytes\n');
+		clearHarnessDigestCache();
+		const afterContent = await bothKeys();
+		expect(afterContent.chatbot).toBe(before.chatbot);
+		expect(afterContent.agent).toBe(before.agent);
+
+		await rm(join(tempRepo, 'link.txt'));
+		await symlink(join(tempRepo, 'docs/secret.txt'), join(tempRepo, 'link.txt'));
+		clearHarnessDigestCache();
+		const afterTarget = await bothKeys();
+		expect(afterTarget.chatbot).not.toBe(before.chatbot);
+		expect(afterTarget.agent).not.toBe(before.agent);
+	});
+
 	it('an edit under docs/ or a __tests__ directory does not change the chatbot or agent key', async () => {
 		await seedCase();
 		await mkdir(join(tempRepo, 'docs'), { recursive: true });
@@ -547,6 +615,57 @@ describe('computeCacheKey — execution closure (chatbot and agent)', () => {
 		const after = await bothKeys();
 		expect(after.chatbot).toBe(before.chatbot);
 		expect(after.agent).toBe(before.agent);
+	});
+
+	it('a dist symlink to a directory is keyed by its target string, not the directory contents', async () => {
+		await seedCase();
+		await writeFile(join(tempRepo, '.gitignore'), 'dist/\n');
+		commitAll('ignore-dist');
+		await mkdir(join(tempRepo, 'docs/dist-a'), { recursive: true });
+		await mkdir(join(tempRepo, 'docs/dist-b'), { recursive: true });
+		await writeFile(join(tempRepo, 'docs/dist-a/mod.js'), 'v1\n');
+		await writeFile(join(tempRepo, 'docs/dist-b/mod.js'), 'v1\n');
+		await mkdir(join(tempRepo, 'apps/food/dist'), { recursive: true });
+		await symlink('../../../docs/dist-a', join(tempRepo, 'apps/food/dist/linked'));
+
+		const before = await bothKeys();
+		await writeFile(join(tempRepo, 'docs/dist-a/mod.js'), 'v2\n');
+		clearHarnessDigestCache();
+		const afterContent = await bothKeys();
+		expect(afterContent.chatbot).toBe(before.chatbot);
+		expect(afterContent.agent).toBe(before.agent);
+
+		await rm(join(tempRepo, 'apps/food/dist/linked'));
+		await symlink('../../../docs/dist-b', join(tempRepo, 'apps/food/dist/linked'));
+		clearHarnessDigestCache();
+		const afterTarget = await bothKeys();
+		expect(afterTarget.chatbot).not.toBe(before.chatbot);
+		expect(afterTarget.agent).not.toBe(before.agent);
+	});
+
+	it('a dist symlink to a file is keyed by its target string, not the file bytes', async () => {
+		await seedCase();
+		await writeFile(join(tempRepo, '.gitignore'), 'dist/\n');
+		commitAll('ignore-dist');
+		await mkdir(join(tempRepo, 'docs'), { recursive: true });
+		await writeFile(join(tempRepo, 'docs/a.js'), 'same\n');
+		await writeFile(join(tempRepo, 'docs/b.js'), 'same\n');
+		await mkdir(join(tempRepo, 'apps/food/dist'), { recursive: true });
+		await symlink('../../../docs/a.js', join(tempRepo, 'apps/food/dist/link.js'));
+
+		const before = await bothKeys();
+		await writeFile(join(tempRepo, 'docs/a.js'), 'different bytes\n');
+		clearHarnessDigestCache();
+		const afterContent = await bothKeys();
+		expect(afterContent.chatbot).toBe(before.chatbot);
+		expect(afterContent.agent).toBe(before.agent);
+
+		await rm(join(tempRepo, 'apps/food/dist/link.js'));
+		await symlink(join(tempRepo, 'docs/a.js'), join(tempRepo, 'apps/food/dist/link.js'));
+		clearHarnessDigestCache();
+		const afterTarget = await bothKeys();
+		expect(afterTarget.chatbot).not.toBe(before.chatbot);
+		expect(afterTarget.agent).not.toBe(before.agent);
 	});
 
 	it('changing a byte under apps/food/dist changes the chatbot key and the agent key', async () => {

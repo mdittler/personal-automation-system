@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
-import { readFile, readdir } from 'node:fs/promises';
+import { lstat, readFile, readdir, readlink } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { PersonaCase } from '@core/types/regression.js';
@@ -287,6 +287,40 @@ function gitDiffHash(repoRoot: string): Promise<string> {
 	});
 }
 
+type ClassifiedPath =
+	| { kind: 'file'; bytes: Buffer }
+	| { kind: 'symlink'; marker: string }
+	| { kind: 'other'; marker: string };
+
+/**
+ * Classify one path without following symlinks. A link to a directory (for
+ * example an untracked `node_modules` symlink, which `node_modules/` in
+ * `.gitignore` does not exclude) would make `readFile` throw EISDIR. The
+ * symlink marker is `symlink:<path>:<readlink target>`. Directories, sockets,
+ * and anything else contribute `other:<path>`.
+ */
+async function classifyPath(label: string, abs: string): Promise<ClassifiedPath> {
+	const st = await lstat(abs);
+	if (st.isSymbolicLink()) {
+		const target = await readlink(abs);
+		return { kind: 'symlink', marker: `symlink:${label}:${target}` };
+	}
+	if (st.isFile()) return { kind: 'file', bytes: await readFile(abs) };
+	return { kind: 'other', marker: `other:${label}` };
+}
+
+function sha256Hex(data: string | Buffer): string {
+	return createHash('sha256').update(data).digest('hex');
+}
+
+/** `path:<sha256>` for files and symlinks; the literal `other:<path>` marker otherwise. */
+async function pathIdentity(label: string, abs: string): Promise<string> {
+	const classified = await classifyPath(label, abs);
+	if (classified.kind === 'file') return `${label}:${sha256Hex(classified.bytes)}`;
+	if (classified.kind === 'symlink') return `${label}:${sha256Hex(classified.marker)}`;
+	return classified.marker;
+}
+
 async function untrackedIdentity(repoRoot: string): Promise<string> {
 	const { stdout } = await execFileAsync(
 		'git',
@@ -297,12 +331,7 @@ async function untrackedIdentity(repoRoot: string): Promise<string> {
 		.split('\0')
 		.filter((p) => p.length > 0 && !excludedFromWorktree(p))
 		.sort();
-	const lines = await Promise.all(
-		paths.map(async (p) => {
-			const bytes = await readFile(join(repoRoot, p));
-			return `${p}:${createHash('sha256').update(bytes).digest('hex')}`;
-		}),
-	);
+	const lines = await Promise.all(paths.map((p) => pathIdentity(p, join(repoRoot, p))));
 	return lines.join('\n');
 }
 
@@ -315,32 +344,37 @@ async function worktreeIdentity(repoRoot: string): Promise<string> {
 	return `head:${head}\ndiff:${diffHash}\nuntracked:\n${untracked}`;
 }
 
-async function walkFiles(dir: string): Promise<string[]> {
+/** Paths relative to `root`. Symlinks are listed and not followed. */
+async function listDistEntries(dir: string, root: string): Promise<string[]> {
 	const out: string[] = [];
 	const entries = await readdir(dir, { withFileTypes: true });
 	for (const entry of entries) {
 		const abs = join(dir, entry.name);
-		if (entry.isDirectory()) out.push(...(await walkFiles(abs)));
-		else if (entry.isFile()) out.push(abs);
+		const rel = relative(root, abs).split(sep).join('/');
+		if (entry.isSymbolicLink()) out.push(rel);
+		else if (entry.isDirectory()) out.push(...(await listDistEntries(abs, root)));
+		else out.push(rel);
 	}
 	return out;
 }
 
 /** `dist:<sha256 of sorted path+content>` or `dist:absent`. */
 async function distMarker(distDir: string): Promise<string> {
-	let files: string[];
+	let rels: string[];
 	try {
-		files = await walkFiles(distDir);
+		rels = await listDistEntries(distDir, distDir);
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 'dist:absent';
 		throw err;
 	}
-	const rels = files.map((abs) => relative(distDir, abs).split(sep).join('/')).sort();
+	rels.sort();
 	const hash = createHash('sha256');
 	for (const rel of rels) {
+		const classified = await classifyPath(rel, join(distDir, rel));
 		hash.update(rel);
 		hash.update('\0');
-		hash.update(await readFile(join(distDir, rel)));
+		if (classified.kind === 'file') hash.update(classified.bytes);
+		else hash.update(classified.marker);
 		hash.update('\0');
 	}
 	return `dist:${hash.digest('hex')}`;
