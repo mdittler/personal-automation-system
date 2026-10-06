@@ -17,14 +17,16 @@ export interface ModelPricing {
 
 /** Approximate cost per million tokens (as of 2026). */
 export const MODEL_PRICING: Record<string, ModelPricing> = {
-	// Anthropic
-	'claude-opus-4-6': { input: 15.0, output: 75.0 },
-	// Published price: $2 input / $10 output per million tokens
-	// (https://www.anthropic.com/claude/sonnet, verified 2026-10-06).
+	// Anthropic — base rates from https://platform.claude.com/docs/en/about-claude/pricing
+	// (verified 2026-10-06; ids from each model's overview page). Cache-write/read
+	// multipliers are NOT modelled here (open-items "Agent Runtime deferrals" item 9).
+	'claude-fable-5-1': { input: 10.0, output: 50.0 },
+	'claude-opus-5-5': { input: 4.0, output: 20.0 },
+	'claude-opus-4-6': { input: 5.0, output: 25.0 },
 	'claude-sonnet-5-5': { input: 2.0, output: 10.0 },
 	'claude-sonnet-4-6': { input: 3.0, output: 15.0 },
 	'claude-sonnet-4-20250514': { input: 3.0, output: 15.0 },
-	'claude-haiku-4-5-20251001': { input: 0.8, output: 4.0 },
+	'claude-haiku-4-5-20251001': { input: 1.0, output: 5.0 },
 
 	// Google Gemini
 	'gemini-2.5-pro': { input: 1.25, output: 10.0 },

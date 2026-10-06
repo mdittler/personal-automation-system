@@ -131,10 +131,10 @@ describe('CostTracker', () => {
 	it('estimates cost correctly for Opus', () => {
 		const tracker = new CostTracker(tempDir, logger);
 
-		// Opus: $15/M input, $75/M output
+		// Opus 4.6: $5/M input, $25/M output
 		const cost = tracker.estimateCost('claude-opus-4-6', 1_000_000, 1_000_000);
 
-		expect(cost).toBe(15.0 + 75.0);
+		expect(cost).toBe(5.0 + 25.0);
 	});
 
 	it('returns zero cost for unknown ollama models', () => {
