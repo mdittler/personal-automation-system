@@ -17,6 +17,8 @@ export type LLMErrorCategory =
 	| 'overloaded'
 	| 'parameter-rejection'
 	| 'empty-output'
+	| 'tools-unsupported'
+	| 'aborted'
 	| 'unknown';
 
 export interface LLMErrorInfo {
@@ -40,6 +42,9 @@ const USER_MESSAGES: Record<LLMErrorCategory, string> = {
 		'The selected AI model rejected one of the request settings. Retrying will not help — please contact your admin to adjust the model configuration.',
 	'empty-output':
 		'The selected AI model ran out of room before it produced an answer. Retrying will not help — please contact your admin to raise the response length limit for this model.',
+	'tools-unsupported':
+		'The selected AI model does not support tools, so it cannot run this request. Please ask your admin to pick a tool-capable model.',
+	aborted: 'The request was cancelled.',
 	unknown: 'Could not process your request right now. Please try again later.',
 };
 
@@ -54,6 +59,8 @@ const RETRYABLE: Record<LLMErrorCategory, boolean> = {
 	overloaded: true,
 	'parameter-rejection': false,
 	'empty-output': false,
+	'tools-unsupported': false,
+	aborted: false,
 	unknown: true,
 };
 
@@ -75,6 +82,25 @@ const RETRYABLE: Record<LLMErrorCategory, boolean> = {
  * imports, exactly as the LLMRateLimitError / LLMCostCapError checks do.
  */
 const EMPTY_OUTPUT_ERROR_NAME = 'LLMEmptyOutputError';
+
+const TOOLS_UNSUPPORTED_ERROR_NAME = 'LLMToolsUnsupportedError';
+
+/**
+ * True when the error is a cancellation. Two signals, either suffices:
+ *  - the error is named `AbortError` (the runtime's own abort, or the
+ *    provider layer's normalized `toAbortError`);
+ *  - the caller's `signal` has aborted — then *whatever* the provider threw is
+ *    the consequence of our cancellation (P2-4: the openai and
+ *    @anthropic-ai/sdk `APIUserAbortError` classes are named `'Error'`, and a
+ *    native fetch aborted with a custom reason throws that reason, so a
+ *    name-only check misses real cancellations).
+ * Never retried.
+ */
+export function isAbortError(error: unknown, signal?: AbortSignal): boolean {
+	if (signal?.aborted) return true;
+	if (error == null || typeof error !== 'object') return false;
+	return (error as Record<string, unknown>).name === 'AbortError';
+}
 
 const PARAMETER_REJECTION_PATTERNS: readonly RegExp[] = [
 	/is deprecated for this model/,
@@ -119,6 +145,12 @@ export function classifyLLMError(error: unknown): LLMErrorInfo {
 	// Deterministic — the same request exhausts the same budget every time.
 	if (err.name === EMPTY_OUTPUT_ERROR_NAME) {
 		return makeInfo('empty-output');
+	}
+	if (err.name === TOOLS_UNSUPPORTED_ERROR_NAME) {
+		return makeInfo('tools-unsupported');
+	}
+	if (isAbortError(err)) {
+		return makeInfo('aborted');
 	}
 
 	// Provider HTTP errors (Anthropic SDK, OpenAI SDK, etc.)
