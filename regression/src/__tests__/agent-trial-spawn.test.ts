@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -90,6 +90,30 @@ describe('spawnAgentTrial (REQ-REG-AGENT-002)', () => {
 		expect(out.verdict).toBe('error');
 		expect(out.details).toMatch(/timed out after 300 ms/);
 		expect(liveWorkerCount()).toBe(0);
+	});
+
+	it('kills a hung worker that ignores SIGTERM (timeout uses SIGKILL; review R4-1)', async () => {
+		const pidFile = join(dir, 'hung.pid');
+		const p = await worker(
+			`import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`,
+		);
+		const out = await spawnAgentTrial(
+			{ workerPath: p, execArgv: [], cwd: dir, timeoutMs: 300 },
+			request,
+		);
+		expect(out.verdict).toBe('error');
+		const pid = Number(await readFile(pidFile, 'utf8'));
+		let alive = true;
+		for (let i = 0; i < 40 && alive; i++) {
+			try {
+				process.kill(pid, 0);
+				await new Promise((r) => setTimeout(r, 25));
+			} catch {
+				alive = false;
+			}
+		}
+		if (alive) process.kill(pid, 'SIGKILL');
+		expect(alive).toBe(false);
 	});
 
 	it('forwards each meter line to onMeter as it arrives, before the result (heartbeat source; review C25)', async () => {
