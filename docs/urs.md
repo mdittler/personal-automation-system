@@ -12955,6 +12955,43 @@ Local models run on the operator's own hardware and are always free; adding a ne
 
 ---
 
+### REQ-LLM-044 — The intent classifier MUST accept index-style and number-prefixed category answers, and the PAS-relevance classifier MUST have an output budget that fits its full label set
+
+**Phase:** Q3b classifier fix (2026-10-06) | **Status:** Implemented
+
+`buildClassifyPrompt` lists categories numbered `1. …`. Haiku (the default fast tier on a fresh install) answered with the index (`{"category": "4"}`, often fenced) or `"5. <text>"`; `parseClassifyResponse` required the exact string and fell back to confidence 0.3/0.1, below the router's 0.4 threshold, so single-intent messages such as "What's on my grocery list right now?" went to the chatbot fallback instead of Food.
+
+- `parseClassifyResponse` resolves the `category` value (string or number) via exact text, trimmed/whitespace/case-insensitive text, a leading `N.`/`N)` prefix followed by matching text, or an in-range 1-based index. Index `categories.length + 1` is the prompt's "none" slot and returns `none`. Out-of-range indexes (`0`, `99`, negative) are never mapped and keep the existing low-confidence fallback. Exact-text answers behave as before. The parser is provider-agnostic.
+- `buildClassifyPrompt` additionally instructs the model to answer with the category text, not its number (belt and braces; the parser does not depend on it).
+- `claude-sonnet-5-5` is in `MODEL_PRICING`, mirroring `claude-sonnet-4-6`, so it no longer triggers the unknown-model conservative fallback.
+- `classifyPASMessage` raised `maxTokens` from 10 to 32; 10 truncated Haiku's `YES_PAS NO_SETTINGS YES_DATA` label set (`finishReason: length`). `classifyStructuredOutput` was assessed and is not applicable there: the reply is a space-separated token list, not JSON, and `LLMService.complete()` returns a bare string with no `finishReason`; `parsePASClassifierOutput` already fails open on a truncated set.
+
+**Standard tests:**
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > maps a fenced string index to categories[n-1] keeping confidence
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > maps a numeric index the same way
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > strips a leading "N. " prefix and matches the exact text
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > strips a leading "N) " prefix
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > matches case/whitespace-different exact text
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > maps the "none" slot index (categories.length + 1) to none
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > maps "6. none" to none
+- `classify.test.ts` > buildClassifyPrompt — answer-format instruction (Q3b) > tells the model to answer with the category text, not its number
+- `intent-classifier.test.ts` > IntentClassifier with a fast tier that answers by index (Q3b) > routes to the owning app, not the chatbot fallback (null)
+- `model-pricing.test.ts` > model-pricing > getModelPricing > resolves claude-sonnet-5-5 without the unknown-model fallback (mirrors claude-sonnet-4-6)
+- `pas-classifier.parser.test.ts` > classifyPASMessage token budget (Q3b) > allows enough output tokens for the longest label set and parses it in full
+
+**Edge case tests:**
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > still returns none for "none"
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > does not map out-of-range index 99 / 0 / 7 / -1 (keeps low-confidence fallback) (4 cases)
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > does not map an out-of-range numeric index
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > exact text answers are unchanged
+- `classify.test.ts` > parseClassifyResponse — numbered answers (Q3b) > a category whose text is itself numeric-prefixed still matches exactly first
+- `pas-classifier.parser.test.ts` > classifyPASMessage token budget (Q3b) > a Haiku-truncated label set (YES_PAS NO_SETTINGS YES_) fails open without a data claim
+
+**Fixes:** closes the open-items entry "Intent classifier rejects numbered category answers" (2026-10-06, Q3b).
+
+---
+
+
 ### REQ-REG-021 — A regression cost estimate MUST price each bucket against the tier that actually serves it
 
 **Phase:** Truncation Diagnosis + Local-Model Cost Correctness (2026-09-02) | **Status:** Implemented
@@ -13391,6 +13428,7 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-LLM-041 | json-strip-fences.test.ts, recall-classifier.test.ts, message-segmenter.test.ts, title-generator.test.ts, session-summarizer.test.ts, session-control-classifier.test.ts, data-query.test.ts, route-verifier.test.ts, weakness-summarizer.test.ts | 15 | 20 | Implemented |
 | REQ-LLM-042 | openai-compatible-provider.test.ts, llama-cpp-provider.test.ts | 4 | 6 | Implemented |
 | REQ-LLM-043 | estimator.test.ts, local-model-estimate.test.ts, regression-routes.test.ts, estimate-guard-cost.test.ts, system-info.test.ts | 8 | 14 | Implemented |
+| REQ-LLM-044 | classify.test.ts, intent-classifier.test.ts, model-pricing.test.ts, pas-classifier.parser.test.ts | 11 | 9 | Implemented |
 | REQ-GUI-003 | llm-usage.test.ts | 4 | 5 | Implemented |
 | REQ-LLM-016 | cost-tracker.test.ts | 1 | 1 | Implemented |
 | REQ-LLM-017 | cost-tracker.test.ts, model-pricing.test.ts | 1 | 1 | Implemented |
@@ -13910,4 +13948,4 @@ The matrix includes only implemented requirements. Planned requirements (REQ-DAT
 | REQ-GUI-SURFACE-003 | activity.test.ts | 5 | 4 | Implemented |
 | REQ-GUI-SURFACE-004 | llm-usage.test.ts, admin-route-guards.test.ts | 5 | 2 | Implemented |
 
-| **Totals** | **442 test files** | **3158** | **3072** | **6230 tests** |
+| **Totals** | **442 test files** | **3169** | **3081** | **6250 tests** |

@@ -30,6 +30,7 @@ export function buildClassifyPrompt(text: string, categories: string[]): string 
 		'Classify the following text into exactly one of the categories listed below.',
 		'If the text does not clearly match any category, use "none".',
 		'Respond with ONLY a JSON object in this format: {"category": "<chosen category>", "confidence": <0.0-1.0>}',
+		'In "category", answer with the category text, not its number.',
 		'Do not include any other text.',
 		'',
 		'Categories:',

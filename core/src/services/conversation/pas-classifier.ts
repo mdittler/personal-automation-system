@@ -269,7 +269,9 @@ export async function classifyPASMessage(
 		const response = await deps.llm.complete(sanitizeInput(text), {
 			tier: 'fast',
 			systemPrompt,
-			maxTokens: 10,
+			// Longest label set is `YES_PAS NO_SETTINGS YES_DATA` (~12+ tokens on Haiku's
+			// tokenizer); 10 truncated it (finishReason: length). Leave headroom.
+			maxTokens: 32,
 			temperature: 0,
 		});
 

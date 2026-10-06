@@ -2,6 +2,7 @@ import type { Logger } from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import type { LLMService } from '../../../types/llm.js';
 import type { IntentTableEntry } from '../../app-registry/manifest-cache.js';
+import { classify } from '../../llm/classify.js';
 import { IntentClassifier } from '../intent-classifier.js';
 
 function createMockLogger(): Logger {
@@ -106,5 +107,28 @@ describe('IntentClassifier', () => {
 			intent: 'echo',
 			confidence: 0.4,
 		});
+	});
+});
+
+describe('IntentClassifier with a fast tier that answers by index (Q3b)', () => {
+	it('routes to the owning app, not the chatbot fallback (null)', async () => {
+		const logger = createMockLogger();
+		const client = {
+			complete: vi.fn().mockResolvedValue('```json\n{"category": "4", "confidence": 0.95}\n```'),
+		};
+		const llm = {
+			complete: vi.fn(),
+			classify: (text: string, cats: string[]) => classify(text, cats, client as never, logger),
+			extractStructured: vi.fn(),
+		} as unknown as LLMService;
+		const classifier = new IntentClassifier({ llm, logger });
+
+		const result = await classifier.classify(
+			"What's on my grocery list right now?",
+			intentTable,
+			0.4,
+		);
+
+		expect(result).toEqual({ appId: 'grocery', intent: 'grocery list', confidence: 0.95 });
 	});
 });

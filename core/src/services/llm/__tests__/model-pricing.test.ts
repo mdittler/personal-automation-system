@@ -25,6 +25,11 @@ describe('model-pricing', () => {
 			expect(pricing).toEqual({ input: 2.0, output: 8.0 });
 		});
 
+		it('resolves claude-sonnet-5-5 without the unknown-model fallback (mirrors claude-sonnet-4-6)', () => {
+			expect(hasPricing('claude-sonnet-5-5')).toBe(true);
+			expect(getModelPricing('claude-sonnet-5-5')).toEqual(getModelPricing('claude-sonnet-4-6'));
+		});
+
 		it('returns null for an unknown model', () => {
 			expect(getModelPricing('totally-unknown-model')).toBeNull();
 		});
