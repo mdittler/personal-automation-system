@@ -150,3 +150,18 @@ describe('GoogleProvider — temperature capability gate', () => {
 		expect(mockGenerateContent.mock.calls[0]?.[0]?.config).toMatchObject({ temperature: 0.9 });
 	});
 });
+
+describe('GoogleProvider — chat is out of scope (design §5.2, open-items deferral 1)', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('supportsTools is false and chatWithUsage throws not-implemented without calling the SDK', async () => {
+		const provider = makeProvider();
+		await expect(provider.supportsTools('gemini-2.5-flash')).resolves.toBe(false);
+		await expect(provider.chatWithUsage([{ role: 'user', content: 'hi' }])).rejects.toThrow(
+			/does not implement chat\(\)/,
+		);
+		expect(mockGenerateContent).not.toHaveBeenCalled();
+	});
+});
