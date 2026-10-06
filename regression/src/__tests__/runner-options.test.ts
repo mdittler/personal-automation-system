@@ -20,6 +20,7 @@ function makeCli(over: Partial<CliOptions> = {}): CliOptions {
 		help: false,
 		listOnly: false,
 		noCache: false,
+		archiveCache: false,
 		noManifest: false,
 		...over,
 	};

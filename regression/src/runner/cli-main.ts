@@ -56,6 +56,7 @@ try {
 		help: false,
 		listOnly: false,
 		noCache: false,
+		archiveCache: false,
 		noManifest: false,
 	};
 }

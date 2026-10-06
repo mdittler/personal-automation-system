@@ -35,6 +35,7 @@ import {
 import type { RubricJudgeLLM } from '../oracles/rubric.js';
 import { BUCKET_HARNESS_PATHS, bucketCacheSalt, computeCacheKey } from '../shared/cache-key.js';
 import type { EstimateCall, EstimateUsdFn } from '../shared/types.js';
+import { archiveCache } from './archive-cache.js';
 import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
 import { RunBudget } from './budget.js';
 import { CacheStore, isCacheableVerdict } from './cache.js';
@@ -473,12 +474,18 @@ export async function runCli(
 				help: false,
 				listOnly: false,
 				noCache: false,
+				archiveCache: false,
 				noManifest: false,
 			},
 		};
 	}
 	if (cli.help) {
 		write(HELP_TEXT);
+		return { exitCode: 0, outcome: null, options: cli };
+	}
+	if (cli.archiveCache) {
+		const dest = await archiveCache(deps.cacheDir, new Date());
+		write(dest ? `Archived cache to ${dest}\n` : 'No cache directory to archive.\n');
 		return { exitCode: 0, outcome: null, options: cli };
 	}
 	const effectiveDeps: RunCliDeps = {

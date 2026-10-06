@@ -52,6 +52,8 @@ export interface CliOptions {
 	listOnly: boolean;
 	/** Force fresh dispatch for every case (no cache reads). */
 	noCache: boolean;
+	/** Move the cache to a dated archive and exit (REQ-REG-027). */
+	archiveCache: boolean;
 	modelMatrix?: ModelMatrix;
 	judgeModel?: ModelRef;
 	/** Caller-supplied run UUID. When absent and `noManifest === false`,
@@ -84,6 +86,8 @@ Usage:
   pnpm test:regression -- --judge-model=<provider/model>
                                        Override the rubric-oracle judge model (standard tier).
   pnpm test:regression -- --no-cache   Force fresh dispatch for every case (skip all cache reads).
+  pnpm test:regression -- --archive-cache
+                                       Move the cache to <cacheDir>-archive/<timestamp>/ and exit.
   pnpm test:regression -- --run-id=<uuid>
                                        Tag this run with a UUID; subprocess writes a RunManifest
                                        JSON file at $DATA_DIR/system/regression-runs/<uuid>.json so the
@@ -139,6 +143,7 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 		help: false,
 		listOnly: false,
 		noCache: false,
+		archiveCache: false,
 		noManifest: false,
 	};
 	const rerunIds = new Set<string>();
@@ -168,6 +173,11 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
 		}
 		if (a === '--list') {
 			opts.listOnly = true;
+			i++;
+			continue;
+		}
+		if (a === '--archive-cache') {
+			opts.archiveCache = true;
 			i++;
 			continue;
 		}

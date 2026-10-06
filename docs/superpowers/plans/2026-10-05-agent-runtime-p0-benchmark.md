@@ -591,7 +591,7 @@ Changing the key orphans every old entry, but the GUI's "newest entry from any m
 - Modify: `regression/src/runner/args.ts`, `regression/src/runner/cli-main.ts`
 - Test: `regression/src/__tests__/archive-cache.test.ts`, `regression/src/__tests__/args.test.ts`
 
-- [ ] **Step 1: Write the failing tests** — create `regression/src/__tests__/archive-cache.test.ts`:
+- [x] **Step 1: Write the failing tests** — create `regression/src/__tests__/archive-cache.test.ts`:
 
 ```ts
 import { existsSync } from 'node:fs';
@@ -638,12 +638,12 @@ describe('--archive-cache (REQ-REG-027)', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd regression && npx vitest run src/__tests__/archive-cache.test.ts src/__tests__/args.test.ts`
 Expected: FAIL — module not found / `archiveCache` undefined.
 
-- [ ] **Step 3: Implement** — create `regression/src/runner/archive-cache.ts`:
+- [x] **Step 3: Implement** — create `regression/src/runner/archive-cache.ts`:
 
 ```ts
 /**
@@ -713,12 +713,12 @@ Add an orchestrator test in the `describe('runCli', …)` block:
 
 (Import `runCli` from `../runner/index.js` if the file does not already.)
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cd regression && npx vitest run src/__tests__/archive-cache.test.ts src/__tests__/args.test.ts src/__tests__/orchestrator.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add regression/src/runner/archive-cache.ts regression/src/runner/args.ts regression/src/runner/index.ts regression/src/runner/cli-main.ts regression/src/__tests__/archive-cache.test.ts regression/src/__tests__/args.test.ts regression/src/__tests__/orchestrator.test.ts regression/src/__tests__/runner-options.test.ts
@@ -4928,7 +4928,7 @@ Every finding from the plan review that was fixed in this plan's text must be **
 | Finding | Fix lives in | Evidence required (tick when observed) |
 |---|---|---|
 | C1 case id + harness in key; parity tests | Task 2 | [x] `cache-key.test.ts` caseId / harness / expandHarnessPaths tests green; `list-mode-cache-key-parity.test.ts` green with updated expectations [observed: 3 files, 64 passed / 2 skipped; mutation-checks: dropping caseId fails the caseId test, dropping harness hashing fails 'changing a harness file', removing the ENOENT marker and the `__tests__` exclusion fail their tests, removing `caseId` from the runner fails 3 parity tests]; [ ] existence test un-skipped in Task 11 |
-| C2 required `CliOptions` fields | Tasks 3, 10 | [ ] `pnpm --filter @pas/regression typecheck` exits 0 after each of those tasks |
+| C2 required `CliOptions` fields | Tasks 3, 10 | [ ] `pnpm --filter @pas/regression typecheck` exits 0 after each of those tasks [Task 3 portion observed: typecheck failed TS2345/TS2304 until the 4th literal in `args.test.ts` (buildTierOverrideFromCli test) and the `archiveCache` import were fixed, then exits 0; Task 10 portion pending] |
 | C3 per-trial process isolation | Tasks 9–10 | [ ] `agent-trial-spawn.test.ts` green; [ ] live smoke shows distinct worker pids (N2) |
 | C4 stale `dist/` benchmarked | Task 12 Step 0 | [ ] findings doc records `pnpm build` + `git rev-parse HEAD` before each baseline |
 | C5 injection: notes, other-user messages, real integrations | Tasks 5, 9, 11 | [ ] `agent-trial.test.ts` noExternalMessages test green; [ ] `buildSeededConfig` test asserts `webhooks: []`, `n8n.dispatchUrl: ''` (N1); [ ] `agent-cases.test.ts` "every injection task watches notes/ and context/ and forbids messages to other users" green (asserts `unchanged` ⊇ {`notes/`, `context/`} and `noExternalMessages: true` for all three) |
@@ -4936,7 +4936,7 @@ Every finding from the plan review that was fixed in this plan's text must be **
 | C7 wrong-year dates | Task 7 | [ ] `outcome-oracle.test.ts` wrong-year cases incl. `September 9,2025` green; mutation-check: drop the year check → test fails |
 | C8 seed-facts + photos in key | Task 2 | [x] `BUCKET_HARNESS_PATHS.agent` contains `src/cases/agent/seed-facts.ts` and `fixtures/receipts/` [observed in cache-key.ts]; [ ] existence test green (Task 11) |
 | C9/C16 dry-run vs dispatch pricing; baseline sizing | Tasks 9, 10, 12 | [ ] `agent-runner.test.ts` "prices a case as per-turn estimate × turns × repeats" green (`estimateAgentCaseUsd(2, 3, …)` ≈ 0.006); [ ] `markdown-report.test.ts` per-case override test green; [ ] code review: both the orchestrator pre-check and the dry-run branch call `estimateAgentCaseUsd`; [ ] findings doc shows the completeness gate applied |
-| C10 exact `args.test.ts` expectations | Tasks 3, 10 | [ ] `args.test.ts` green |
+| C10 exact `args.test.ts` expectations | Tasks 3, 10 | [ ] `args.test.ts` green [Task 3 portion observed: both exact `toEqual` expectations carry `archiveCache: false`; 64 passed in args/archive-cache/orchestrator-adjacent run, full suite 692 passed / 2 skipped; Task 10 portion pending] |
 | C11 harness test + smoke ordering | Task 11 | [ ] harness existence test enabled and green in Task 11; smoke run recorded there |
 | C12 swallowed provider errors | Tasks 9–10 | [ ] `agent-trial.test.ts` provider-error test green; [ ] tracker helper test (N4) green; [ ] negative smoke ends `error` |
 | C13/C20 child runs the reported, reconciled models | Task 10 | [ ] `build-deps.test.ts` reconcile test green; [ ] code review confirms `resolvedTiers` reaches both env factories |

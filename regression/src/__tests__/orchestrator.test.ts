@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RubricJudgeLLM } from '../oracles/rubric.js';
 import type { RecallAdapter } from '../runner/dispatch.js';
-import { runSuite } from '../runner/index.js';
+import { runCli, runSuite } from '../runner/index.js';
 import { VERDICT } from '../shared/types.js';
 import { StubLLMService } from './_stub-provider.js';
 
@@ -790,5 +790,18 @@ describe('runSuite — chatbot bucket', () => {
 			}),
 		);
 		expect(events).toEqual(['cb-a', 'cb-b']); // sorted by id
+	});
+});
+
+describe('runCli --archive-cache', () => {
+	it('--archive-cache moves the cache and exits 0 without dispatching (REQ-REG-027)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		const opts = baseOpts();
+		await runSuite(opts);
+		const out: string[] = [];
+		const res = await runCli(['--archive-cache'], opts, { stdout: (s) => out.push(s) });
+		expect(res.exitCode).toBe(0);
+		expect(out.join('')).toMatch(/Archived cache to /);
+		expect(opts.classifiers.foodShadow).toHaveBeenCalledTimes(1);
 	});
 });

@@ -11,6 +11,7 @@ describe('parseCliArgs', () => {
 			help: false,
 			listOnly: false,
 			noCache: false,
+			archiveCache: false,
 			noManifest: false,
 			runId: undefined,
 			manifestDir: undefined,
@@ -214,6 +215,7 @@ describe('parseCliArgs', () => {
 			help: false,
 			listOnly: false,
 			noCache: false,
+			archiveCache: false,
 			noManifest: false,
 		});
 	});
@@ -292,6 +294,7 @@ describe('buildTierOverrideFromCli', () => {
 				help: false,
 				listOnly: false,
 				noCache: false,
+				archiveCache: false,
 				noManifest: false,
 			}),
 		).toBeUndefined();
@@ -338,5 +341,12 @@ describe('buildTierOverrideFromCli', () => {
 			fast: { provider: 'ollama', model: 'gemma4:e4b' },
 			reasoning: { provider: 'anthropic', model: 'claude-opus-4-7' },
 		});
+	});
+});
+
+describe('--archive-cache (REQ-REG-027)', () => {
+	it('parses the flag', () => {
+		expect(parseCliArgs(['--archive-cache']).archiveCache).toBe(true);
+		expect(parseCliArgs([]).archiveCache).toBe(false);
 	});
 });
