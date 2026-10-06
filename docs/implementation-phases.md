@@ -4337,6 +4337,31 @@ Round 5 (confirming, loop cap) raised only R5-a. Loop closed. Sonnet simplify pa
 Local run: 23 pass / 20 fail / 3 error ($0, median 31.2 s per trial); the 3 errors are the photo tasks ("not applicable - text-only provider"). Frontier run: 15 pass / 31 fail / 0 error ($2.38, median 8.5 s; photo 3/3). Multi-turn is 0/3 on both and write is 1/8 (local) and 2/8 (frontier); no-tool is 4/4 on both. The frontier pipeline scores below local on single-fact (2/10 vs 7/10) and injection (0/3 vs 3/3) because `parseClassifyResponse` rejects Haiku's numbered category answers and the message falls to the chatbot fallback (fix queued as Q3b), so the frontier baseline should be re-recorded after Q3b before P4. Superseded earlier runs (a062159 local, a credit-exhausted frontier attempt, a 9e1c128 hang) are listed in the findings doc.
 ---
 
+## Q3b Fix — Classifier accepts numbered category answers (2026-10-06)
+
+**Defect:** found by the Agent Runtime P0 frontier baseline. Haiku, the default fast tier, answers classify prompts with the category index (`{"category":"4"}`) or with `"5. text"`. `parseClassifyResponse` accepted only an exact category string, fell back below the router's 0.4 threshold, and sent single-intent Food messages to the chatbot.
+
+**Fix (86cc871):**
+- `resolveCategory` maps an in-range index or an `N.`/`N)` prefix whose text matches; index `length+1` maps to none.
+- The prompt now asks for the category text.
+- `claude-sonnet-5-5` is priced.
+- The PAS-relevance classifier gets 32 output tokens instead of 10.
+
+REQ-LLM-044. Closure proof: 11 new tests fail at 6bc5d24.
+
+**Code review ledger** (Codex `gpt-6-luna` medium ⇄ Grok `grok-4.7-high`):
+
+| id | sev | finding | disposition |
+|---|---|---|---|
+| R1-1 | critical | `"4. remove item"` (index 4 = "plan meals") mapped to the text at 0.99 | fixed-in-code: the prefix index and the text must agree, otherwise the answer is unresolved (<0.4) |
+| R1-2 | major | a non-finite confidence became NaN and passed the threshold | fixed-in-code: an invalid value becomes 0, an absent one stays 0.8; the router comparison is NaN-safe |
+| R1-3 | major | sonnet-5-5 entered at $3/$15; the published price is $2/$10 | fixed-in-code: $2/$10, citing anthropic.com/claude/sonnet (verified 2026-10-06) |
+| R2-1 | critical (claimed) | duplicate intent texts across apps resolve to the first owner | declined — no reachable trigger (no installed apps share an intent text), and the behaviour already existed for text answers; recorded in open-items |
+
+Round 2 raised no other findings, so the loop closed.
+
+---
+
 ## Deferred / Open Items
 
 See `docs/open-items.md` for all deferred phases, unfinished corrections, proposals, and accepted risks.
