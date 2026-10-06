@@ -1,7 +1,11 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { promisify } from 'node:util';
 import type { PersonaCase } from '@core/types/regression.js';
 import { hashRepoRelative } from './git-hash.js';
 import type { TierModelSnapshot } from './types.js';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Today as YYYY-MM-DD in the supplied timezone. Shared between the cache
@@ -40,6 +44,105 @@ export function bucketCacheSalt(
 	return undefined;
 }
 
+/**
+ * Harness sources whose behaviour shapes a bucket's verdicts (REQ-REG-024).
+ * Mixed into every case's key so a fix in a runner, oracle, seed, or the LLM
+ * layer invalidates stale grades. Entries ending in `/` expand to every
+ * tracked or untracked (non-ignored) file below them, excluding `__tests__/`.
+ * A contract test asserts each entry exists in the real repository.
+ */
+export const COMMON_HARNESS_PATHS: readonly string[] = [
+	'regression/src/runner/index.ts',
+	'regression/src/shared/cache-key.ts',
+	'core/src/services/llm/',
+];
+
+/**
+ * Agent harness import rule (review C24): hashing a file does not hash its
+ * imports, so every `regression/src` module that an agent-specific harness
+ * file value-imports must itself be listed in `BUCKET_HARNESS_PATHS.agent`.
+ * `cache-key.test.ts` enforces this with `HARNESS_IMPORT_RE`. The only
+ * exemption is the type re-export module (it carries the `VERDICT` constant
+ * and no grading logic).
+ */
+export const HARNESS_IMPORT_EXEMPT: ReadonlySet<string> = new Set([
+	'regression/src/shared/types.ts',
+]);
+/** Group 1 = `type ` for type-only imports; group 2 = the module specifier. */
+export const HARNESS_IMPORT_RE = /import\s+(type\s+)?[\s\S]*?\sfrom\s+'([^']+)'/g;
+
+// Keyed by bucket name as a string so the `agent` entry can land before Task 6
+// adds `'agent'` to the bucket union.
+export const BUCKET_HARNESS_PATHS: Readonly<Record<string, readonly string[]>> = {
+	routing: [
+		...COMMON_HARNESS_PATHS,
+		'regression/src/runner/case-runners/routing-runner.ts',
+		'regression/src/runner/dispatch.ts',
+		'regression/src/oracles/structural.ts',
+	],
+	recall: [
+		...COMMON_HARNESS_PATHS,
+		'regression/src/runner/case-runners/recall-runner.ts',
+		'regression/src/runner/dispatch.ts',
+		'regression/src/oracles/structural.ts',
+	],
+	receipt: [
+		...COMMON_HARNESS_PATHS,
+		'regression/src/runner/case-runners/receipt-runner.ts',
+		'regression/src/oracles/structural.ts',
+		'regression/src/oracles/transcription.ts',
+	],
+	chatbot: [
+		...COMMON_HARNESS_PATHS,
+		'regression/src/runner/case-runners/chatbot-runner.ts',
+		'regression/src/runner/chatbot-environment.ts',
+		'regression/src/runner/seeded-runtime.ts', // Task 5 extracts the runtime builder here
+		'regression/src/oracles/rubric.ts',
+		'regression/fixtures/chatbot/seed.json',
+	],
+	agent: [
+		...COMMON_HARNESS_PATHS,
+		'regression/src/runner/case-runners/agent-runner.ts',
+		'regression/src/runner/agent-trial.ts',
+		'regression/src/runner/agent-trial-worker.ts',
+		'regression/src/runner/agent-trial-spawn.ts',
+		'regression/src/runner/agent-environment.ts',
+		'regression/src/runner/seeded-runtime.ts',
+		'regression/src/runner/seed.ts',
+		// Worker-side provider plumbing (Task 10): error capture + drain, and the registry builder.
+		'regression/src/runner/provider-call-tracker.ts',
+		'regression/src/runner/provider-registry.ts',
+		'regression/src/oracles/outcome.ts',
+		// Ground-truth derivation and photo inputs determine the grade too.
+		'regression/src/cases/agent/seed-facts.ts',
+		'regression/fixtures/agent/seed.sha256',
+		'regression/fixtures/receipts/',
+	],
+};
+
+/** Expand `dir/` entries into sorted file lists (tracked + untracked, non-ignored). */
+export async function expandHarnessPaths(
+	paths: readonly string[],
+	repoRoot: string,
+): Promise<string[]> {
+	const out = new Set<string>();
+	for (const p of paths) {
+		if (!p.endsWith('/')) {
+			out.add(p);
+			continue;
+		}
+		const { stdout } = await execFileAsync(
+			'git',
+			['ls-files', '--cached', '--others', '--exclude-standard', '--', p],
+			{ cwd: repoRoot },
+		);
+		for (const f of stdout.split('\n')) {
+			if (f && !f.includes('/__tests__/')) out.add(f);
+		}
+	}
+	return [...out].sort();
+}
+
 export interface ComputeCacheKeyArgs {
 	casePath: string; // repo-relative
 	coveragePaths: string[]; // all repo-relative
@@ -61,6 +164,14 @@ export interface ComputeCacheKeyArgs {
 	 * `rawExtractedDate`) re-exercises. Omitted for routing/recall/chatbot.
 	 */
 	extraSalt?: string;
+	/** Case id — distinguishes cases that share one definition file. */
+	caseId?: string;
+	/**
+	 * Harness sources (see `BUCKET_HARNESS_PATHS`). Unlike `coveragePaths`, a
+	 * missing harness file contributes `path:absent` instead of throwing, so
+	 * temp-repo unit tests need not recreate the real harness tree.
+	 */
+	harnessPaths?: readonly string[];
 }
 
 export async function computeCacheKey(args: ComputeCacheKeyArgs): Promise<string> {
@@ -77,6 +188,20 @@ export async function computeCacheKey(args: ComputeCacheKeyArgs): Promise<string
 	const hashes = await Promise.all(sortedCoverage.map(hash));
 	const coverageEntries = sortedCoverage.map((p, i) => `${p}:${hashes[i]}`);
 
+	const harnessFiles = args.harnessPaths
+		? await expandHarnessPaths(args.harnessPaths, args.repoRoot)
+		: [];
+	const harnessEntries = await Promise.all(
+		harnessFiles.map(async (p) => {
+			try {
+				return `${p}:${await hash(p)}`;
+			} catch (err) {
+				if ((err as NodeJS.ErrnoException).code === 'ENOENT') return `${p}:absent`;
+				throw err;
+			}
+		}),
+	);
+
 	const modelStr = `fast=${args.modelIds.fast},standard=${args.modelIds.standard},reasoning=${args.modelIds.reasoning ?? 'none'}`;
 
 	const h = createHash('sha256');
@@ -85,6 +210,14 @@ export async function computeCacheKey(args: ComputeCacheKeyArgs): Promise<string
 	h.update(coverageEntries.join('\n'));
 	h.update('\0');
 	h.update(modelStr);
+	if (args.caseId !== undefined) {
+		h.update('\0');
+		h.update(`case:${args.caseId}`);
+	}
+	if (harnessEntries.length > 0) {
+		h.update('\0');
+		h.update(`harness:${harnessEntries.join('\n')}`);
+	}
 	// Salt is mixed in last with a distinguishing prefix. `extraSalt` omitted
 	// vs `extraSalt: ''` yields different keys (defensive: empty string is a
 	// real value, not "unsalted").

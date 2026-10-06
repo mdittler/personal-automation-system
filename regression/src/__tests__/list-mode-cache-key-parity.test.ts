@@ -20,7 +20,7 @@ import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadCases } from '../runner/case-loader.js';
 import { type RunCliDeps, runCli } from '../runner/index.js';
-import { bucketCacheSalt, computeCacheKey } from '../shared/cache-key.js';
+import { BUCKET_HARNESS_PATHS, bucketCacheSalt, computeCacheKey } from '../shared/cache-key.js';
 
 let repoRoot: string;
 let casesDir: string;
@@ -100,6 +100,8 @@ describe('list-mode cache-key parity', () => {
 		const expected = await computeCacheKey({
 			casePath: relPath(repoRoot, loaded[0]!.filePath),
 			coveragePaths: loaded[0]!.case.coverage,
+			caseId: loaded[0]!.case.id,
+			harnessPaths: BUCKET_HARNESS_PATHS[loaded[0]!.case.bucket] ?? [],
 			modelIds: MODEL_IDS,
 			repoRoot,
 		});
@@ -188,6 +190,8 @@ export default c;
 		const expected = await computeCacheKey({
 			casePath: relPath(repoRoot, receipt.filePath),
 			coveragePaths: receipt.case.coverage,
+			caseId: receipt.case.id,
+			harnessPaths: BUCKET_HARNESS_PATHS[receipt.case.bucket] ?? [],
 			modelIds: MODEL_IDS,
 			repoRoot,
 			extraSalt: salt,
@@ -214,6 +218,8 @@ export default c;
 		const expected = await computeCacheKey({
 			casePath: relPath(repoRoot, routing.filePath),
 			coveragePaths: routing.case.coverage,
+			caseId: routing.case.id,
+			harnessPaths: BUCKET_HARNESS_PATHS[routing.case.bucket] ?? [],
 			modelIds: MODEL_IDS,
 			repoRoot,
 			// no extraSalt — routing buckets are bucket-salt-free

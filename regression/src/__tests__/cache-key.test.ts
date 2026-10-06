@@ -1,9 +1,17 @@
 import { execSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { computeCacheKey } from '../shared/cache-key.js';
+import {
+	BUCKET_HARNESS_PATHS,
+	COMMON_HARNESS_PATHS,
+	HARNESS_IMPORT_EXEMPT,
+	HARNESS_IMPORT_RE,
+	computeCacheKey,
+	expandHarnessPaths,
+} from '../shared/cache-key.js';
 import { hashRepoRelative } from '../shared/git-hash.js';
 
 let tempRepo: string;
@@ -271,5 +279,113 @@ describe('computeCacheKey', () => {
 			const after = await computeCacheKey(base);
 			expect(after).not.toBe(before);
 		});
+	});
+});
+
+describe('computeCacheKey — caseId (REQ-REG-024)', () => {
+	it('two cases defined in the same file get different keys', async () => {
+		await writeFile(join(tempRepo, 'cases.ts'), 'export {}\n');
+		const base = {
+			casePath: 'cases.ts',
+			coveragePaths: [],
+			modelIds: { fast: 'f', standard: 's', reasoning: null },
+			repoRoot: tempRepo,
+		};
+		const a = await computeCacheKey({ ...base, caseId: 'case-a' });
+		const b = await computeCacheKey({ ...base, caseId: 'case-b' });
+		expect(a).not.toBe(b);
+	});
+});
+
+describe('computeCacheKey — harness paths (REQ-REG-024)', () => {
+	it('changing a harness file changes the key', async () => {
+		await writeFile(join(tempRepo, 'cases.ts'), 'export {}\n');
+		await mkdir(join(tempRepo, 'h'), { recursive: true });
+		await writeFile(join(tempRepo, 'h', 'runner.ts'), 'v1\n');
+		const args = {
+			casePath: 'cases.ts',
+			coveragePaths: [],
+			modelIds: { fast: 'f', standard: 's', reasoning: null },
+			repoRoot: tempRepo,
+			caseId: 'c',
+			harnessPaths: ['h/'],
+		};
+		const before = await computeCacheKey(args);
+		await writeFile(join(tempRepo, 'h', 'runner.ts'), 'v2\n');
+		const after = await computeCacheKey(args);
+		expect(after).not.toBe(before);
+	});
+
+	it('a missing harness file contributes a stable marker instead of throwing', async () => {
+		await writeFile(join(tempRepo, 'cases.ts'), 'export {}\n');
+		const args = {
+			casePath: 'cases.ts',
+			coveragePaths: [],
+			modelIds: { fast: 'f', standard: 's', reasoning: null },
+			repoRoot: tempRepo,
+			caseId: 'c',
+			harnessPaths: ['does/not/exist.ts'],
+		};
+		expect(await computeCacheKey(args)).toBe(await computeCacheKey(args));
+	});
+
+	it('expandHarnessPaths lists files under a directory entry, excluding __tests__', async () => {
+		await mkdir(join(tempRepo, 'd', '__tests__'), { recursive: true });
+		await writeFile(join(tempRepo, 'd', 'a.ts'), 'a\n');
+		await writeFile(join(tempRepo, 'd', '__tests__', 'a.test.ts'), 't\n');
+		expect(await expandHarnessPaths(['d/'], tempRepo)).toEqual(['d/a.ts']);
+	});
+
+	// enabled in Task 11 (agent files and fixtures do not exist until then)
+	it.skip('every BUCKET_HARNESS_PATHS entry exists in the real repository', () => {
+		const realRoot = join(process.cwd(), '..');
+		for (const paths of Object.values(BUCKET_HARNESS_PATHS)) {
+			for (const p of paths) expect(existsSync(join(realRoot, p)), p).toBe(true);
+		}
+	});
+
+	it('extracted modules are harness paths (review C24)', () => {
+		expect(BUCKET_HARNESS_PATHS.chatbot).toContain('regression/src/runner/seeded-runtime.ts');
+		for (const p of [
+			'regression/src/runner/seeded-runtime.ts',
+			'regression/src/runner/provider-call-tracker.ts',
+			'regression/src/runner/provider-registry.ts',
+			'regression/src/runner/seed.ts',
+		]) {
+			expect(BUCKET_HARNESS_PATHS.agent, p).toContain(p);
+		}
+	});
+
+	// Hashing a harness file does not hash its imports, so a module the worker
+	// or trial pulls in must be listed itself. This test enforces the rule for
+	// the agent-specific files: every `regression/src` module they value-import
+	// is itself an agent harness path. Type-only imports, packages and
+	// `@core/*` are excluded (the LLM layer is covered by its directory entry).
+	// enabled in Task 11 (agent files do not exist until then)
+	it.skip('every regression/src module value-imported by an agent-specific harness file is an agent harness path', async () => {
+		const realRoot = join(process.cwd(), '..');
+		const agent = BUCKET_HARNESS_PATHS.agent!;
+		const covered = (p: string) => agent.some((h) => (h.endsWith('/') ? p.startsWith(h) : h === p));
+		const entryFiles = agent.filter(
+			(p) =>
+				p.startsWith('regression/src/') && p.endsWith('.ts') && !COMMON_HARNESS_PATHS.includes(p),
+		);
+		expect(entryFiles.length).toBeGreaterThan(5);
+		for (const file of entryFiles) {
+			const src = await readFile(join(realRoot, file), 'utf8');
+			for (const m of src.matchAll(HARNESS_IMPORT_RE)) {
+				const [, typeOnly, spec] = m;
+				if (typeOnly || !spec!.startsWith('.')) continue;
+				const target = relative(realRoot, resolve(realRoot, dirname(file), spec!)).replace(
+					/\.js$/,
+					'.ts',
+				);
+				if (HARNESS_IMPORT_EXEMPT.has(target)) continue;
+				expect(
+					covered(target),
+					`${file} value-imports ${target}, which is not an agent harness path`,
+				).toBe(true);
+			}
+		}
 	});
 });

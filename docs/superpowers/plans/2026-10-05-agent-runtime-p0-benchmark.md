@@ -274,7 +274,7 @@ All cases from one `index.ts` share a key (the case id is not hashed), and the k
 - Modify: `regression/src/runner/index.ts` (both `computeCacheKey` call sites: `runSuite` and `emitCaseList`)
 - Test: `regression/src/__tests__/cache-key.test.ts`, `regression/src/__tests__/orchestrator.test.ts`
 
-- [ ] **Step 1: Write failing tests** — append to `regression/src/__tests__/cache-key.test.ts` (its `beforeEach` creates a temp git repo in `tempRepo`; add `mkdir` to the existing `node:fs/promises` import):
+- [x] **Step 1: Write failing tests** — append to `regression/src/__tests__/cache-key.test.ts` (its `beforeEach` creates a temp git repo in `tempRepo`; add `mkdir` to the existing `node:fs/promises` import):
 
 ```ts
 import { existsSync } from 'node:fs';
@@ -403,12 +403,12 @@ Update the three expected-key computations in `regression/src/__tests__/list-mod
 
 (import `BUCKET_HARNESS_PATHS` alongside `computeCacheKey` from `../shared/cache-key.js`).
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd regression && npx vitest run src/__tests__/cache-key.test.ts src/__tests__/orchestrator.test.ts`
 Expected: FAIL — `BUCKET_HARNESS_PATHS` / `expandHarnessPaths` not exported; keys identical.
 
-- [ ] **Step 3: Implement** — in `regression/src/shared/cache-key.ts`:
+- [x] **Step 3: Implement** — in `regression/src/shared/cache-key.ts`:
 
 Add imports at the top:
 
@@ -568,12 +568,12 @@ In `regression/src/runner/index.ts`, import `BUCKET_HARNESS_PATHS` from `../shar
 				harnessPaths: BUCKET_HARNESS_PATHS[lc.case.bucket] ?? [],
 ```
 
-- [ ] **Step 4: Run to verify pass** (the existence contract test and the import-rule test will fail until Tasks 5/7/8/9/10 create the agent files; mark both `it.skip` with comment `// enabled in Task 11` until then — Task 11 removes the skips. The "extracted modules are harness paths" test asserts list contents only and runs now.)
+- [x] **Step 4: Run to verify pass** (the existence contract test and the import-rule test will fail until Tasks 5/7/8/9/10 create the agent files; mark both `it.skip` with comment `// enabled in Task 11` until then — Task 11 removes the skips. The "extracted modules are harness paths" test asserts list contents only and runs now.)
 
 Run: `cd regression && npx vitest run src/__tests__/cache-key.test.ts src/__tests__/orchestrator.test.ts src/__tests__/list-mode-cache-key-parity.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add regression/src/shared/cache-key.ts regression/src/runner/index.ts regression/src/__tests__/cache-key.test.ts regression/src/__tests__/orchestrator.test.ts regression/src/__tests__/list-mode-cache-key-parity.test.ts
@@ -4927,14 +4927,14 @@ Every finding from the plan review that was fixed in this plan's text must be **
 
 | Finding | Fix lives in | Evidence required (tick when observed) |
 |---|---|---|
-| C1 case id + harness in key; parity tests | Task 2 | [ ] `cache-key.test.ts` caseId / harness / expandHarnessPaths / existence tests green; `list-mode-cache-key-parity.test.ts` green with updated expectations |
+| C1 case id + harness in key; parity tests | Task 2 | [x] `cache-key.test.ts` caseId / harness / expandHarnessPaths tests green; `list-mode-cache-key-parity.test.ts` green with updated expectations [observed: 3 files, 64 passed / 2 skipped; mutation-checks: dropping caseId fails the caseId test, dropping harness hashing fails 'changing a harness file', removing the ENOENT marker and the `__tests__` exclusion fail their tests, removing `caseId` from the runner fails 3 parity tests]; [ ] existence test un-skipped in Task 11 |
 | C2 required `CliOptions` fields | Tasks 3, 10 | [ ] `pnpm --filter @pas/regression typecheck` exits 0 after each of those tasks |
 | C3 per-trial process isolation | Tasks 9–10 | [ ] `agent-trial-spawn.test.ts` green; [ ] live smoke shows distinct worker pids (N2) |
 | C4 stale `dist/` benchmarked | Task 12 Step 0 | [ ] findings doc records `pnpm build` + `git rev-parse HEAD` before each baseline |
 | C5 injection: notes, other-user messages, real integrations | Tasks 5, 9, 11 | [ ] `agent-trial.test.ts` noExternalMessages test green; [ ] `buildSeededConfig` test asserts `webhooks: []`, `n8n.dispatchUrl: ''` (N1); [ ] `agent-cases.test.ts` "every injection task watches notes/ and context/ and forbids messages to other users" green (asserts `unchanged` ⊇ {`notes/`, `context/`} and `noExternalMessages: true` for all three) |
 | C6 fail + error cached as fail | Task 9 | [ ] `agent-runner.test.ts` "infrastructure error outranks a graded failure" green; mutation-check: swap the precedence → test fails |
 | C7 wrong-year dates | Task 7 | [ ] `outcome-oracle.test.ts` wrong-year cases incl. `September 9,2025` green; mutation-check: drop the year check → test fails |
-| C8 seed-facts + photos in key | Task 2 | [ ] `BUCKET_HARNESS_PATHS.agent` contains both; existence test green |
+| C8 seed-facts + photos in key | Task 2 | [x] `BUCKET_HARNESS_PATHS.agent` contains `src/cases/agent/seed-facts.ts` and `fixtures/receipts/` [observed in cache-key.ts]; [ ] existence test green (Task 11) |
 | C9/C16 dry-run vs dispatch pricing; baseline sizing | Tasks 9, 10, 12 | [ ] `agent-runner.test.ts` "prices a case as per-turn estimate × turns × repeats" green (`estimateAgentCaseUsd(2, 3, …)` ≈ 0.006); [ ] `markdown-report.test.ts` per-case override test green; [ ] code review: both the orchestrator pre-check and the dry-run branch call `estimateAgentCaseUsd`; [ ] findings doc shows the completeness gate applied |
 | C10 exact `args.test.ts` expectations | Tasks 3, 10 | [ ] `args.test.ts` green |
 | C11 harness test + smoke ordering | Task 11 | [ ] harness existence test enabled and green in Task 11; smoke run recorded there |
@@ -4946,7 +4946,7 @@ Every finding from the plan review that was fixed in this plan's text must be **
 | C19 background calls escape | Task 10 | [ ] in-flight tracker test (N3): follow-up call scheduled after the first completes is awaited; timeout records an error |
 | C21 typecheck (and tsx) via stale declarations | Task 0 | [x] typecheck green with stale `core/dist` [observed: with `core/dist/utils/json-strip-fences.d.ts` removed, typecheck fails TS7016 without the tsconfig path and exits clean with it]; [x] `tsx-resolution.test.ts` green — the tsx-loaded probe prints a `core/src/utils/json-strip-fences.ts` path and no `core/dist` [observed: test fails (probe cannot resolve) before the tsconfig path, passes after; suite 679 passed] |
 | C23 smoke did not select a case or expose trial details | Tasks 10, 11 | [ ] `args.test.ts` `--case` block green; [ ] `orchestrator.test.ts` "dispatches only the named cases and rejects unknown ids" + "runCli --case=<id> reaches runSuite" green; [ ] Task 11 Step 8 table recorded: `totalCases` 1, graded verdict, pid count `2`, heartbeat lines for 1/2 and 2/2; [ ] negative smoke: `error` + provider-error details + unchanged cache dir |
-| C24 harness paths missed extracted modules | Tasks 2, 10, 11 | [ ] `cache-key.test.ts` "extracted modules are harness paths" green (`chatbot` has `seeded-runtime.ts`; `agent` has `seeded-runtime.ts`, `provider-call-tracker.ts`, `provider-registry.ts`, `seed.ts`); [ ] existence test and the import-rule test un-skipped in Task 11 and green; [ ] code review: the worker imports `provider-registry.ts`, not `build-deps.ts` |
+| C24 harness paths missed extracted modules | Tasks 2, 10, 11 | [x] `cache-key.test.ts` "extracted modules are harness paths" green (`chatbot` has `seeded-runtime.ts`; `agent` has `seeded-runtime.ts`, `provider-call-tracker.ts`, `provider-registry.ts`, `seed.ts`) [observed green]; [ ] existence test and the import-rule test un-skipped in Task 11 and green; [ ] code review: the worker imports `provider-registry.ts`, not `build-deps.ts` |
 | C25 slow case outlives the GUI watchdog; orphaned workers | Task 10 | [ ] `agent-trial-spawn.test.ts` "forwards each meter line to onMeter as it arrives, before the result" green; [ ] `agent-runner.test.ts` "forwards each trial meter to deps.onMeter" green; [ ] `orchestrator.test.ts` "relays every trial meter as a heartbeat", "runCli --json writes heartbeat NDJSON lines before the case-result", and "keeps heartbeats off stdout" green; [ ] core `subprocess.test.ts` "heartbeat NDJSON lines keep a slow run alive" green (40 ms stall window, 90 ms of heartbeats); [ ] `agent-trial-spawn.test.ts` "installWorkerTeardown kills live workers…" green (exit 143, `worker-terminated` log with `costUsd` 0.02, pid gone); [ ] code review: `cli-main.ts` calls `installWorkerTeardown()` |
 | C26 weak acceptance rows (C5, C9, C21) | Tasks 0, 9, 11 | [ ] the three strengthened rows above are ticked with the named tests |
 | C27 contractual numbers not pinned | Tasks 8, 10, 11 | [ ] `agent-cases.test.ts`: `cases.length === 46`, `AGENT_CATEGORIES.length === 8` and 8 distinct categories used, every `budgetUsd === 0.75`; [ ] `agent-environment.test.ts`: `seed.sha256` has 20 lines (9 receipts, 3 overlay files); [ ] `provider-call-tracker.test.ts`: `DEFAULT_SETTLE_MS === 250`, `DEFAULT_DRAIN_TIMEOUT_MS === 120_000`; [ ] `agent-trial-spawn.test.ts`: `METER_INTERVAL_MS === 2000`, `WORKER_TIMEOUT_MS === 900_000`; [ ] `args.test.ts`: `repeats` defaults to 3, range 1..10 |

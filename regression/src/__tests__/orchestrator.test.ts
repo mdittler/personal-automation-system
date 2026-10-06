@@ -109,6 +109,14 @@ describe('runSuite — empty case dir', () => {
 });
 
 describe('runSuite — cache lifecycle', () => {
+	it('cases sharing one definition file are cached independently (REQ-REG-024)', async () => {
+		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
+		await writeFile(join(casesDir, 'b.case.ts'), oneRoutingCase('b-id'));
+		const outcome = await runSuite(baseOpts());
+		const keys = new Set(outcome.results.map((r) => r.cacheKey));
+		expect(keys.size).toBe(2);
+	});
+
 	it('does not cache an error verdict — the next run dispatches again (REQ-REG-023)', async () => {
 		await writeFile(join(casesDir, 'a.case.ts'), oneRoutingCase('a-id'));
 		const adapter = makeAdapter();

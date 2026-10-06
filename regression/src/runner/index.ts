@@ -33,7 +33,7 @@ import {
 	VERDICT,
 } from '@core/types/regression.js';
 import type { RubricJudgeLLM } from '../oracles/rubric.js';
-import { bucketCacheSalt, computeCacheKey } from '../shared/cache-key.js';
+import { BUCKET_HARNESS_PATHS, bucketCacheSalt, computeCacheKey } from '../shared/cache-key.js';
 import type { EstimateCall, EstimateUsdFn } from '../shared/types.js';
 import { type CliOptions, HELP_TEXT, parseCliArgs } from './args.js';
 import { RunBudget } from './budget.js';
@@ -198,6 +198,8 @@ export async function runSuite(opts: RunSuiteOptions): Promise<RunSuiteOutcome> 
 				modelIds: opts.modelIds,
 				repoRoot: opts.repoRoot,
 				hashCache,
+				caseId: lc.case.id,
+				harnessPaths: BUCKET_HARNESS_PATHS[lc.case.bucket] ?? [],
 				...(salt !== undefined ? { extraSalt: salt } : {}),
 			});
 		}),
@@ -565,6 +567,8 @@ async function emitCaseList(deps: RunCliDeps, write: (s: string) => void): Promi
 				modelIds: deps.modelIds,
 				repoRoot: deps.repoRoot,
 				hashCache,
+				caseId: lc.case.id,
+				harnessPaths: BUCKET_HARNESS_PATHS[lc.case.bucket] ?? [],
 				...(salt !== undefined ? { extraSalt: salt } : {}),
 			});
 		}),
