@@ -316,3 +316,46 @@ describe('parsePasYamlConfig()', () => {
 		expect((config as any).futureFeature).toBe(true);
 	});
 });
+
+describe('agent block — schema validation (REQ-LLM-052)', () => {
+	it('accepts a full agent block', () => {
+		expect(
+			PasYamlConfigSchema.safeParse({
+				agent: {
+					model: { provider: 'ollama', model: 'qwen3.8:27b-mlx' },
+					vision_model: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+					thinking: 'off',
+					context_window: 32768,
+					keep_alive: '30m',
+				},
+			}).success,
+		).toBe(true);
+	});
+	it('accepts an absent block and an empty block', () => {
+		expect(PasYamlConfigSchema.safeParse({}).success).toBe(true);
+		expect(PasYamlConfigSchema.safeParse({ agent: {} }).success).toBe(true);
+	});
+	it('rejects thinking outside off|low|medium|high', () => {
+		expect(PasYamlConfigSchema.safeParse({ agent: { thinking: 'max' } }).success).toBe(false);
+	});
+	it('rejects a non-positive or non-integer context_window', () => {
+		expect(PasYamlConfigSchema.safeParse({ agent: { context_window: 0 } }).success).toBe(false);
+		expect(PasYamlConfigSchema.safeParse({ agent: { context_window: 1.5 } }).success).toBe(false);
+	});
+	it('rejects a model without both provider and model', () => {
+		expect(
+			PasYamlConfigSchema.safeParse({ agent: { model: { provider: 'ollama' } } }).success,
+		).toBe(false);
+	});
+	it('accepts supports_tools on a provider', () => {
+		expect(
+			PasYamlConfigSchema.safeParse({
+				llm: {
+					providers: {
+						x: { type: 'llama-cpp', name: 'x', base_url: 'http://l', supports_tools: true },
+					},
+				},
+			}).success,
+		).toBe(true);
+	});
+});

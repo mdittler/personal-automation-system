@@ -35,6 +35,7 @@ const YamlProviderConfigSchema = z
 		api_key_env: z.string().min(1).optional(),
 		base_url: z.string().optional(),
 		default_model: z.string().optional(),
+		supports_tools: z.boolean().optional(),
 	})
 	.passthrough()
 	.superRefine((data, ctx) => {
@@ -149,6 +150,18 @@ export const PasYamlConfigSchema = z
 				// sanitizes invalid input that bypasses the schema. Same Codex
 				// "protect fresh deployments" rule as always_verify_intents.
 				multi_intent_split: z.boolean().optional(),
+			})
+			.passthrough()
+			.optional(),
+		// Agent Runtime settings (design §18). Defaults live in code
+		// (chat-defaults.ts); the schema validates shape only.
+		agent: z
+			.object({
+				model: YamlTierSchema.optional(),
+				vision_model: YamlTierSchema.optional(),
+				thinking: z.enum(['off', 'low', 'medium', 'high']).optional(),
+				context_window: z.number().int().positive().optional(),
+				keep_alive: z.string().min(1).optional(),
 			})
 			.passthrough()
 			.optional(),
